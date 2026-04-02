@@ -1,0 +1,6 @@
+{
+    "port": 6036,
+    "timeout": 10,
+    "max_channels": 64,
+    "concurrency": 4
+}

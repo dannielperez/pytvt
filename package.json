@@ -1,0 +1,16 @@
+{
+  "name": "pytvt",
+  "version": "1.0.0",
+  "description": "Bulk TVT NVR camera scanner using native SDK via Docker",
+  "main": "scan_nvr.mjs",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": ["tvt", "nvr", "camera", "scanner", "sdk"],
+  "author": "dperez",
+  "license": "AGPL-3.0-or-later",
+  "type": "commonjs",
+  "dependencies": {
+    "koffi": "^2.15.2"
+  }
+}

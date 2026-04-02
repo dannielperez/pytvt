@@ -1,0 +1,38 @@
+node_modules/
+__pycache__/
+*.pyc
+output/
+*.csv
+*.json.bak
+.env
+.DS_Store
+
+# Device inventory (contains site-specific data)
+files/
+
+# Debug/dump scripts (development only)
+debug_*.py
+parse_init.py
+
+# Python
+*.egg-info/
+dist/
+build/
+Pipfile.lock
+
+# Logs and dumps
+*.log
+*.dump
+*.pcap
+*.cap
+
+# Scan output artifacts
+*.xlsx
+failed_devices.json
+
+# Docker (Dockerfile lives in tvt-api repo now)
+Dockerfile
+.dockerignore
+
+# Local tvt-api copy (standalone repo)
+tvt-api/
