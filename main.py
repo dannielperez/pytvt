@@ -3,7 +3,7 @@
 TVT NVR Camera Scanner
 
 Reads a JSON file of NVR devices, connects to each TVT NVR via the native
-binary protocol (port 9008), and retrieves all programmed camera information.
+binary protocol (port 9008 for camera, 6006 for NVR), and retrieves all programmed camera information.
 The SDK backend talks to a Fastify API running inside Docker (or natively on
 Linux) which wraps the native TVT SDK.
 
@@ -462,6 +462,22 @@ def save_xlsx_per_site(all_results: list[dict], output_dir: str) -> None:
         safe_name = "".join(c if c.isalnum() or c in " -_#()" else "_" for c in site_name).strip()
         xlsx_path = output_path / f"{safe_name}.xlsx"
 
+        # Count cameras in new scan results
+        new_cam_count = sum(
+            1 for nvr in nvr_results for cam in nvr.get("cameras", [])
+            if cam.get("address", "").strip()
+        )
+
+        # Skip overwrite when new scan got 0 cameras but existing file has data
+        if new_cam_count == 0 and xlsx_path.exists():
+            existing_wb = load_workbook(xlsx_path)
+            if "NVR Config" in existing_wb.sheetnames and existing_wb["NVR Config"].max_row > 1:
+                old_count = existing_wb["NVR Config"].max_row - 1
+                print(f"  {site_name}: scan returned 0 cameras, keeping existing file ({old_count} cameras)")
+                existing_wb.close()
+                continue
+            existing_wb.close()
+
         # Load existing workbook or create new one
         if xlsx_path.exists():
             wb = load_workbook(xlsx_path)
@@ -708,6 +724,7 @@ def main():
 
     # Always save failed devices if any failed
     failed_path = args.failed or str(SCRIPT_DIR / "files" / "failed_devices.json")
+    Path(failed_path).parent.mkdir(parents=True, exist_ok=True)
     save_failed_devices(all_results, unique_devices, failed_path)
 
 
