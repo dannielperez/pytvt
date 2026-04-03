@@ -34,5 +34,3 @@ failed_devices.json
 Dockerfile
 .dockerignore
 
-# Local tvt-api copy (standalone repo)
-tvt-api/

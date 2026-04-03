@@ -1,3 +1,6 @@
 [submodule "tvt"]
 	path = tvt
 	url = https://github.com/dannielperez/tvt.git
+[submodule "tvt-api"]
+	path = tvt-api
+	url = https://github.com/dannielperez/tvt-api.git
