@@ -10,7 +10,7 @@ output/
 # Device inventory (contains site-specific data)
 files/
 
-# Debug/dump scripts (development only)
+# Debug/development scripts (not in tools/)
 debug_*.py
 parse_init.py
 

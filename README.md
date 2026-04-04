@@ -6,7 +6,7 @@ Built on the reverse-engineering work from [2BAD/tvt](https://github.com/2BAD/tv
 
 ## Features
 
-- **Pure-Python protocol client** — speaks the TVT binary protocol directly over TCP (port 6036), including XOR-encrypted login and HTTP-tunnelled API calls
+- **Pure-Python protocol client** — speaks the TVT binary protocol directly over TCP (port 6036), supporting both standard (XOR) and head-variant (SHA1) login encryption, plus HTTP-tunnelled API calls
 - **Native SDK via HTTP API** — optional [tvt-api](https://github.com/dannielperez/tvt-api) backend that wraps the vendor's `libdvrnetsdk.so` in a Fastify HTTP service (Docker, linux/amd64)
 - **Native SDK local** — alternative `sdk-local` backend that runs the SDK bridge (`scan_nvr.mjs`) as a subprocess (requires Node.js + the SDK natively on Linux x86-64)
 - **LAN auto-discovery** — finds TVT devices on the local network via SSDP multicast (no inventory file needed)
@@ -30,8 +30,8 @@ Built on the reverse-engineering work from [2BAD/tvt](https://github.com/2BAD/tv
 
 Connects directly to TVT devices over TCP using the proprietary binary protocol:
 
-1. **Handshake** — receives encryption parameters (nonce, protocol version)
-2. **Login** — authenticates with XOR-encrypted credentials
+1. **Handshake** — receives encryption parameters (nonce, protocol version, encryption type)
+2. **Login** — authenticates with encrypted credentials (standard XOR or head-variant SHA1, auto-detected)
 3. **Query** — retrieves device info and camera list via HTTP-tunnelled requests
 4. **Logout** — cleanly disconnects
 
@@ -343,7 +343,7 @@ A JSON array of device objects. At minimum each entry needs `ip`; the scanner fi
 [
   {
     "site": "Site A Downtown",
-    "ip": "10.0.1.250",
+    "ip": "10.10.10.250",
     "mac": "58:5B:69:AA:BB:01",
     "hostname": "NVR1",
     "manufacturer": "TVT"
@@ -392,7 +392,7 @@ When using `--xlsx`, the scanner creates one `.xlsx` file per site. Each file co
 
 | NVR Name | IP | Model | Serial Number | Firmware | Cameras |
 |---|---|---|---|---|---|
-| NVR32 | 10.0.1.250 | TD-3332B4 | ABC123 | 5.2.3.190 | 29 |
+| NVR32 | 10.10.10.250 | TD-3332B4 | ABC123 | 5.2.3.190 | 29 |
 
 If the `.xlsx` file already exists, only the NVR Config and NVR Info tabs are replaced — other tabs are preserved.
 
@@ -427,6 +427,13 @@ pytvt/
 ├── .env.example          # Template for credentials
 ├── requirements.txt      # Python dependencies
 ├── package.json          # Node.js dependencies (koffi) — sdk-local only
+├── tools/                # Reverse-engineering and debug utilities
+│   ├── verify_pw.py      # Live NVR nonce capture + password encryption verifier
+│   ├── verify_capture.py # Pcap-based login packet encryption verifier
+│   ├── parse_pcap.py     # Full TVT protocol pcap parser (SLL, SLL2, Ethernet)
+│   ├── capture_sdk.sh    # Docker tcpdump capture script for SDK traffic
+│   ├── sdk_login.cjs     # SDK login helper for traffic capture
+│   └── test_sha1.mjs     # Direct PUB_SHA1Encrypt SDK function tester
 └── tvt/                  # Git submodule — github.com/dannielperez/tvt
     ├── bin/linux/        # Native shared library (libdvrnetsdk.so)
     ├── source/           # TypeScript SDK source (reference implementation)
@@ -449,6 +456,25 @@ The TVT binary protocol runs over TCP and uses the following packet structure:
 | 24 | … | Data | Command-specific payload |
 
 Login passwords are XOR-encrypted using a 3-byte nonce provided in the initial handshake. Camera information is retrieved via HTTP requests tunnelled through the binary protocol.
+
+### Login Encryption Variants
+
+The protocol version in the init handshake (`protocolVer` at offset 12) determines the login encryption scheme:
+
+#### Standard Variant (`protocolVer < 11`)
+
+Password bytes are XOR-encrypted with a 3-byte nonce from the init packet (offset 45–47). Username is sent in plaintext.
+
+#### Head Variant (`protocolVer >= 11`, init flag `"head"`)
+
+Uses a stronger two-step password encryption scheme, discovered via SDK binary disassembly:
+
+1. `MD5(password)` → hex digest → uppercase
+2. Concatenate with nonce: `SHA1( MD5_UPPER + sprintf("%08d", nonce) )`
+
+The nonce is a 3-byte little-endian integer from the init packet, formatted as a zero-padded 8-digit decimal string. The username is XOR-encrypted using the nonce formatted via `sprintf("%u", nonce)` as a repeating key.
+
+The login packet uses `connectType=3` with a 236-byte payload, and the NVR returns device info and channel data directly in the login response (no HTTP tunnel needed for camera enumeration).
 
 See `tvt/proto/` for Wireshark dissector scripts that decode the full protocol.
 
