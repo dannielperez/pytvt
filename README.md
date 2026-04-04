@@ -343,7 +343,7 @@ A JSON array of device objects. At minimum each entry needs `ip`; the scanner fi
 [
   {
     "site": "Site A Downtown",
-    "ip": "10.10.10.250",
+    "ip": "10.10.10.100",
     "mac": "58:5B:69:AA:BB:01",
     "hostname": "NVR1",
     "manufacturer": "TVT"
@@ -392,7 +392,7 @@ When using `--xlsx`, the scanner creates one `.xlsx` file per site. Each file co
 
 | NVR Name | IP | Model | Serial Number | Firmware | Cameras |
 |---|---|---|---|---|---|
-| NVR32 | 10.10.10.250 | TD-3332B4 | ABC123 | 5.2.3.190 | 29 |
+| NVR32 | 10.10.10.100 | TD-3332B4 | ABC123 | 5.2.3.190 | 29 |
 
 If the `.xlsx` file already exists, only the NVR Config and NVR Info tabs are replaced — other tabs are preserved.
 
