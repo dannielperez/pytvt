@@ -9,6 +9,8 @@ Built on the reverse-engineering work from [2BAD/tvt](https://github.com/2BAD/tv
 - **Pure-Python protocol client** — speaks the TVT binary protocol directly over TCP (port 6036), including XOR-encrypted login and HTTP-tunnelled API calls
 - **Native SDK via HTTP API** — optional [tvt-api](https://github.com/dannielperez/tvt-api) backend that wraps the vendor's `libdvrnetsdk.so` in a Fastify HTTP service (Docker, linux/amd64)
 - **Native SDK local** — alternative `sdk-local` backend that runs the SDK bridge (`scan_nvr.mjs`) as a subprocess (requires Node.js + the SDK natively on Linux x86-64)
+- **LAN auto-discovery** — finds TVT devices on the local network via SSDP multicast (no inventory file needed)
+- **Remote subnet sweep** — discovers TVT devices on routable subnets (e.g. CCTV VLANs) via unicast UDP probes + TCP port fingerprinting
 - **Bulk scanner** — scan dozens of NVRs in parallel and extract every programmed camera channel (name, IP, port, status, model)
 - **Multiple output formats** — console, CSV, JSON, or per-site XLSX workbooks
 - **Flexible backend selection** — `protocol`, `sdk`, `sdk-local`, or `both` (protocol with SDK fallback)
@@ -71,6 +73,45 @@ Tries the Python protocol first; on failure, falls back to the SDK HTTP API:
 
 ```bash
 python3 main.py devices.json --backend both --api-url http://localhost:3000
+```
+
+### LAN Auto-Discovery (`tvt_discovery.py`)
+
+Discovers TVT NVRs, IPCs, DVRs and other devices on the local network without needing an inventory file. Uses the same SSDP/UPnP multicast protocol as TVT's official IPTool application:
+
+1. Sends an `M-SEARCH` probe to multicast group `239.255.255.250:1900`
+2. TVT devices respond with an XML body (`<multicastSearchResult>`) containing IP, MAC, model, firmware, ports, etc.
+3. Responses are parsed and de-duplicated by MAC address
+
+The discovery protocol was reverse-engineered from the IPTool.app macOS binary and confirmed against the official `DVR_NET_SDK.h` header (`SEARCHED_DEVICE_INFO` struct, `IPTool_SearchDataCallBack` callback).
+
+```
+tvt_discovery.py ──M-SEARCH──▶ 239.255.255.250:1900
+                                    │
+                              TVT devices respond
+                              with XML device info
+                                    │
+                                    ▼
+                        parsed device list (table / JSON)
+```
+
+#### Remote Subnet Sweep
+
+SSDP multicast is limited to the local broadcast domain — routers don't forward it. For remote routable subnets (e.g. a 10.200.50.0/24 CCTV VLAN), the discovery tool switches to a two-phase unicast approach:
+
+1. **UDP unicast** — sends the same M-SEARCH probe directly to each host's port 1900 using a ThreadPoolExecutor (default 50 parallel probes)
+2. **TCP fallback** — hosts that don't reply to UDP get a TCP connection attempt on port 9008 (the TVT data port); if the device sends an init handshake packet (`head` or `1111` magic bytes), it's flagged as a TVT device
+
+```
+tvt_discovery.py --subnet 10.200.50.0/24
+    │
+    ├──UDP M-SEARCH──▶ 10.200.50.1:1900
+    ├──UDP M-SEARCH──▶ 10.200.50.2:1900
+    ├──  ...254 hosts in parallel...     ──▶ XML response? → full device info
+    │
+    └──TCP fallback on non-responders:
+        ├──TCP :9008──▶ 10.200.50.3  ──▶ TVT handshake? → minimal device entry
+        └──TCP :9008──▶ 10.200.50.5  ──▶ connection refused → skip
 ```
 
 ### Orchestrator (`main.py`)
@@ -231,7 +272,7 @@ python3 main.py nvr_devices.json -c 2
 
 | Flag | Description |
 |---|---|
-| `input` | Path to NVR devices JSON file (required) |
+| `input` | Path to NVR devices JSON file (optional with `--discover`) |
 | `--config` | Path to config.json (default: `./config.json`) |
 | `-o`, `--output` | Output file (`.csv` or `.json`) |
 | `-s`, `--site` | Filter by site name (partial match) |
@@ -242,6 +283,50 @@ python3 main.py nvr_devices.json -c 2
 | `--api-url` | tvt-api URL for `sdk`/`both` backends (default: `http://localhost:3000`) |
 | `--xlsx DIR` | Export one `.xlsx` file per site into `DIR` |
 | `--failed FILE` | Save devices that failed to scan to a JSON file for retry |
+| `--discover` | Run LAN discovery first, merge found devices with input file, then scan |
+| `--discover-only` | Only discover devices on the LAN (no scanning) |
+| `--discover-timeout` | Seconds to wait for discovery responses per probe (default: `5`) |
+| `--subnet CIDR` | Sweep a remote subnet for TVT devices (repeatable) |
+| `--discover-concurrency` | Max parallel probes for subnet sweep (default: `50`) |
+| `--no-tcp-fallback` | Skip TCP port-probe fallback during subnet sweep |
+
+### LAN Discovery
+
+```bash
+# Discover all TVT devices on the local network
+python3 tvt_discovery.py
+
+# Custom timeout and retries
+python3 tvt_discovery.py --timeout 8 --retries 3
+
+# Output as JSON
+python3 tvt_discovery.py --json
+
+# Save discovered NVRs in scanner-compatible JSON format
+python3 tvt_discovery.py --scanner-json discovered_nvrs.json --site "Office"
+
+# Sweep a remote CCTV subnet for TVT devices
+python3 tvt_discovery.py --subnet 10.200.50.0/24
+
+# Sweep multiple subnets
+python3 tvt_discovery.py --subnet 10.200.50.0/24 --subnet 10.200.51.0/24
+
+# Sweep with faster timeout (1s per host) and more parallelism
+python3 tvt_discovery.py --subnet 10.200.50.0/24 --timeout 1 --concurrency 100
+
+# Sweep without TCP fallback (UDP only)
+python3 tvt_discovery.py --subnet 10.200.50.0/24 --no-tcp-fallback
+
+# Discover and scan in one command (via main.py)
+python3 main.py --discover-only
+python3 main.py --discover --backend protocol --xlsx files/
+python3 main.py devices.json --discover --xlsx files/  # merge with existing inventory
+
+# Sweep a subnet and scan all found NVRs
+python3 main.py --subnet 10.200.50.0/24 --xlsx files/
+python3 main.py --subnet 10.200.50.0/24 --subnet 10.200.51.0/24 -o results.json
+python3 main.py devices.json --subnet 10.200.50.0/24 --discover --xlsx files/  # merge all
+```
 
 ### Python Protocol Client (standalone)
 
@@ -336,6 +421,7 @@ python3 main.py nvr_devices.json --xlsx files/ --failed retry_later.json
 pytvt/
 ├── main.py               # Python orchestrator — CLI, concurrency, output
 ├── tvt_protocol.py       # Pure Python TVT binary protocol client
+├── tvt_discovery.py      # LAN auto-discovery + remote subnet sweep
 ├── scan_nvr.mjs          # Node.js SDK bridge — subprocess for sdk-local backend
 ├── config.json           # Non-sensitive settings (port, timeout, etc.)
 ├── .env.example          # Template for credentials

@@ -31,6 +31,7 @@ dotenv.load_dotenv()
 SCRIPT_DIR = Path(__file__).parent.resolve()
 
 from tvt_protocol import scan_nvr as python_scan_nvr
+from tvt_discovery import discover_devices, discover_subnet, print_discovery_report, discovery_to_scanner_format, save_discovery_xlsx
 
 # Default API URL for the TVT SDK Fastify server
 DEFAULT_API_URL = os.getenv("TVT_API_URL", "http://localhost:3000")
@@ -580,7 +581,8 @@ def main():
     )
     parser.add_argument(
         "input",
-        help="Path to JSON file with NVR device list",
+        nargs="?",
+        help="Path to JSON file with NVR device list (optional with --discover)",
     )
     parser.add_argument(
         "--config",
@@ -629,7 +631,89 @@ def main():
         default=DEFAULT_API_URL,
         help=f"TVT SDK API URL for sdk backend (default: {DEFAULT_API_URL})",
     )
+    parser.add_argument(
+        "--discover",
+        action="store_true",
+        help="Run LAN discovery to find TVT devices before scanning (no input file needed)",
+    )
+    parser.add_argument(
+        "--discover-timeout",
+        type=float,
+        default=5.0,
+        help="Seconds to wait for discovery responses per probe (default: 5)",
+    )
+    parser.add_argument(
+        "--discover-only",
+        action="store_true",
+        help="Only discover devices, don't scan (prints table or JSON)",
+    )
+    parser.add_argument(
+        "--subnet",
+        action="append",
+        metavar="CIDR",
+        help="Scan a remote subnet for TVT devices (repeatable, e.g. --subnet 10.200.50.0/24)",
+    )
+    parser.add_argument(
+        "--discover-concurrency",
+        type=int,
+        default=50,
+        help="Max parallel probes for subnet sweep (default: 50)",
+    )
+    parser.add_argument(
+        "--no-tcp-fallback",
+        action="store_true",
+        help="Skip TCP port probe fallback during subnet sweep",
+    )
     args = parser.parse_args()
+
+    # ── Helper: run all discovery probes and collect results ────────
+    def _run_discovery() -> list[dict]:
+        """Run LAN multicast + subnet sweeps, return merged device list."""
+        all_discovered: list[dict] = []
+        # LAN multicast (unless only subnets were requested)
+        if not args.subnet:
+            print(f"Searching for TVT devices on LAN (timeout={args.discover_timeout}s)...")
+            all_discovered.extend(discover_devices(timeout=args.discover_timeout))
+        # Subnet sweeps
+        if args.subnet:
+            for cidr in args.subnet:
+                found = discover_subnet(
+                    cidr,
+                    timeout=args.discover_timeout,
+                    concurrency=args.discover_concurrency,
+                    tcp_fallback=not args.no_tcp_fallback,
+                )
+                all_discovered.extend(found)
+        # De-duplicate by MAC
+        seen_macs: set[str] = set()
+        unique: list[dict] = []
+        for d in all_discovered:
+            mac = d.get("mac", "")
+            if mac and mac in seen_macs:
+                continue
+            if mac:
+                seen_macs.add(mac)
+            unique.append(d)
+        return unique
+
+    # ── Discovery-only mode ──────────────────────────────────────────
+    if args.discover_only or (args.subnet and not args.input and not args.discover):
+        discovered = _run_discovery()
+        print_discovery_report(discovered)
+        if args.output:
+            scan_port = config["port"] if args.input or args.discover else 6036
+            scanner_devs = discovery_to_scanner_format(discovered, site=args.site or "Discovered", scan_port=scan_port)
+            with open(args.output, "w") as f:
+                json.dump(scanner_devs, f, indent=2)
+            print(f"Scanner JSON ({len(scanner_devs)} devices) saved to: {args.output}")
+        if args.xlsx:
+            xlsx_path = str(Path(args.xlsx) / "discovery.xlsx")
+            save_discovery_xlsx(discovered, xlsx_path)
+        return
+
+    # ── Validate input ───────────────────────────────────────────────
+    if not args.input and not args.discover and not args.subnet:
+        parser.error("input file is required (or use --discover / --discover-only / --subnet)")
 
     # Load config
     config = load_config(args.config)
@@ -642,8 +726,22 @@ def main():
         config["password"] = args.password
 
     # Load and filter devices
-    all_devices = load_devices(args.input)
-    tvt_devices = filter_tvt_devices(all_devices)
+    all_devices = []
+    if args.input:
+        all_devices = load_devices(args.input)
+    tvt_devices = filter_tvt_devices(all_devices) if all_devices else []
+
+    # Merge discovered devices if --discover or --subnet flag is set
+    if args.discover or args.subnet:
+        discovered = _run_discovery()
+        print_discovery_report(discovered)
+        discovered_devs = discovery_to_scanner_format(discovered, site=args.site or "Discovered")
+        # Merge: discovered devices that aren't already in the file
+        existing_ips = {d["ip"] for d in tvt_devices}
+        for dd in discovered_devs:
+            if dd["ip"] not in existing_ips:
+                tvt_devices.append(dd)
+                existing_ips.add(dd["ip"])
 
     if args.site:
         site_filter = args.site.lower()
