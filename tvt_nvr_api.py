@@ -279,6 +279,11 @@ class NvrClient:
         """Authenticate to the NVR web interface.
 
         Uses challenge-response: reqLogin → hash → doLogin.
+
+        Supports two firmware variants:
+        - Older firmware returns both ``nonce`` and ``token`` in reqLogin.
+        - Newer firmware (1.4.12+) returns only ``nonce`` and ``sessionId``;
+          the token is returned by doLogin instead.
         """
         # Step 1: Request login challenge
         req_body = self._build_request()
@@ -286,10 +291,18 @@ class NvrClient:
 
         nonce = self._parse_xml_field(data, "nonce")
         token = self._parse_xml_field(data, "token")
-        if not nonce or not token:
-            raise NvrApiError(f"reqLogin failed: no nonce/token in response")
 
-        self._token = token
+        if not nonce:
+            # Check for specific error codes
+            error_code = self._parse_xml_field(data, "errorCode")
+            raise NvrApiError(
+                f"reqLogin failed: no nonce in response (errorCode={error_code})",
+                error_code,
+            )
+
+        # Some firmware versions don't return a token in reqLogin;
+        # doLogin will return it instead. Use "null" as placeholder.
+        self._token = token  # may be None
 
         # Step 2: Hash password = SHA512(MD5(password).upper() + "#" + nonce)
         md5_hex = hashlib.md5(self.password.encode()).hexdigest().upper()
@@ -302,6 +315,11 @@ class NvrClient:
         )
         data = self._post("doLogin", login_body)
         self._check_response(data, "doLogin")
+
+        # Pick up token from doLogin if reqLogin didn't provide one
+        if not self._token:
+            self._token = self._parse_xml_field(data, "token")
+
         self._logged_in = True
 
     def _require_login(self) -> None:
