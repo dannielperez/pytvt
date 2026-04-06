@@ -1,0 +1,93 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pytvt"
+version = "0.2.0"
+description = "Bulk TVT NVR camera scanner and management toolkit"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [
+    { name = "Danniel Perez" },
+]
+keywords = ["tvt", "nvr", "camera", "scanner", "cctv", "ipc", "surveillance"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: System :: Networking",
+]
+dependencies = [
+    "openpyxl>=3.1.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.4",
+    "mypy>=1.10",
+]
+
+[project.scripts]
+pytvt = "pytvt.cli:main"
+pytvt-discover = "pytvt.cli:discover"
+pytvt-api = "pytvt.cli:api"
+pytvt-snapshot = "pytvt.cli:snapshot"
+pytvt-diff = "pytvt.cli:diff_cli"
+
+[project.urls]
+Homepage = "https://github.com/dannielperez/pytvt"
+Repository = "https://github.com/dannielperez/pytvt"
+Issues = "https://github.com/dannielperez/pytvt/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pytvt"]
+
+# ── Ruff ─────────────────────────────────────────────────────────────
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+ignore = [
+    "E501",    # line length handled by formatter
+    "SIM108",  # ternary — readability preference
+    "RUF022",  # __all__ sort — grouped by category intentionally
+    "UP015",   # open mode — existing code style
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Pre-existing code — suppress until incremental cleanup
+"src/pytvt/protocol.py" = ["F841", "E402", "F401", "UP041", "E702", "F541", "SIM109", "SIM113", "SIM105", "B905", "I001", "RUF013", "B007"]
+"src/pytvt/discovery.py" = ["F401", "E402", "UP041", "E702", "F541", "I001", "B007", "SIM113", "F811"]
+"src/pytvt/nvr_api.py" = ["F401", "E402", "UP041", "E702", "F541", "F841", "B905", "I001", "RUF013", "F811"]
+"src/pytvt/snapshot.py" = ["F401", "E402", "UP041", "E702", "F541", "F841", "B007", "RUF013", "I001", "B905"]
+"src/pytvt/cli.py" = ["E402", "I001", "F541"]
+"tests/*" = ["F401"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["pytvt"]
+
+# ── Mypy ─────────────────────────────────────────────────────────────
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+
+# ── Pytest ───────────────────────────────────────────────────────────
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

@@ -1,8 +1,17 @@
 #!/usr/bin/env python3
 """
+RESEARCH / REFERENCE ONLY — not part of the pytvt runtime.
+
 Connect to an NVR, capture the init packet nonce, then verify the
 password encryption scheme discovered from SDK disassembly:
   SHA1( MD5(password).upper() + sprintf("%08d", nonce_LE_uint24) )
+
+This script was used to confirm the head-variant SHA1 password encryption
+by connecting to a live NVR and comparing computed hashes against the wire
+protocol. The verified algorithm is now implemented in
+src/pytvt/protocol.py (encrypt_password_sha1).
+
+See research/README.md for context.
 """
 import hashlib
 import os

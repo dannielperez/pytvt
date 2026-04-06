@@ -116,77 +116,18 @@ import subprocess
 import sys
 from dataclasses import dataclass, field
 
+from .models import (
+    ApiServerConfig,
+    Channel,
+    NvrApiError,
+    PasswordSecurity,
+    PortConfig,
+    RtspServerConfig,
+    User,
+)
+
 XML_HEADER = '<?xml version="1.0" encoding="utf-8" ?>'
 SYSTEM_TYPE = "NVMS-9000"
-
-
-@dataclass
-class RtspServerConfig:
-    """RTSP server settings from ``queryRTSPServer``."""
-    enabled: bool
-    port: int
-    auth_type: str          # 'Digest' or 'Basic'
-    anonymous_access: bool
-
-
-@dataclass
-class ApiServerConfig:
-    """API server settings from ``queryApiServer``."""
-    enabled: bool
-    auth_type: str  # 'Digest' or 'Basic'
-
-
-@dataclass
-class PortConfig:
-    """Network port configuration from ``queryNetPortCfg``."""
-    http_port: int
-    https_port: int
-    server_port: int     # TVT protocol port (default 6036)
-    rtsp_port: int       # RTSP port (default 554)
-    pos_port: int
-    auto_report_port: int
-
-
-@dataclass
-class Channel:
-    """A camera channel registered on the NVR (from ``queryDevList``)."""
-    chl_num: int         # 1-indexed channel number
-    name: str            # display name (e.g. 'IP Camera')
-    ip: str              # IPC camera's own IP address
-    port: int            # IPC protocol port (typically 9008)
-    dev_id: str          # NVR internal device ID
-    model: str           # e.g. 'TD-9544S4-C'
-    manufacturer: str    # e.g. 'TVT'
-    protocol: str        # e.g. 'TVT'
-    online: bool = True
-
-
-@dataclass
-class User:
-    """An NVR user account (from ``queryUserList``)."""
-    user_id: str
-    username: str
-    user_type: str       # 'default_admin', 'normal', etc.
-    enabled: bool
-    auth_group: str = ""  # e.g. 'Administrator'
-    email: str = ""
-    bind_mac: bool = False
-    mac: str = "00:00:00:00:00:00"
-
-
-@dataclass
-class PasswordSecurity:
-    """Password complexity policy from ``queryPasswordSecurity``."""
-    min_strength: str                                   # weak, medium, strong, stronger
-    expiration_days: int                                # 0 = never expires
-    allowed_levels: list[str] = field(default_factory=list)  # available strength tiers
-
-
-class NvrApiError(Exception):
-    """Raised when NVR API returns an error."""
-    def __init__(self, message: str, error_code: str | None = None):
-        super().__init__(message)
-        self.error_code = error_code
 
 
 class NvrClient:
@@ -244,7 +185,7 @@ class NvrClient:
         token = self._token or "null"
         return (
             f'{XML_HEADER}<request version="1.0"  systemType="{SYSTEM_TYPE}" clientType="WEB">'
-            f'<token>{token}</token></request>'
+            f"<token>{token}</token></request>"
         )
 
     def _build_request_with_content(self, content: str) -> str:
@@ -252,7 +193,7 @@ class NvrClient:
         token = self._token or "null"
         return (
             f'{XML_HEADER}<request version="1.0"   systemType="{SYSTEM_TYPE}" clientType="WEB">'
-            f'<token>{token}</token>{content}</request>'
+            f"<token>{token}</token>{content}</request>"
         )
 
     @staticmethod
@@ -310,8 +251,8 @@ class NvrClient:
 
         # Step 3: doLogin
         login_body = self._build_request_with_content(
-            f'<content><userName><![CDATA[{self.username}]]></userName>'
-            f'<password><![CDATA[{sha512_hex}]]></password></content>'
+            f"<content><userName><![CDATA[{self.username}]]></userName>"
+            f"<password><![CDATA[{sha512_hex}]]></password></content>"
         )
         data = self._post("doLogin", login_body)
         self._check_response(data, "doLogin")
@@ -382,17 +323,19 @@ class NvrClient:
         for m in re.finditer(r'<item\s+id="([^"]+)">(.*?)</item>', dev_data, re.DOTALL):
             dev_id = m.group(1)
             block = m.group(2)
-            channels.append(Channel(
-                chl_num=int(self._parse_xml_field(block, "chlNum") or 0),
-                name=self._parse_xml_field(block, "name") or "",
-                ip=self._parse_xml_field(block, "ip") or "",
-                port=int(self._parse_xml_field(block, "port") or 9008),
-                dev_id=dev_id,
-                model=self._parse_xml_field(block, "productModel") or "",
-                manufacturer=self._parse_xml_field(block, "manufacturer") or "",
-                protocol=self._parse_xml_field(block, "protocolType") or "",
-                online=dev_id in online_ids,
-            ))
+            channels.append(
+                Channel(
+                    chl_num=int(self._parse_xml_field(block, "chlNum") or 0),
+                    name=self._parse_xml_field(block, "name") or "",
+                    ip=self._parse_xml_field(block, "ip") or "",
+                    port=int(self._parse_xml_field(block, "port") or 9008),
+                    dev_id=dev_id,
+                    model=self._parse_xml_field(block, "productModel") or "",
+                    manufacturer=self._parse_xml_field(block, "manufacturer") or "",
+                    protocol=self._parse_xml_field(block, "protocolType") or "",
+                    online=dev_id in online_ids,
+                )
+            )
         return channels
 
     def get_rtsp_url(self, channel: int, stream_type: str = "main") -> str:
@@ -407,6 +350,7 @@ class NvrClient:
             stream_type: 'main', 'sub', or 'third'
         """
         from urllib.parse import quote
+
         user = quote(self.username, safe="")
         pwd = quote(self.password, safe="")
         profile = {"main": "profile1", "sub": "profile2", "third": "profile3"}.get(stream_type, "profile1")
@@ -433,12 +377,12 @@ class NvrClient:
         """
         self._require_login()
         content = (
-            f'<content>'
-            f'<rtspServerSwitch>true</rtspServerSwitch>'
-            f'<rtspAuthType>{auth_type}</rtspAuthType>'
-            f'<rtspPort>{port}</rtspPort>'
-            f'<anonymousAccess>{str(anonymous).lower()}</anonymousAccess>'
-            f'</content>'
+            f"<content>"
+            f"<rtspServerSwitch>true</rtspServerSwitch>"
+            f"<rtspAuthType>{auth_type}</rtspAuthType>"
+            f"<rtspPort>{port}</rtspPort>"
+            f"<anonymousAccess>{str(anonymous).lower()}</anonymousAccess>"
+            f"</content>"
         )
         data = self._post("editRTSPServer", self._build_request_with_content(content))
         self._check_response(data, "editRTSPServer")
@@ -448,12 +392,12 @@ class NvrClient:
         self._require_login()
         rtsp = self.query_rtsp_server()
         content = (
-            f'<content>'
-            f'<rtspServerSwitch>false</rtspServerSwitch>'
-            f'<rtspAuthType>{rtsp.auth_type}</rtspAuthType>'
-            f'<rtspPort>{rtsp.port}</rtspPort>'
-            f'<anonymousAccess>{str(rtsp.anonymous_access).lower()}</anonymousAccess>'
-            f'</content>'
+            f"<content>"
+            f"<rtspServerSwitch>false</rtspServerSwitch>"
+            f"<rtspAuthType>{rtsp.auth_type}</rtspAuthType>"
+            f"<rtspPort>{rtsp.port}</rtspPort>"
+            f"<anonymousAccess>{str(rtsp.anonymous_access).lower()}</anonymousAccess>"
+            f"</content>"
         )
         data = self._post("editRTSPServer", self._build_request_with_content(content))
         self._check_response(data, "editRTSPServer")
@@ -466,10 +410,10 @@ class NvrClient:
         """
         self._require_login()
         content = (
-            f'<content>'
-            f'<apiserverSwitch>true</apiserverSwitch>'
-            f'<authenticationType>{auth_type}</authenticationType>'
-            f'</content>'
+            f"<content>"
+            f"<apiserverSwitch>true</apiserverSwitch>"
+            f"<authenticationType>{auth_type}</authenticationType>"
+            f"</content>"
         )
         data = self._post("editApiServer", self._build_request_with_content(content))
         self._check_response(data, "editApiServer")
@@ -479,10 +423,10 @@ class NvrClient:
         self._require_login()
         api = self.query_api_server()
         content = (
-            f'<content>'
-            f'<apiserverSwitch>false</apiserverSwitch>'
-            f'<authenticationType>{api.auth_type}</authenticationType>'
-            f'</content>'
+            f"<content>"
+            f"<apiserverSwitch>false</apiserverSwitch>"
+            f"<authenticationType>{api.auth_type}</authenticationType>"
+            f"</content>"
         )
         data = self._post("editApiServer", self._build_request_with_content(content))
         self._check_response(data, "editApiServer")
@@ -527,17 +471,19 @@ class NvrClient:
         for m in re.finditer(r'<item id="([^"]+)">(.*?)</item>', data, re.DOTALL):
             uid = m.group(1)
             block = m.group(2)
-            name_m = re.search(r'<userName><!\[CDATA\[(.*?)\]\]></userName>', block)
-            users.append(User(
-                user_id=uid,
-                username=name_m.group(1) if name_m else "",
-                user_type=self._parse_xml_field(block, "userType") or "normal",
-                enabled=self._parse_xml_field(block, "enabled") == "true",
-                auth_group=self._parse_xml_field(block, "authGroup") or "",
-                email=self._parse_xml_field(block, "email") or "",
-                bind_mac=self._parse_xml_field(block, "bindMacSwitch") == "true",
-                mac=self._parse_xml_field(block, "mac") or "00:00:00:00:00:00",
-            ))
+            name_m = re.search(r"<userName><!\[CDATA\[(.*?)\]\]></userName>", block)
+            users.append(
+                User(
+                    user_id=uid,
+                    username=name_m.group(1) if name_m else "",
+                    user_type=self._parse_xml_field(block, "userType") or "normal",
+                    enabled=self._parse_xml_field(block, "enabled") == "true",
+                    auth_group=self._parse_xml_field(block, "authGroup") or "",
+                    email=self._parse_xml_field(block, "email") or "",
+                    bind_mac=self._parse_xml_field(block, "bindMacSwitch") == "true",
+                    mac=self._parse_xml_field(block, "mac") or "00:00:00:00:00:00",
+                )
+            )
         return users
 
     def query_password_security(self) -> PasswordSecurity:
@@ -550,7 +496,7 @@ class NvrClient:
         self._require_login()
         data = self._post("queryPasswordSecurity", self._build_request())
         self._check_response(data, "queryPasswordSecurity")
-        levels = re.findall(r'<enum>(weak|medium|strong|stronger)</enum>', data)
+        levels = re.findall(r"<enum>(weak|medium|strong|stronger)</enum>", data)
         content = self._parse_xml_field(data, "content") or data
         strength = self._parse_xml_field(content, "userPasswordAllowLevel") or "weak"
         expiry = self._parse_xml_field(content, "userPasswordExpirationTime") or "0"
@@ -579,10 +525,10 @@ class NvrClient:
         old_enc = self._encode_password(old_password)
         new_enc = self._encode_password(new_password)
         content = (
-            f'<content>'
-            f'<oldPassword><![CDATA[{old_enc}]]></oldPassword>'
-            f'<password><![CDATA[{new_enc}]]></password>'
-            f'</content>'
+            f"<content>"
+            f"<oldPassword><![CDATA[{old_enc}]]></oldPassword>"
+            f"<password><![CDATA[{new_enc}]]></password>"
+            f"</content>"
         )
         data = self._post("editUserPassword", self._build_request_with_content(content))
         self._check_response(data, "editUserPassword")
@@ -591,9 +537,9 @@ class NvrClient:
         self._cookie = None
         self._token = None
 
-    def update_device_credentials(self, dev_ids: list[str] | None = None,
-                                  username: str = "admin",
-                                  password: str | None = None) -> int:
+    def update_device_credentials(
+        self, dev_ids: list[str] | None = None, username: str = "admin", password: str | None = None
+    ) -> int:
         """Update stored credentials for IPC cameras on the NVR (editDevList).
 
         This changes what the NVR uses to connect to IPC cameras.
@@ -618,12 +564,12 @@ class NvrClient:
         for did in dev_ids:
             items.append(
                 f'<item id="{did}">'
-                f'<userName><![CDATA[{username}]]></userName>'
-                f'<password><![CDATA[{pwd}]]></password>'
-                f'</item>'
+                f"<userName><![CDATA[{username}]]></userName>"
+                f"<password><![CDATA[{pwd}]]></password>"
+                f"</item>"
             )
 
-        content = '<content type="list">' + ''.join(items) + '</content>'
+        content = '<content type="list">' + "".join(items) + "</content>"
         data = self._post("editDevList", self._build_request_with_content(content))
         self._check_response(data, "editDevList")
         return len(items)
@@ -692,16 +638,23 @@ def rtsp_snapshot(rtsp_url: str, output_path: str, timeout: int = 10) -> bool:
         True if snapshot was saved successfully
     """
     import os
+
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
     try:
         result = subprocess.run(
             [
-                "ffmpeg", "-y",
-                "-rtsp_transport", "tcp",
-                "-timeout", str(timeout * 1_000_000),
-                "-i", rtsp_url,
-                "-frames:v", "1",
-                "-q:v", "2",
+                "ffmpeg",
+                "-y",
+                "-rtsp_transport",
+                "tcp",
+                "-timeout",
+                str(timeout * 1_000_000),
+                "-i",
+                rtsp_url,
+                "-frames:v",
+                "1",
+                "-q:v",
+                "2",
                 output_path,
             ],
             capture_output=True,
@@ -750,8 +703,9 @@ def main():
     sync_parser.add_argument("--device-user", default="admin", help="Username to set for IPC devices")
     sync_parser.add_argument("--device-password", help="Password to set (default: NVR password)")
 
-    chall_parser = sub.add_parser("change-admin-and-sync",
-                                  help="Change admin password and update all stored IPC credentials")
+    chall_parser = sub.add_parser(
+        "change-admin-and-sync", help="Change admin password and update all stored IPC credentials"
+    )
     chall_parser.add_argument("new_password", help="New password")
 
     args = parser.parse_args()
@@ -766,7 +720,9 @@ def main():
         if args.command == "status":
             rtsp = nvr.query_rtsp_server()
             api = nvr.query_api_server()
-            print(f"RTSP Server:  {'ENABLED' if rtsp.enabled else 'DISABLED'}  (port={rtsp.port}, auth={rtsp.auth_type})")
+            print(
+                f"RTSP Server:  {'ENABLED' if rtsp.enabled else 'DISABLED'}  (port={rtsp.port}, auth={rtsp.auth_type})"
+            )
             print(f"API Server:   {'ENABLED' if api.enabled else 'DISABLED'}  (auth={api.auth_type})")
 
         elif args.command == "enable-rtsp":
@@ -806,6 +762,7 @@ def main():
             ok = nvr.snapshot(args.channel, output, stream_type=args.stream)
             if ok:
                 import os
+
                 size = os.path.getsize(output)
                 print(f"OK ({size:,} bytes)")
             else:
@@ -814,6 +771,7 @@ def main():
 
         elif args.command == "snapshot-all":
             import os
+
             nvr.ensure_services_enabled()
             channels = nvr.query_channels()
             online = [ch for ch in channels if ch.online]

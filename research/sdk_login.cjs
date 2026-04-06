@@ -1,4 +1,15 @@
-// SDK login capture helper — uses env vars from /app/.env or environment
+// ┌──────────────────────────────────────────────────────────────┐
+// │  RESEARCH / REFERENCE ONLY — not part of the pytvt runtime  │
+// └──────────────────────────────────────────────────────────────┘
+//
+// SDK login capture helper — logs into an NVR via the native SDK FFI so that
+// capture_sdk.sh can record the binary handshake in a pcap. Used during
+// protocol reverse engineering to compare SDK-generated packets against the
+// pure-Python implementation in src/pytvt/protocol.py.
+//
+// See research/README.md for context.
+
+// Uses env vars from /app/.env or environment
 const { readFileSync } = require("fs");
 
 // Load .env from Docker image if present

@@ -57,7 +57,7 @@ DEFAULT_TIMEOUT = 30
 
 # Common TVT device ports
 PORT_CAMERA = 9008  # IPC cameras
-PORT_NVR = 6036     # NVR/DVR devices
+PORT_NVR = 6036  # NVR/DVR devices
 
 
 def capture_snapshot(
@@ -84,13 +84,15 @@ def capture_snapshot(
     Returns:
         JPEG bytes on success, None on failure
     """
-    payload = json.dumps({
-        "ip": ip,
-        "port": port,
-        "username": username,
-        "password": password,
-        "channel": channel,
-    }).encode()
+    payload = json.dumps(
+        {
+            "ip": ip,
+            "port": port,
+            "username": username,
+            "password": password,
+            "channel": channel,
+        }
+    ).encode()
 
     req = urllib.request.Request(
         f"{api_url}/snapshot",
@@ -171,14 +173,16 @@ def get_rtsp_url(
     Returns:
         RTSP URL string on success, None on failure
     """
-    payload = json.dumps({
-        "ip": ip,
-        "port": port,
-        "username": username,
-        "password": password,
-        "channel": channel,
-        "streamType": stream_type,
-    }).encode()
+    payload = json.dumps(
+        {
+            "ip": ip,
+            "port": port,
+            "username": username,
+            "password": password,
+            "channel": channel,
+            "streamType": stream_type,
+        }
+    ).encode()
 
     req = urllib.request.Request(
         f"{api_url}/rtsp-url",
@@ -262,11 +266,15 @@ def snapshot_all_channels(
         List of {channel, name, file, success} dicts
     """
     # First scan to get camera list
-    scan_payload = json.dumps({
-        "ip": ip, "port": port,
-        "username": username, "password": password,
-        "maxCameras": max_channels,
-    }).encode()
+    scan_payload = json.dumps(
+        {
+            "ip": ip,
+            "port": port,
+            "username": username,
+            "password": password,
+            "maxCameras": max_channels,
+        }
+    ).encode()
 
     req = urllib.request.Request(
         f"{api_url}/scan",
@@ -309,9 +317,14 @@ def snapshot_all_channels(
             continue
 
         ok = save_snapshot(
-            ip, ch, filepath,
-            port=port, username=username, password=password,
-            api_url=api_url, timeout=timeout,
+            ip,
+            ch,
+            filepath,
+            port=port,
+            username=username,
+            password=password,
+            api_url=api_url,
+            timeout=timeout,
         )
 
         if ok:
@@ -373,10 +386,14 @@ def snapshot_from_json(
 
         if all_channels:
             results = snapshot_all_channels(
-                ip, output_dir,
-                max_channels=max_channels, port=port,
-                username=username, password=password,
-                api_url=api_url, timeout=timeout,
+                ip,
+                output_dir,
+                max_channels=max_channels,
+                port=port,
+                username=username,
+                password=password,
+                api_url=api_url,
+                timeout=timeout,
                 site_name=site,
             )
             for r in results:
@@ -394,9 +411,14 @@ def snapshot_from_json(
 
             total += 1
             ok = save_snapshot(
-                ip, ch, filepath,
-                port=port, username=username, password=password,
-                api_url=api_url, timeout=timeout,
+                ip,
+                ch,
+                filepath,
+                port=port,
+                username=username,
+                password=password,
+                api_url=api_url,
+                timeout=timeout,
             )
             if ok:
                 print(f"  ch{ch}: saved → {filepath}")
@@ -411,6 +433,7 @@ def snapshot_from_json(
 # ──────────────────────────────────────────────────────────────────────
 # Direct mode: NVR web API + ffmpeg (no Docker container required)
 # ──────────────────────────────────────────────────────────────────────
+
 
 def direct_snapshot_all(
     nvr_ip: str,
@@ -440,7 +463,7 @@ def direct_snapshot_all(
     Returns:
         List of dicts with keys: channel, name, ip, file, success, status.
     """
-    from tvt_nvr_api import NvrClient, NvrApiError, rtsp_snapshot as _rtsp_snap
+    from .nvr_api import NvrClient, rtsp_snapshot as _rtsp_snap
 
     os.makedirs(output_dir, exist_ok=True)
     results = []
@@ -453,8 +476,16 @@ def direct_snapshot_all(
         for ch in channels:
             if not ch.online:
                 print(f"  CH{ch.chl_num:>2} ({ch.name}): OFFLINE - skipped")
-                results.append({"channel": ch.chl_num, "name": ch.name, "ip": ch.ip,
-                                "file": None, "success": False, "status": "offline"})
+                results.append(
+                    {
+                        "channel": ch.chl_num,
+                        "name": ch.name,
+                        "ip": ch.ip,
+                        "file": None,
+                        "success": False,
+                        "status": "offline",
+                    }
+                )
                 continue
 
             safe = ch.name.replace("/", "_").replace(" ", "_")
@@ -470,8 +501,16 @@ def direct_snapshot_all(
             else:
                 print("FAILED")
 
-            results.append({"channel": ch.chl_num, "name": ch.name, "ip": ch.ip,
-                            "file": filepath if ok else None, "success": ok, "status": "online"})
+            results.append(
+                {
+                    "channel": ch.chl_num,
+                    "name": ch.name,
+                    "ip": ch.ip,
+                    "file": filepath if ok else None,
+                    "success": ok,
+                    "status": "online",
+                }
+            )
 
     return results
 
@@ -505,7 +544,7 @@ def direct_snapshot_channel(
     Returns:
         True if the snapshot was saved successfully.
     """
-    from tvt_nvr_api import NvrClient, rtsp_snapshot as _rtsp_snap
+    from .nvr_api import NvrClient, rtsp_snapshot as _rtsp_snap
 
     with NvrClient(nvr_ip, username, password, port=web_port, timeout=timeout) as nvr:
         nvr.login()
@@ -546,7 +585,7 @@ def direct_snapshot_from_json(
     Returns:
         Dict with keys: total, success, failed.
     """
-    from tvt_nvr_api import NvrClient, NvrApiError, rtsp_snapshot as _rtsp_snap
+    from .nvr_api import NvrClient, rtsp_snapshot as _rtsp_snap
 
     with open(json_path) as f:
         data = json.load(f)
@@ -567,9 +606,12 @@ def direct_snapshot_from_json(
 
         if all_channels:
             results = direct_snapshot_all(
-                ip, output_dir,
-                username=username, password=password,
-                web_port=web_port, stream_type=stream_type,
+                ip,
+                output_dir,
+                username=username,
+                password=password,
+                web_port=web_port,
+                stream_type=stream_type,
                 timeout=timeout,
             )
             for r in results:
@@ -586,9 +628,13 @@ def direct_snapshot_from_json(
 
             total += 1
             ok = direct_snapshot_channel(
-                ip, ch, filepath,
-                username=username, password=password,
-                web_port=web_port, stream_type=stream_type,
+                ip,
+                ch,
+                filepath,
+                username=username,
+                password=password,
+                web_port=web_port,
+                stream_type=stream_type,
                 timeout=timeout,
             )
             if ok:
@@ -626,8 +672,9 @@ def main():
     )
 
     # Mode selection
-    parser.add_argument("--direct", action="store_true",
-                        help="Use NVR web API + ffmpeg RTSP directly (no tvt-api Docker container)")
+    parser.add_argument(
+        "--direct", action="store_true", help="Use NVR web API + ffmpeg RTSP directly (no tvt-api Docker container)"
+    )
 
     # Target selection
     target = parser.add_mutually_exclusive_group(required=True)
@@ -636,36 +683,53 @@ def main():
 
     # Channel selection
     ch_group = parser.add_mutually_exclusive_group()
-    ch_group.add_argument("--channel", "-c", type=int, default=0,
-                          help="Channel number (default: 0; for IPC cameras, 0 is the camera itself)")
-    ch_group.add_argument("--all-channels", action="store_true",
-                          help="Capture all channels on the device")
+    ch_group.add_argument(
+        "--channel",
+        "-c",
+        type=int,
+        default=0,
+        help="Channel number (default: 0; for IPC cameras, 0 is the camera itself)",
+    )
+    ch_group.add_argument("--all-channels", action="store_true", help="Capture all channels on the device")
 
     # RTSP URL mode (SDK only)
-    parser.add_argument("--rtsp-url", action="store_true",
-                        help="Retrieve RTSP URL instead of capturing a snapshot (SDK mode only)")
-    parser.add_argument("--stream-type", type=int, default=0, choices=[0, 1, 2, 3],
-                        help="Stream type: 0=main, 1=sub, 2=third, 3=fourth (default: 0)")
+    parser.add_argument(
+        "--rtsp-url", action="store_true", help="Retrieve RTSP URL instead of capturing a snapshot (SDK mode only)"
+    )
+    parser.add_argument(
+        "--stream-type",
+        type=int,
+        default=0,
+        choices=[0, 1, 2, 3],
+        help="Stream type: 0=main, 1=sub, 2=third, 3=fourth (default: 0)",
+    )
 
     # Output
-    parser.add_argument("-o", "--output",
-                        help="Output file (.jpg) or directory (with --all-channels or --from-json)")
+    parser.add_argument("-o", "--output", help="Output file (.jpg) or directory (with --all-channels or --from-json)")
 
     # Connection
-    parser.add_argument("--port", type=int, default=DEFAULT_PORT,
-                        help=f"Device protocol port (default: {DEFAULT_PORT}; cameras=9008, NVRs=6036)")
-    parser.add_argument("--web-port", type=int, default=80,
-                        help="NVR web interface port for --direct mode (default: 80)")
-    parser.add_argument("--username", "-u", default=DEFAULT_USERNAME,
-                        help=f"Device username (default: {DEFAULT_USERNAME})")
-    parser.add_argument("--password", "-p", default=DEFAULT_PASSWORD,
-                        help="Device password")
-    parser.add_argument("--api-url", default=DEFAULT_API_URL,
-                        help=f"tvt-api URL for SDK mode (default: {DEFAULT_API_URL})")
-    parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT,
-                        help=f"Request timeout seconds (default: {DEFAULT_TIMEOUT})")
-    parser.add_argument("--max-channels", type=int, default=64,
-                        help="Max channels when scanning in SDK mode (default: 64)")
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=DEFAULT_PORT,
+        help=f"Device protocol port (default: {DEFAULT_PORT}; cameras=9008, NVRs=6036)",
+    )
+    parser.add_argument(
+        "--web-port", type=int, default=80, help="NVR web interface port for --direct mode (default: 80)"
+    )
+    parser.add_argument(
+        "--username", "-u", default=DEFAULT_USERNAME, help=f"Device username (default: {DEFAULT_USERNAME})"
+    )
+    parser.add_argument("--password", "-p", default=DEFAULT_PASSWORD, help="Device password")
+    parser.add_argument(
+        "--api-url", default=DEFAULT_API_URL, help=f"tvt-api URL for SDK mode (default: {DEFAULT_API_URL})"
+    )
+    parser.add_argument(
+        "--timeout", type=int, default=DEFAULT_TIMEOUT, help=f"Request timeout seconds (default: {DEFAULT_TIMEOUT})"
+    )
+    parser.add_argument(
+        "--max-channels", type=int, default=64, help="Max channels when scanning in SDK mode (default: 64)"
+    )
 
     args = parser.parse_args()
 
@@ -685,9 +749,12 @@ def main():
             if args.all_channels:
                 print(f"[direct] Capturing all channels from {args.ip} → {args.output}/")
                 results = direct_snapshot_all(
-                    args.ip, args.output,
-                    username=args.username, password=args.password,
-                    web_port=args.web_port, stream_type=stream_name,
+                    args.ip,
+                    args.output,
+                    username=args.username,
+                    password=args.password,
+                    web_port=args.web_port,
+                    stream_type=stream_name,
                     timeout=args.timeout,
                 )
                 ok = sum(1 for r in results if r["success"])
@@ -700,9 +767,13 @@ def main():
                 output_file = args.output
                 print(f"[direct] Capturing {args.ip} ch{ch} → {output_file}")
                 ok = direct_snapshot_channel(
-                    args.ip, ch, output_file,
-                    username=args.username, password=args.password,
-                    web_port=args.web_port, stream_type=stream_name,
+                    args.ip,
+                    ch,
+                    output_file,
+                    username=args.username,
+                    password=args.password,
+                    web_port=args.web_port,
+                    stream_type=stream_name,
                     timeout=args.timeout,
                 )
                 if ok:
@@ -715,11 +786,14 @@ def main():
         elif args.from_json:
             print(f"[direct] Capturing from {args.from_json} → {args.output}/")
             summary = direct_snapshot_from_json(
-                args.from_json, args.output,
+                args.from_json,
+                args.output,
                 channel=args.channel if not args.all_channels else None,
                 all_channels=args.all_channels,
-                username=args.username, password=args.password,
-                web_port=args.web_port, stream_type=stream_name,
+                username=args.username,
+                password=args.password,
+                web_port=args.web_port,
+                stream_type=stream_name,
                 timeout=args.timeout,
             )
             print(f"\nDone: {summary['success']}/{summary['total']} snapshots captured, {summary['failed']} failed")
@@ -733,10 +807,14 @@ def main():
             sname = STREAM_TYPE_NAMES.get(args.stream_type, str(args.stream_type))
             print(f"Getting RTSP URL for {args.ip} ch{args.channel} ({sname})...")
             url = get_rtsp_url(
-                args.ip, args.channel,
-                stream_type=args.stream_type, port=args.port,
-                username=args.username, password=args.password,
-                api_url=args.api_url, timeout=args.timeout,
+                args.ip,
+                args.channel,
+                stream_type=args.stream_type,
+                port=args.port,
+                username=args.username,
+                password=args.password,
+                api_url=args.api_url,
+                timeout=args.timeout,
             )
             if url:
                 print(url)
@@ -747,10 +825,14 @@ def main():
             output_dir = args.output
             print(f"Capturing all channels from {args.ip} → {output_dir}/")
             results = snapshot_all_channels(
-                args.ip, output_dir,
-                max_channels=args.max_channels, port=args.port,
-                username=args.username, password=args.password,
-                api_url=args.api_url, timeout=args.timeout,
+                args.ip,
+                output_dir,
+                max_channels=args.max_channels,
+                port=args.port,
+                username=args.username,
+                password=args.password,
+                api_url=args.api_url,
+                timeout=args.timeout,
             )
             ok = sum(1 for r in results if r["success"])
             total = len(results)
@@ -759,9 +841,14 @@ def main():
             output_file = args.output
             print(f"Capturing {args.ip} ch{args.channel} → {output_file}")
             ok = save_snapshot(
-                args.ip, args.channel, output_file,
-                port=args.port, username=args.username, password=args.password,
-                api_url=args.api_url, timeout=args.timeout,
+                args.ip,
+                args.channel,
+                output_file,
+                port=args.port,
+                username=args.username,
+                password=args.password,
+                api_url=args.api_url,
+                timeout=args.timeout,
             )
             if ok:
                 size = os.path.getsize(output_file)
@@ -779,8 +866,10 @@ def main():
             output_dir=output_dir,
             all_channels=args.all_channels,
             max_channels=args.max_channels,
-            username=args.username, password=args.password,
-            api_url=args.api_url, timeout=args.timeout,
+            username=args.username,
+            password=args.password,
+            api_url=args.api_url,
+            timeout=args.timeout,
         )
         print(f"\nDone: {summary['success']}/{summary['total']} snapshots captured, {summary['failed']} failed")
         if summary["failed"] > 0:

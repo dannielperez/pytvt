@@ -1,6 +1,17 @@
 #!/usr/bin/env python3
-"""Parse a pcap file to extract TVT init and login packets for the same connection.
-Designed to run inside the Docker container after capture_sdk.sh."""
+"""
+RESEARCH / REFERENCE ONLY — not part of the pytvt runtime.
+
+Parse a pcap file to extract TVT init and login packets for the same connection.
+Designed to run inside the Docker container after capture_sdk.sh.
+
+This script was used during protocol reverse engineering to understand the TVT
+binary protocol handshake (init nonce exchange, login packet structure, password
+encryption scheme). The findings from this analysis are implemented in
+src/pytvt/protocol.py as production code.
+
+See research/README.md for context.
+"""
 import struct
 import sys
 

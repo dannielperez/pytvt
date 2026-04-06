@@ -1,3 +1,14 @@
+// ┌──────────────────────────────────────────────────────────────┐
+// │  RESEARCH / REFERENCE ONLY — not part of the pytvt runtime  │
+// └──────────────────────────────────────────────────────────────┘
+//
+// Test PUB_SHA1Encrypt from the TVT SDK directly to compare its output
+// against the Python SHA1 implementation. Used during protocol reverse
+// engineering to validate that the head-variant encryption in
+// src/pytvt/protocol.py matches the native SDK behavior.
+//
+// See research/README.md for context.
+
 // Test PUB_SHA1Encrypt from the TVT SDK directly
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';

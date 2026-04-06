@@ -24,7 +24,8 @@ from datetime import datetime
 
 # Add parent for imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from tvt_nvr_api import NvrClient, NvrApiError
+from pytvt.nvr_api import NvrClient
+from pytvt.models import NvrApiError
 
 INVENTORY_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "data", "results", "ruijie", "nvr_devices.json")
 REPORT_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "data", "results", "tvt")

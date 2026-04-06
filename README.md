@@ -1,343 +1,309 @@
 # pytvt
 
-A Python toolset for bulk-scanning [TVT](https://en.tvt.net.cn/) (Shenzhen TVT Digital Technology Co., Ltd) NVRs and enumerating every programmed IP camera. Supports two independent backends — a pure-Python binary protocol client and a native SDK bridge via HTTP API — that can be used alone or together.
+Bulk-scan TVT NVRs and enumerate every connected IP camera — pure Python, no vendor tools required.
 
-Built on the reverse-engineering work from [2BAD/tvt](https://github.com/2BAD/tvt) (TypeScript) and extended with a native Python protocol client.
+## What is pytvt?
+
+`pytvt` is a Python toolkit for managing [TVT](https://en.tvt.net.cn/) (Shenzhen TVT Digital Technology) NVR and IPC devices at scale. It connects to NVRs, authenticates via the proprietary binary protocol, and retrieves full camera channel inventories — names, IPs, ports, models, online status — across dozens of sites in parallel.
+
+It also supports LAN auto-discovery via SSDP multicast and remote subnet sweeps, so you can find devices without an inventory file.
+
+## Architecture
+
+```
+                       ┌───────────────────────────────────────────┐
+                       │              pytvt (Python)               │
+                       │                                           │
+  Inventory JSON ─────▶│  CLI / Library API                        │
+  or --discover        │    │                                      │
+                       │    ├─ protocol (default)                  │
+                       │    │    Pure Python TCP client ──────────▶│── NVR :6036
+                       │    │                                      │
+                       │    ├─ sdk (compat mode)                   │
+                       │    │    HTTP POST ──▶ tvt-api (Docker) ──▶│── NVR :6036
+                       │    │                                      │
+                       │    └─ sdk-local (direct mode)             │
+                       │         Node subprocess ─▶ libdvrnetsdk ─▶│── NVR :6036
+                       │                                           │
+                       │  Output: console / CSV / JSON / XLSX      │
+                       └───────────────────────────────────────────┘
+```
+
+The scanner supports three backends (integration modes), each suited to different deployment scenarios. You can also combine `protocol` with `sdk` fallback using `--backend both`.
+
+## Why use it?
+
+- **No vendor software required** — the default `protocol` backend is pure Python with zero native dependencies
+- **Bulk operations** — scan dozens of NVRs in parallel, export per-site XLSX workbooks
+- **Multiple backends** — choose the integration mode that fits your environment
+- **Auto-discovery** — find TVT devices via SSDP multicast or remote subnet sweep
+- **Typed data models** — clean `dataclass`-based API for programmatic use
+- **CLI + library** — use from the command line or import as a Python package
 
 ## Features
 
-- **Pure-Python protocol client** — speaks the TVT binary protocol directly over TCP (port 6036), supporting both standard (XOR) and head-variant (SHA1) login encryption, plus HTTP-tunnelled API calls
-- **Native SDK via HTTP API** — optional [tvt-api](https://github.com/dannielperez/tvt-api) backend that wraps the vendor's `libdvrnetsdk.so` in a Fastify HTTP service (Docker, linux/amd64)
-- **Native SDK local** — alternative `sdk-local` backend that runs the SDK bridge (`scan_nvr.mjs`) as a subprocess (requires Node.js + the SDK natively on Linux x86-64)
-- **LAN auto-discovery** — finds TVT devices on the local network via SSDP multicast (no inventory file needed)
-- **Remote subnet sweep** — discovers TVT devices on routable subnets (e.g. CCTV VLANs) via unicast UDP probes + TCP port fingerprinting
-- **Bulk scanner** — scan dozens of NVRs in parallel and extract every programmed camera channel (name, IP, port, status, model)
-- **Multiple output formats** — console, CSV, JSON, or per-site XLSX workbooks
-- **Flexible backend selection** — `protocol`, `sdk`, `sdk-local`, or `both` (protocol with SDK fallback)
+- Pure-Python TVT binary protocol client (standard XOR and head-variant SHA1 encryption)
+- Native SDK integration via HTTP API (`tvt-api` Docker container) or local subprocess
+- LAN device discovery via SSDP multicast
+- Remote subnet sweep via unicast UDP + TCP port fingerprinting
+- Concurrent bulk scanning with configurable parallelism
+- Scan diffing / change detection between scan runs
+- Output to console, CSV, JSON, or per-site XLSX
+- Failed device tracking with automatic retry support
+- Camera snapshot capture (SDK-based)
+- NVR web CGI client for configuration management
 
-## Related Repositories
+## Backend Comparison
 
-| Repo | Description |
-|---|---|
-| [dannielperez/tvt](https://github.com/dannielperez/tvt) | Fork of 2BAD/tvt TypeScript library — TVT SDK FFI bindings (git submodule) |
-| [dannielperez/tvt-api](https://github.com/dannielperez/tvt-api) | Fastify HTTP API wrapping the TVT SDK — Docker-based, linux/amd64 |
+| Backend | Flag | Requires | Platform | Best for |
+|---|---|---|---|---|
+| **protocol** | `--backend protocol` | Python only | Any | Default — works everywhere, no external deps |
+| **sdk** | `--backend sdk` | Docker + [tvt-api](https://github.com/dannielperez/tvt-api) | Any (Docker host) | Development / compatibility mode |
+| **sdk-local** | `--backend sdk-local` | Node.js 18+ + native SDK | Linux x86-64 only | Direct mode — no Docker required |
+| **both** | `--backend both` | Docker + tvt-api | Any | Protocol first, SDK fallback on failure |
 
-## How It Works
+### Integration Modes
 
-### Backends
+**Compatibility mode** (`sdk` backend) — uses the [tvt-api](https://github.com/dannielperez/tvt-api) Fastify server, which wraps the native TVT SDK in a Docker container. This is the current development-friendly path and is fully working.
 
-#### 1. Python Protocol Client (`--backend protocol`, default)
+**Direct mode** (`sdk-local` backend) — runs the SDK bridge (`bridges/sdk_local/scan_nvr.mjs`) as a local Node.js subprocess, calling the native `libdvrnetsdk.so` directly. Requires Linux x86-64 and the SDK library on the host. This is the future production direction for environments where Docker is not available.
 
-Connects directly to TVT devices over TCP using the proprietary binary protocol:
+**Protocol mode** (default) — pure Python, no external dependencies. Works on any platform with TCP access to the NVR management port. Does not require the SDK at all.
 
-1. **Handshake** — receives encryption parameters (nonce, protocol version, encryption type)
-2. **Login** — authenticates with encrypted credentials (standard XOR or head-variant SHA1, auto-detected)
-3. **Query** — retrieves device info and camera list via HTTP-tunnelled requests
-4. **Logout** — cleanly disconnects
+Both integration paths are intentionally supported for compatibility.
 
-No external dependencies beyond Python. Works on any platform with TCP access to the NVR.
-
-#### 2. SDK via HTTP API (`--backend sdk`)
-
-Sends scan requests to the [tvt-api](https://github.com/dannielperez/tvt-api) Fastify server, which wraps the native TVT SDK (`libdvrnetsdk.so`). The API runs in Docker (linux/amd64):
-
-```
-main.py ──POST /scan──▶ tvt-api (Docker) ──FFI──▶ libdvrnetsdk.so ──▶ NVR
-```
-
-Start the API first:
+## Quick Start
 
 ```bash
-# From the tvt-api repo:
-docker build -t tvt-api .
-docker run --rm -p 3000:3000 tvt-api
+# Install
+pip install -e .
+
+# Scan NVRs from an inventory file
+pytvt devices.json -u admin -p password
+
+# Discover devices on the local LAN
+pytvt-discover
+
+# Discover and scan in one command
+pytvt --discover -u admin -p password --xlsx files/
 ```
-
-Then scan:
-
-```bash
-python3 main.py devices.json --backend sdk --api-url http://localhost:3000
-```
-
-#### 3. SDK Local Subprocess (`--backend sdk-local`)
-
-Runs `scan_nvr.mjs` via Node.js subprocess. Requires the native SDK library on the host (Linux x86-64 only):
-
-```bash
-python3 main.py devices.json --backend sdk-local
-```
-
-#### 4. Combined (`--backend both`)
-
-Tries the Python protocol first; on failure, falls back to the SDK HTTP API:
-
-```bash
-python3 main.py devices.json --backend both --api-url http://localhost:3000
-```
-
-### LAN Auto-Discovery (`tvt_discovery.py`)
-
-Discovers TVT NVRs, IPCs, DVRs and other devices on the local network without needing an inventory file. Uses the same SSDP/UPnP multicast protocol as TVT's official IPTool application:
-
-1. Sends an `M-SEARCH` probe to multicast group `239.255.255.250:1900`
-2. TVT devices respond with an XML body (`<multicastSearchResult>`) containing IP, MAC, model, firmware, ports, etc.
-3. Responses are parsed and de-duplicated by MAC address
-
-The discovery protocol was reverse-engineered from the IPTool.app macOS binary and confirmed against the official `DVR_NET_SDK.h` header (`SEARCHED_DEVICE_INFO` struct, `IPTool_SearchDataCallBack` callback).
-
-```
-tvt_discovery.py ──M-SEARCH──▶ 239.255.255.250:1900
-                                    │
-                              TVT devices respond
-                              with XML device info
-                                    │
-                                    ▼
-                        parsed device list (table / JSON)
-```
-
-#### Remote Subnet Sweep
-
-SSDP multicast is limited to the local broadcast domain — routers don't forward it. For remote routable subnets (e.g. a 10.200.50.0/24 CCTV VLAN), the discovery tool switches to a two-phase unicast approach:
-
-1. **UDP unicast** — sends the same M-SEARCH probe directly to each host's port 1900 using a ThreadPoolExecutor (default 50 parallel probes)
-2. **TCP fallback** — hosts that don't reply to UDP get a TCP connection attempt on port 9008 (the TVT data port); if the device sends an init handshake packet (`head` or `1111` magic bytes), it's flagged as a TVT device
-
-```
-tvt_discovery.py --subnet 10.200.50.0/24
-    │
-    ├──UDP M-SEARCH──▶ 10.200.50.1:1900
-    ├──UDP M-SEARCH──▶ 10.200.50.2:1900
-    ├──  ...254 hosts in parallel...     ──▶ XML response? → full device info
-    │
-    └──TCP fallback on non-responders:
-        ├──TCP :9008──▶ 10.200.50.3  ──▶ TVT handshake? → minimal device entry
-        └──TCP :9008──▶ 10.200.50.5  ──▶ connection refused → skip
-```
-
-### Orchestrator (`main.py`)
-
-```
-nvr_devices.json ──▶ main.py ──▶ backend (protocol / sdk / sdk-local / both)
-                                        │
-                                        ▼
-                                  console / CSV / JSON / XLSX
-```
-
-1. Reads a JSON inventory of devices
-2. Filters to TVT devices (by manufacturer field or MAC OUI prefix `58:5B:69`)
-3. De-duplicates by IP
-4. Scans each NVR in parallel using the chosen backend
-5. Outputs results to console, CSV, JSON, or per-site XLSX
-
-## Requirements
-
-### Protocol-only (default)
-
-- **Python 3.10+**
-- `pip install -r requirements.txt`
-- Network access to NVR management port (default: `6036`)
-
-### SDK via HTTP API (`--backend sdk`)
-
-Everything above, plus:
-
-- **Docker** (for running [tvt-api](https://github.com/dannielperez/tvt-api))
-- Network access from the tvt-api container to NVR port `6036`
-
-### SDK Local (`--backend sdk-local`)
-
-Everything above, plus:
-
-- **Node.js 18+**
-- **Linux x86-64** (the native SDK library is x86-64 only)
-- `npm install` (installs koffi FFI bindings)
 
 ## Installation
 
-### Protocol-only (simplest)
+### Protocol-only (default, recommended)
 
 ```bash
 git clone https://github.com/dannielperez/pytvt.git
 cd pytvt
-pip install -r requirements.txt
+pip install -e .
 ```
 
-### With SDK HTTP API support
+Requires Python 3.10+ and network access to NVR port 6036. No native dependencies.
+
+### With SDK compatibility mode (Docker)
 
 ```bash
-git clone https://github.com/dannielperez/pytvt.git
-cd pytvt
-pip install -r requirements.txt
+pip install -e .
 
-# In a separate directory, set up the API:
+# Set up tvt-api separately:
 git clone --recurse-submodules https://github.com/dannielperez/tvt-api.git
-cd tvt-api
-docker build -t tvt-api .
-docker run --rm -p 3000:3000 tvt-api
+cd tvt-api && docker build -t tvt-api . && docker run --rm -p 3000:3000 tvt-api
 ```
 
-### With SDK Local support (Linux x86-64 only)
+### With SDK direct mode (Linux x86-64)
 
 ```bash
 git clone --recurse-submodules https://github.com/dannielperez/pytvt.git
 cd pytvt
-pip install -r requirements.txt
-npm install
+pip install -e .
+cd bridges/sdk_local && npm install && cd ../..
 ```
 
-If you cloned without `--recurse-submodules`:
-
-```bash
-git submodule update --init --recursive
-npm install
-```
-
-## Configuration
-
-### Credentials
-
-Copy the example environment file and fill in your NVR credentials:
-
-```bash
-cp .env.example .env
-```
-
-`.env`:
-
-```
-TVT_USERNAME=admin
-TVT_PASSWORD=your_password_here
-```
-
-Credentials are resolved in this order (first wins):
-
-1. CLI flags (`-u`, `-p`)
-2. Environment variables (`TVT_USERNAME`, `TVT_PASSWORD`)
-3. `config.json` fields (`username`, `password`)
-
-### Settings
-
-Edit `config.json` for non-sensitive settings:
-
-```json
-{
-    "port": 6036,
-    "timeout": 10,
-    "max_channels": 64,
-    "concurrency": 4
-}
-```
-
-| Field | Description | Default |
-|---|---|---|
-| `port` | TVT protocol port | `6036` |
-| `timeout` | Connection timeout (seconds) | `10` |
-| `max_channels` | Max camera channels to query per NVR | `64` |
-| `concurrency` | Number of NVRs to scan in parallel | `4` |
+Requires Node.js 18+ and the native SDK shared library.
 
 ## Usage
 
-### Bulk Scanner
+### Compatibility Mode (tvt-api / Docker)
 
 ```bash
-# Scan all TVT NVRs from an inventory file (protocol backend)
-python3 main.py nvr_devices.json
+# Start tvt-api (in another terminal)
+docker run --rm -p 3000:3000 tvt-api
 
-# Use the SDK HTTP API backend
-python3 main.py nvr_devices.json --backend sdk --api-url http://localhost:3000
+# Scan via SDK HTTP API
+pytvt devices.json --backend sdk --api-url http://localhost:3000
 
-# Use both backends (protocol first, SDK fallback)
-python3 main.py nvr_devices.json --backend both --api-url http://localhost:3000
-
-# Export to CSV
-python3 main.py nvr_devices.json -o cameras.csv
-
-# Export to JSON
-python3 main.py nvr_devices.json -o cameras.json
-
-# Export one XLSX per site into files/
-python3 main.py nvr_devices.json --xlsx files/
-
-# Filter by site name
-python3 main.py nvr_devices.json --site "Site A"
-
-# Override credentials
-python3 main.py nvr_devices.json -u admin -p mypassword
-
-# Limit concurrency
-python3 main.py nvr_devices.json -c 2
+# Protocol first, SDK fallback
+pytvt devices.json --backend both --api-url http://localhost:3000
 ```
 
-### CLI Options
+### Direct Mode (sdk-local)
+
+```bash
+pytvt devices.json --backend sdk-local
+```
+
+### Protocol Mode (default)
+
+```bash
+# Scan with default protocol backend
+pytvt devices.json
+
+# Override credentials
+pytvt devices.json -u admin -p mypassword
+
+# Export to CSV
+pytvt devices.json -o cameras.csv
+
+# Export to JSON
+pytvt devices.json -o cameras.json
+
+# One XLSX per site
+pytvt devices.json --xlsx files/
+
+# Filter by site name
+pytvt devices.json --site "Downtown"
+
+# Limit concurrency
+pytvt devices.json -c 2
+
+# Also works as a module
+python -m pytvt devices.json
+```
+
+### Discovery
+
+```bash
+# LAN multicast discovery
+pytvt-discover
+
+# Custom timeout
+pytvt-discover --timeout 8 --retries 3
+
+# JSON output
+pytvt-discover --json
+
+# Save as scanner-compatible inventory
+pytvt-discover --scanner-json discovered.json --site "Office"
+
+# Remote subnet sweep
+pytvt-discover --subnet 10.200.50.0/24
+
+# Multiple subnets
+pytvt-discover --subnet 10.200.50.0/24 --subnet 10.200.51.0/24
+
+# Discover + scan in one command
+pytvt --discover --xlsx files/
+pytvt --subnet 10.200.50.0/24 -o results.json
+```
+
+### Scan Diffing
+
+Compare two scan result files to detect changes between runs:
+
+```bash
+# Human-readable diff report
+pytvt-diff old_scan.json new_scan.json
+
+# Machine-readable JSON output
+pytvt-diff --json old_scan.json new_scan.json
+
+# One-line summary
+pytvt-diff --summary old_scan.json new_scan.json
+```
+
+The diff detects:
+- **Devices added/removed** — NVRs appearing or disappearing between scans
+- **Device metadata changes** — firmware upgrades, model changes, scan failures
+- **Camera channel changes** — cameras added/removed/renamed, status changes (Online ↔ Offline), IP address changes
+- **Failure drift** — devices that started or stopped failing
+
+Devices are matched by `nvr_ip`. Cameras within a device are matched by `channel` index. Only cameras with IP addresses are compared.
+
+**Console output example:**
+
+```
+================================================================================
+  SCAN DIFF REPORT
+================================================================================
+  Old: monday.json
+  New: friday.json
+  Devices: 3 → 3
+  Changes: 1 changed, 2 unchanged
+================================================================================
+
+  ~~ CHANGED DEVICES (1)
+  ----------------------------------------------------------------------------
+  ~ 10.10.10.100 / NVR-01 @ Site A
+      firmware: '5.1.0' → '5.2.3'
+      cameras: 29 → 30
+      + ch 29: New Entrance Cam
+      ~ ch 5 (Lobby): status: 'Offline' → 'Online'
+```
+
+**Library usage:**
+
+```python
+from pytvt import diff_scans, load_scan_file
+
+old = load_scan_file("monday.json")
+new = load_scan_file("friday.json")
+diff = diff_scans(old, new)
+
+for device in diff.devices_changed:
+    print(f"{device.nvr_ip}: {len(device.field_changes)} field changes")
+```
+
+### CLI Reference
 
 | Flag | Description |
 |---|---|
 | `input` | Path to NVR devices JSON file (optional with `--discover`) |
 | `--config` | Path to config.json (default: `./config.json`) |
-| `-o`, `--output` | Output file (`.csv` or `.json`) |
+| `-o`, `--output` | Output file path (`.csv` or `.json`) |
 | `-s`, `--site` | Filter by site name (partial match) |
 | `-u`, `--username` | Override NVR username |
 | `-p`, `--password` | Override NVR password |
-| `-c`, `--concurrency` | Max parallel scans |
+| `-c`, `--concurrency` | Max parallel scans (default: from config) |
 | `--backend` | `protocol` (default), `sdk`, `sdk-local`, or `both` |
-| `--api-url` | tvt-api URL for `sdk`/`both` backends (default: `http://localhost:3000`) |
-| `--xlsx DIR` | Export one `.xlsx` file per site into `DIR` |
-| `--failed FILE` | Save devices that failed to scan to a JSON file for retry |
-| `--discover` | Run LAN discovery first, merge found devices with input file, then scan |
-| `--discover-only` | Only discover devices on the LAN (no scanning) |
-| `--discover-timeout` | Seconds to wait for discovery responses per probe (default: `5`) |
-| `--subnet CIDR` | Sweep a remote subnet for TVT devices (repeatable) |
-| `--discover-concurrency` | Max parallel probes for subnet sweep (default: `50`) |
-| `--no-tcp-fallback` | Skip TCP port-probe fallback during subnet sweep |
+| `--api-url` | tvt-api URL for `sdk`/`both` (default: `http://localhost:3000`) |
+| `--xlsx DIR` | Export one XLSX per site into DIR |
+| `--failed FILE` | Save failed devices to JSON for retry |
+| `--discover` | Run LAN discovery before scanning |
+| `--discover-only` | Discover only, no scanning |
+| `--discover-timeout` | Seconds per discovery probe (default: 5) |
+| `--subnet CIDR` | Sweep a remote subnet (repeatable) |
+| `--discover-concurrency` | Max parallel probes for subnet sweep (default: 50) |
+| `--no-tcp-fallback` | Skip TCP port-probe fallback during sweep |
 
-### LAN Discovery
+### Output Examples
 
-```bash
-# Discover all TVT devices on the local network
-python3 tvt_discovery.py
+**Console:**
 
-# Custom timeout and retries
-python3 tvt_discovery.py --timeout 8 --retries 3
+```
+================================================================================
+  Site: Demo Site
+  NVR:  NVR-01 (10.10.10.100)
+================================================================================
+  Device: NVR32 | Model: TD-3332B4
+  Firmware: 5.2.3.19033B241010
+  S/N: ABC123456789
+  Total Channels: 29
+  ----------------------------------------------------------------------------
+  Ch   Camera Name                  Address            Port   Status   Model
+  --   ---------------------------  -----------------  ----   ------   -----
+  1    Lobby                        192.168.1.100      9008   Online   IP-5IRD4S4C4-28
+  2    Parking                      192.168.1.101      9008   Online   IP-5IRD4S4C4-28
 
-# Output as JSON
-python3 tvt_discovery.py --json
-
-# Save discovered NVRs in scanner-compatible JSON format
-python3 tvt_discovery.py --scanner-json discovered_nvrs.json --site "Office"
-
-# Sweep a remote CCTV subnet for TVT devices
-python3 tvt_discovery.py --subnet 10.200.50.0/24
-
-# Sweep multiple subnets
-python3 tvt_discovery.py --subnet 10.200.50.0/24 --subnet 10.200.51.0/24
-
-# Sweep with faster timeout (1s per host) and more parallelism
-python3 tvt_discovery.py --subnet 10.200.50.0/24 --timeout 1 --concurrency 100
-
-# Sweep without TCP fallback (UDP only)
-python3 tvt_discovery.py --subnet 10.200.50.0/24 --no-tcp-fallback
-
-# Discover and scan in one command (via main.py)
-python3 main.py --discover-only
-python3 main.py --discover --backend protocol --xlsx files/
-python3 main.py devices.json --discover --xlsx files/  # merge with existing inventory
-
-# Sweep a subnet and scan all found NVRs
-python3 main.py --subnet 10.200.50.0/24 --xlsx files/
-python3 main.py --subnet 10.200.50.0/24 --subnet 10.200.51.0/24 -o results.json
-python3 main.py devices.json --subnet 10.200.50.0/24 --discover --xlsx files/  # merge all
+================================================================================
+  SUMMARY: 2/2 NVRs scanned successfully, 58 total cameras found
+================================================================================
 ```
 
-### Python Protocol Client (standalone)
-
-```bash
-# Scan a single NVR directly
-python3 tvt_protocol.py 192.168.1.100
-```
+**XLSX per-site:** One `.xlsx` file per site with NVR Config (cameras) and NVR Info (device summary) tabs. Existing tabs in the file are preserved.
 
 ### Input Format
 
-A JSON array of device objects. At minimum each entry needs `ip`; the scanner filters by manufacturer or MAC:
+JSON array of device objects. At minimum each needs `ip`:
 
 ```json
 [
@@ -351,142 +317,181 @@ A JSON array of device objects. At minimum each entry needs `ip`; the scanner fi
 ]
 ```
 
-### Sample Output
+## Configuration
 
-**Console:**
-
-```
-================================================================================
-  Site: Demo Site
-  NVR:  NVR (10.10.10.100)
-================================================================================
-  Device: NVR32 | Model: TD-3332B4
-  Firmware: 5.2.3.19033B241010
-  S/N: ABC123456789
-  Total Channels: 29
-  ----------------------------------------------------------------------------
-  Ch   Camera Name                  Address            Port   Status   Model
-  --   ---------------------------  -----------------  ----   ------   -----
-  1    Camera1                      192.168.1.100      9008   Online   IP-5IRD4S4C4-28
-  2    Camera2                      192.168.1.102      9008   Online   IP-5IRD4S4C4-28
-  3    Camera3                      192.168.1.103      9008   Online   IP-5IRD4S4C4-28
-  ...
-
-================================================================================
-  SUMMARY: 2/2 NVRs scanned successfully, 58 total cameras found
-================================================================================
-```
-
-### XLSX Per-Site Export
-
-When using `--xlsx`, the scanner creates one `.xlsx` file per site. Each file contains two tabs:
-
-**NVR Config** — all cameras from every NVR at that site:
-
-| Camera Name | Address | Port | Status | Protocol | Model |
-|---|---|---|---|---|---|
-| Lobby | 192.168.1.100 | 9008 | Online | IP CAM | IP-5IRD4S4C4-28 |
-| Parking | 192.168.1.101 | 80 | Online | HIKVISION | ECI-D12F2 |
-
-**NVR Info** — summary of each NVR at that site:
-
-| NVR Name | IP | Model | Serial Number | Firmware | Cameras |
-|---|---|---|---|---|---|
-| NVR32 | 10.10.10.100 | TD-3332B4 | ABC123 | 5.2.3.190 | 29 |
-
-If the `.xlsx` file already exists, only the NVR Config and NVR Info tabs are replaced — other tabs are preserved.
+### Credentials
 
 ```bash
-python3 main.py nvr_devices.json --xlsx files/
+cp .env.example .env
+# Edit .env with your NVR credentials
 ```
 
-### Retry Failed Devices
+Precedence (first wins):
 
-Any device that fails to scan is automatically saved to `files/failed_devices.json`. Re-run against just those devices:
+1. CLI flags (`-u`, `-p`)
+2. Environment variables (`TVT_USERNAME`, `TVT_PASSWORD`)
+3. `config.json` fields
+4. Built-in defaults
 
-```bash
-# First scan
-python3 main.py nvr_devices.json --xlsx files/
+### Settings (`config.json`)
 
-# Retry only the failures
-python3 main.py files/failed_devices.json --xlsx files/
-
-# Custom path for failed list
-python3 main.py nvr_devices.json --xlsx files/ --failed retry_later.json
+```json
+{
+    "port": 6036,
+    "timeout": 10,
+    "max_channels": 64,
+    "concurrency": 4
+}
 ```
+
+| Field | Default | Description |
+|---|---|---|
+| `port` | 6036 | TVT protocol port |
+| `timeout` | 10 | Connection timeout (seconds) |
+| `max_channels` | 64 | Max camera channels per NVR |
+| `concurrency` | 4 | Parallel NVR scans |
+
+Environment variables override config file values: `TVT_PORT`, `TVT_TIMEOUT`, `TVT_MAX_CHANNELS`, `TVT_CONCURRENCY`.
 
 ## Project Structure
 
 ```
 pytvt/
-├── main.py               # Python orchestrator — CLI, concurrency, output
-├── tvt_protocol.py       # Pure Python TVT binary protocol client
-├── tvt_discovery.py      # LAN auto-discovery + remote subnet sweep
-├── scan_nvr.mjs          # Node.js SDK bridge — subprocess for sdk-local backend
-├── config.json           # Non-sensitive settings (port, timeout, etc.)
-├── .env.example          # Template for credentials
-├── requirements.txt      # Python dependencies
-├── package.json          # Node.js dependencies (koffi) — sdk-local only
-├── tools/                # Reverse-engineering and debug utilities
-│   ├── verify_pw.py      # Live NVR nonce capture + password encryption verifier
-│   ├── verify_capture.py # Pcap-based login packet encryption verifier
-│   ├── parse_pcap.py     # Full TVT protocol pcap parser (SLL, SLL2, Ethernet)
-│   ├── capture_sdk.sh    # Docker tcpdump capture script for SDK traffic
-│   ├── sdk_login.cjs     # SDK login helper for traffic capture
-│   └── test_sha1.mjs     # Direct PUB_SHA1Encrypt SDK function tester
-└── tvt/                  # Git submodule — github.com/dannielperez/tvt
-    ├── bin/linux/        # Native shared library (libdvrnetsdk.so)
-    ├── source/           # TypeScript SDK source (reference implementation)
-    ├── proto/            # Wireshark protocol dissectors
-    └── docs/             # SDK documentation
+├── src/pytvt/                 # Installable Python package (supported runtime)
+│   ├── __init__.py            # Public API + version
+│   ├── __main__.py            # python -m pytvt support
+│   ├── cli.py                 # CLI entry points (pytvt, pytvt-discover, etc.)
+│   ├── config.py              # Configuration loading + precedence
+│   ├── constants.py           # Enums, ExecutionPlan, backend resolution
+│   ├── exceptions.py          # Base exception hierarchy
+│   ├── models.py              # Dataclasses: ScannerConfig, DeviceEntry, CameraInfo, ScanResult
+│   ├── registry.py            # Backend/integration mode dispatch table
+│   ├── scanner.py             # Backend dispatch + scan orchestration
+│   ├── protocol.py            # Pure Python TVT binary protocol client
+│   ├── discovery.py           # SSDP multicast + subnet sweep discovery
+│   ├── diff.py                # Scan diffing / change detection
+│   ├── sdk_http.py            # SDK HTTP API backend (compat mode → tvt-api)
+│   ├── sdk_local.py           # SDK local subprocess backend (direct mode)
+│   ├── output.py              # CSV / JSON / XLSX formatters
+│   ├── nvr_api.py             # NVR web CGI client
+│   └── snapshot.py            # Camera snapshot capture
+├── bridges/
+│   └── sdk_local/             # Node.js SDK bridge (direct mode)
+│       ├── scan_nvr.mjs       # SDK FFI subprocess script
+│       └── package.json       # koffi dependency
+├── tvt-api/                   # Git submodule → tvt-api (compatibility runtime)
+├── tests/                     # pytest test suite
+│   ├── conftest.py            # Shared fixtures + sample data
+│   ├── test_protocol.py       # Protocol packet/encryption tests
+│   ├── test_architecture.py   # Enum, registry, execution plan, import boundary tests
+│   ├── test_config.py         # Config precedence tests
+│   ├── test_models.py         # Model construction + serialization
+│   ├── test_scanner.py        # Backend dispatch + device loading
+│   ├── test_output.py         # Output format tests
+│   ├── test_discovery.py      # XML parsing + discovery
+│   ├── test_diff.py           # Scan diffing + CLI tests
+│   ├── test_cli.py            # CLI parser + helpers
+│   ├── test_sdk_http.py       # SDK HTTP backend (mocked)
+│   └── test_sdk_local.py      # JSON extraction tests
+├── tools/                     # Operational utilities (import from pytvt)
+│   └── enable_nvr_services.py # Batch NVR RTSP + API enablement
+├── research/                  # Reverse-engineering reference (NOT runtime code)
+│   ├── README.md              # Context and usage notes
+│   ├── parse_pcap.py          # Extract TVT init/login packets from pcap
+│   ├── verify_pw.py           # Verify password encryption against live NVR
+│   ├── verify_capture.py      # Verify encryption from captured SDK traffic
+│   ├── capture_sdk.sh         # Capture SDK ↔ NVR traffic via tcpdump
+│   ├── sdk_login.cjs          # Trigger SDK login for traffic capture
+│   └── test_sha1.mjs          # Test SDK PUB_SHA1Encrypt directly
+├── pyproject.toml             # Packaging (hatchling) + tool config
+├── config.json                # Default non-sensitive settings
+├── .env.example               # Credential template
+├── .github/
+│   ├── workflows/ci.yml       # CI: pytest + ruff (Python 3.10–3.13)
+│   ├── PULL_REQUEST_TEMPLATE.md
+│   └── ISSUE_TEMPLATE/
+└── CONTRIBUTING.md
 ```
 
-## Protocol Details
+## Supported vs Experimental Code
 
-The TVT binary protocol runs over TCP and uses the following packet structure:
+pytvt distinguishes between three tiers of code:
 
-| Offset | Size | Field | Description |
-|---|---|---|---|
-| 0 | 4 | Flag | Always `"1111"` |
-| 4 | 4 | Length | Total packet length (little-endian) |
-| 8 | 4 | Command | Command ID |
-| 12 | 4 | CmdId | Sequence ID |
-| 16 | 4 | CmdVer | Protocol version |
-| 20 | 4 | DataLen | Payload length |
-| 24 | … | Data | Command-specific payload |
+### Supported runtime (`src/pytvt/`, `bridges/`)
 
-Login passwords are XOR-encrypted using a 3-byte nonce provided in the initial handshake. Camera information is retrieved via HTTP requests tunnelled through the binary protocol.
+The installed Python package and its Node.js bridge. This is the code that runs when you use `pytvt` from the CLI or as a library. It is tested, linted, and covered by CI. All three backend families (protocol, sdk, sdk-local) and the composite strategy are supported runtime.
 
-### Login Encryption Variants
+### Compatibility runtime (`tvt-api/`)
 
-The protocol version in the init handshake (`protocolVer` at offset 12) determines the login encryption scheme:
+The Fastify REST API that wraps the native TVT SDK in a Docker container. This is the `compat_bridge` integration mode — it works, is tested in practice, and is the current SDK integration path. It lives in its own repository and is included here as a git submodule.
 
-#### Standard Variant (`protocolVer < 11`)
+### Research / reference (`research/`)
 
-Password bytes are XOR-encrypted with a 3-byte nonce from the init packet (offset 45–47). Username is sent in plaintext.
+Standalone scripts from the protocol reverse-engineering process. These scripts were used to discover and validate the TVT binary protocol — nonce exchange, password encryption, login packet structure. The findings are implemented in `src/pytvt/protocol.py`.
 
-#### Head Variant (`protocolVer >= 11`, init flag `"head"`)
+Research code is **not** imported by any runtime module. This boundary is enforced by a test (`test_architecture.py::TestImportBoundary`). The scripts are preserved as runnable documentation of *how* the protocol was reverse engineered.
 
-Uses a stronger two-step password encryption scheme, discovered via SDK binary disassembly:
+## Development
 
-1. `MD5(password)` → hex digest → uppercase
-2. Concatenate with nonce: `SHA1( MD5_UPPER + sprintf("%08d", nonce) )`
+### Setup
 
-The nonce is a 3-byte little-endian integer from the init packet, formatted as a zero-padded 8-digit decimal string. The username is XOR-encrypted using the nonce formatted via `sprintf("%u", nonce)` as a repeating key.
+```bash
+git clone --recurse-submodules https://github.com/dannielperez/pytvt.git
+cd pytvt
+pip install -e ".[dev]"
+```
 
-The login packet uses `connectType=3` with a 236-byte payload, and the NVR returns device info and channel data directly in the login response (no HTTP tunnel needed for camera enumeration).
+### Testing
 
-See `tvt/proto/` for Wireshark dissector scripts that decode the full protocol.
+```bash
+pytest                    # run all tests
+pytest -v                 # verbose
+pytest tests/test_protocol.py  # single module
+```
 
-## Credits
+### Linting
 
-- TVT protocol reverse engineering and TypeScript SDK by [2BAD/tvt](https://github.com/2BAD/tvt)
-- Native SDK integration via [dannielperez/tvt](https://github.com/dannielperez/tvt) (fork)
-- HTTP API wrapper: [dannielperez/tvt-api](https://github.com/dannielperez/tvt-api)
-- FFI bindings powered by [koffi](https://koffi.dev/)
+```bash
+ruff check src/ tests/    # lint
+ruff format src/ tests/   # format
+mypy src/pytvt/           # type check (optional)
+```
+
+### Using as a library
+
+```python
+from pytvt import load_config, load_devices, scan_single_nvr, filter_tvt_devices
+
+config = load_config("config.json")
+devices = filter_tvt_devices(load_devices("devices.json"))
+
+for device in devices:
+    result = scan_single_nvr(device, config, backend="protocol")
+    if result.success:
+        print(f"{result.device_name}: {result.camera_count} cameras")
+```
+
+## Limitations
+
+- **Protocol backend:** Retrieves camera channel metadata only — no video streaming or recording
+- **Head-variant NVRs** (protocolVer ≥ 11): Return basic channel data (name, status) but not IPC IP addresses
+- **SDK backends:** Native SDK (`libdvrnetsdk.so`) is Linux x86-64 only
+- **sdk-local backend:** Requires Node.js and the SDK shared library on the host
+- **Discovery:** SSDP multicast is limited to the local broadcast domain; remote subnets need `--subnet`
+- **No TLS:** The TVT protocol does not support encryption in transit
+- **Credential handling:** Passwords are XOR-encrypted on the wire (standard variant) — treat the NVR management network as trusted
+
+## Related Projects
+
+| Project | Description |
+|---|---|
+| [dannielperez/tvt-api](https://github.com/dannielperez/tvt-api) | Fastify HTTP API wrapping the TVT SDK — Docker-based, linux/amd64 |
+| [dannielperez/tvt](https://github.com/dannielperez/tvt) | Fork of 2BAD/tvt — TypeScript SDK FFI bindings |
+| [2BAD/tvt](https://github.com/2BAD/tvt) | Original TVT protocol reverse engineering (TypeScript) |
+| [koffi](https://koffi.dev/) | FFI bindings used by the SDK bridge |
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE).
+[MIT License](LICENSE). See [CHANGELOG.md](CHANGELOG.md) for release history.
 
 Starting from version 1.0.0, this project is licensed under the MIT License. Previous versions were licensed under AGPLv3.

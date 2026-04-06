@@ -39,8 +39,7 @@ CMD_HEAD_LOGIN_FAIL = 0x01000204
 PROTOCOL_VER = 3  # NVR_VER_N9000
 
 
-def _make_header(cmd: int, data_len: int, cmd_id: int = 0, cmd_ver: int = 0,
-                 header_flag: bytes = HEADER_FLAG) -> bytes:
+def _make_header(cmd: int, data_len: int, cmd_id: int = 0, cmd_ver: int = 0, header_flag: bytes = HEADER_FLAG) -> bytes:
     """Build a TVT protocol header (20 bytes).
 
     Format:
@@ -76,8 +75,8 @@ def _make_login_data(username: str, password: str, init_info: dict = None) -> by
     data += b"NVRScanner".ljust(28, b"\x00")[:28]  # computerName
     data += b"\x00" * 8  # ip
     data += b"\x00" * 6  # mac
-    data += b"\x00"       # productType
-    data += b"\x00"       # reserved
+    data += b"\x00"  # productType
+    data += b"\x00"  # reserved
     data += struct.pack("<I", PROTOCOL_VER)
     return data
 
@@ -94,10 +93,10 @@ def _make_login_data_head(username: str, password: str, init_info: dict) -> byte
     encrypted_username = _encrypt_username_head(username, nonce_int)
     password_sha1 = _encrypt_password_head(password, nonce_int)
 
-    data = struct.pack("<I", 3)       # connectType = 3
-    data += b"\x00" * 32             # reserved (32 bytes)
-    data += encrypted_username        # username XOR encrypted (64 bytes)
-    data += password_sha1             # SHA1 hash raw (20 bytes)
+    data = struct.pack("<I", 3)  # connectType = 3
+    data += b"\x00" * 32  # reserved (32 bytes)
+    data += encrypted_username  # username XOR encrypted (64 bytes)
+    data += password_sha1  # SHA1 hash raw (20 bytes)
     data = data.ljust(236, b"\x00")  # pad to 236 bytes
     return data
 
@@ -199,10 +198,10 @@ def _make_http_request(path: str, seq: int = 1) -> bytes:
     http_req = f"GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: keep-alive\r\n\r\n"
     content = http_req.encode("ascii")
     data = struct.pack("<I", len(content))  # httpContentLen
-    data += struct.pack("<I", seq)           # httpSeq
-    data += b"\x00" * 64                     # httpReverse (reserved)
-    data += content                          # httpContent
-    data += b"\x00"                          # endByte
+    data += struct.pack("<I", seq)  # httpSeq
+    data += b"\x00" * 64  # httpReverse (reserved)
+    data += content  # httpContent
+    data += b"\x00"  # endByte
     return data
 
 
@@ -251,7 +250,7 @@ def _recv_packet(sock: socket.socket, timeout: float = 10.0) -> tuple[int | None
                 if len(remaining) >= 16:
                     cmd_type = struct.unpack("<I", remaining[0:4])[0]
                     data_len = struct.unpack("<I", remaining[12:16])[0]
-                    payload = remaining[16:16 + data_len] if data_len > 0 else b""
+                    payload = remaining[16 : 16 + data_len] if data_len > 0 else b""
                     return cmd_type, payload
                 return None, flag + next4 + remaining
 
@@ -271,7 +270,7 @@ def _recv_packet(sock: socket.socket, timeout: float = 10.0) -> tuple[int | None
             if len(remaining) >= 16:
                 cmd_type = struct.unpack("<I", remaining[0:4])[0]
                 data_len = struct.unpack("<I", remaining[12:16])[0]
-                payload = remaining[16:16 + data_len] if data_len > 0 else b""
+                payload = remaining[16 : 16 + data_len] if data_len > 0 else b""
                 return cmd_type, payload
 
     return None, flag
@@ -294,16 +293,21 @@ def _parse_login_response(data: bytes) -> dict:
         return info
 
     offset = 0
-    info["config_data_len"] = struct.unpack_from("<I", data, offset)[0]; offset += 4
+    info["config_data_len"] = struct.unpack_from("<I", data, offset)[0]
+    offset += 4
     offset += 20  # Skip PTZ fields (5 * 4 bytes)
     offset += 12  # Skip bSupportPTZ through audioChannel
-    offset += 4   # dwAudioSample
-    offset += 4   # UserRight
-    info["software_ver"] = data[offset:offset+4].hex(); offset += 4
-    info["build_date"] = struct.unpack_from("<I", data, offset)[0]; offset += 4
-    mac_bytes = data[offset:offset+6]; offset += 6
+    offset += 4  # dwAudioSample
+    offset += 4  # UserRight
+    info["software_ver"] = data[offset : offset + 4].hex()
+    offset += 4
+    info["build_date"] = struct.unpack_from("<I", data, offset)[0]
+    offset += 4
+    mac_bytes = data[offset : offset + 6]
+    offset += 6
     info["mac"] = ":".join(f"{b:02X}" for b in mac_bytes)
-    device_name_raw = data[offset:offset+34]; offset += 34
+    device_name_raw = data[offset : offset + 34]
+    offset += 34
     info["device_name"] = device_name_raw.split(b"\x00")[0].decode("ascii", errors="replace").strip()
 
     return info
@@ -318,20 +322,20 @@ def _parse_login_response_head(data: bytes) -> dict:
       channelCount(2) + maxChannels(2) + flags(4) + channels(20*N)
     """
     info = {}
-    if len(data) < 0xb8:
+    if len(data) < 0xB8:
         return info
 
     # Device serial at offset 0x8c (32 bytes, null-terminated)
-    serial_raw = data[0x8c:0xac]
+    serial_raw = data[0x8C:0xAC]
     info["device_name"] = serial_raw.split(b"\x00")[0].decode("ascii", errors="replace").strip()
 
     # Channel count at offset 0xb0 (uint16 LE)
-    channel_count = struct.unpack_from("<H", data, 0xb0)[0]
+    channel_count = struct.unpack_from("<H", data, 0xB0)[0]
     info["channel_count"] = channel_count
 
     # Channel records at offset 0xb8, 20 bytes each
     cameras = []
-    offset = 0xb8
+    offset = 0xB8
     for i in range(channel_count):
         if offset + 20 > len(data):
             break
@@ -339,15 +343,17 @@ def _parse_login_response_head(data: bytes) -> dict:
         ch_type = struct.unpack_from("<I", data, offset + 16)[0]
         # Low byte seems to be online status (1=online), high byte is protocol/manufacturer
         status = "Online" if (ch_type & 0xFF) == 1 else "Offline"
-        cameras.append({
-            "channel": ch_num,
-            "name": f"Channel {ch_num}",
-            "address": "",
-            "port": 0,
-            "status": status,
-            "protocol": "",
-            "model": "",
-        })
+        cameras.append(
+            {
+                "channel": ch_num,
+                "name": f"Channel {ch_num}",
+                "address": "",
+                "port": 0,
+                "status": status,
+                "protocol": "",
+                "model": "",
+            }
+        )
         offset += 20
 
     info["cameras"] = cameras
@@ -367,9 +373,9 @@ def _parse_http_response_body(data: bytes) -> bytes:
     return content
 
 
-def scan_nvr(ip: str, port: int = 6036, username: str = "admin",
-             password: str = "", timeout: float = 10.0,
-             debug: bool = False) -> dict:
+def scan_nvr(
+    ip: str, port: int = 6036, username: str = "admin", password: str = "", timeout: float = 10.0, debug: bool = False
+) -> dict:
     """Connect to a TVT NVR and retrieve camera/IPC channel info.
 
     Returns a dict with device info and camera list.
@@ -407,9 +413,12 @@ def scan_nvr(ip: str, port: int = 6036, username: str = "admin",
         send_flag = HEADER_FLAG
 
         if debug:
-            print(f"[DEBUG] Init: mac={init_info.get('mac')}, loginEncrypt={init_info.get('loginEncrypt')}, "
-                  f"nonce={init_info.get('loginNonce', b'').hex()}, protocolVer={init_info.get('protocolVer')}, "
-                  f"init_flag={'head' if init_flag == INIT_FLAG else '1111'}", flush=True)
+            print(
+                f"[DEBUG] Init: mac={init_info.get('mac')}, loginEncrypt={init_info.get('loginEncrypt')}, "
+                f"nonce={init_info.get('loginNonce', b'').hex()}, protocolVer={init_info.get('protocolVer')}, "
+                f"init_flag={'head' if init_flag == INIT_FLAG else '1111'}",
+                flush=True,
+            )
 
         # Consume the empty ack packet that follows init (some NVRs send it, some don't)
         try:
@@ -426,12 +435,17 @@ def scan_nvr(ip: str, port: int = 6036, username: str = "admin",
         login_cmd = CMD_HEAD_LOGIN if head_variant else CMD_REQUEST_LOGIN
         login_cmd_id = 0x0101 if head_variant else 0
         login_cmd_ver = 0x0101 if head_variant else 0
-        login_packet = _make_header(login_cmd, len(login_data), cmd_id=login_cmd_id,
-                                     cmd_ver=login_cmd_ver, header_flag=send_flag) + login_data
+        login_packet = (
+            _make_header(login_cmd, len(login_data), cmd_id=login_cmd_id, cmd_ver=login_cmd_ver, header_flag=send_flag)
+            + login_data
+        )
 
         if debug:
-            print(f"[DEBUG] Sending login: {len(login_packet)} bytes, head_variant={head_variant}, "
-                  f"password encrypted={init_info.get('loginEncrypt', 0) > 0}", flush=True)
+            print(
+                f"[DEBUG] Sending login: {len(login_packet)} bytes, head_variant={head_variant}, "
+                f"password encrypted={init_info.get('loginEncrypt', 0) > 0}",
+                flush=True,
+            )
 
         sock.sendall(login_packet)
 
@@ -442,8 +456,11 @@ def scan_nvr(ip: str, port: int = 6036, username: str = "admin",
             cmd_type, login_resp = _recv_packet(sock, timeout)
 
         if debug:
-            print(f"[DEBUG] Login response: cmd_type={hex(cmd_type) if isinstance(cmd_type, int) and cmd_type >= 0 else cmd_type}, "
-                  f"len={len(login_resp)}", flush=True)
+            print(
+                f"[DEBUG] Login response: cmd_type={hex(cmd_type) if isinstance(cmd_type, int) and cmd_type >= 0 else cmd_type}, "
+                f"len={len(login_resp)}",
+                flush=True,
+            )
 
         if cmd_type == CMD_REPLY_LOGIN_FAIL or cmd_type == CMD_HEAD_LOGIN_FAIL:
             result["error"] = "Login failed: invalid credentials"
@@ -457,8 +474,11 @@ def scan_nvr(ip: str, port: int = 6036, username: str = "admin",
                 try:
                     cmd_type2, login_resp2 = _recv_packet(sock, timeout=3.0)
                     if debug:
-                        print(f"[DEBUG]   got cmd_type={hex(cmd_type2) if isinstance(cmd_type2, int) and cmd_type2 >= 0 else cmd_type2}, "
-                              f"len={len(login_resp2)}", flush=True)
+                        print(
+                            f"[DEBUG]   got cmd_type={hex(cmd_type2) if isinstance(cmd_type2, int) and cmd_type2 >= 0 else cmd_type2}, "
+                            f"len={len(login_resp2)}",
+                            flush=True,
+                        )
                     if cmd_type2 == -1:
                         continue
                     if len(login_resp2) > 100:
@@ -484,8 +504,11 @@ def scan_nvr(ip: str, port: int = 6036, username: str = "admin",
         # Head-variant NVRs provide channel data in the login response, skip HTTP
         if head_variant and result["cameras"]:
             if debug:
-                print(f"[DEBUG] Head variant: got {len(result['cameras'])} cameras from login response, "
-                      f"skipping HTTP tunnel", flush=True)
+                print(
+                    f"[DEBUG] Head variant: got {len(result['cameras'])} cameras from login response, "
+                    f"skipping HTTP tunnel",
+                    flush=True,
+                )
         else:
             # TVT NVRs serve their web UI config through the same port
             # Try common TVT CGI paths for camera/channel config
@@ -503,7 +526,10 @@ def scan_nvr(ip: str, port: int = 6036, username: str = "admin",
                 cmd_type, resp_data = _recv_packet(sock, timeout=5.0)
 
                 if debug:
-                    print(f"[DEBUG] HTTP tunnel {path}: cmd_type={hex(cmd_type) if cmd_type else None}, resp_len={len(resp_data)}, first_128={resp_data[:128].hex() if resp_data else 'empty'}", flush=True)
+                    print(
+                        f"[DEBUG] HTTP tunnel {path}: cmd_type={hex(cmd_type) if cmd_type else None}, resp_len={len(resp_data)}, first_128={resp_data[:128].hex() if resp_data else 'empty'}",
+                        flush=True,
+                    )
                     if resp_data:
                         body = _parse_http_response_body(resp_data)
                         print(f"[DEBUG] HTTP body preview: {body[:500]}", flush=True)
@@ -600,20 +626,29 @@ def _normalize_camera(item: dict) -> dict | None:
         return None
 
     # Map various field name conventions
-    name = (item.get("szChlname") or item.get("ChannelName") or
-            item.get("channelName") or item.get("name") or
-            item.get("CameraName") or item.get("cameraName") or "")
-    address = (item.get("szServer") or item.get("Address") or
-               item.get("address") or item.get("IP") or
-               item.get("ip") or item.get("IpAddr") or "")
-    port = (item.get("nPort") or item.get("Port") or
-            item.get("port") or 0)
+    name = (
+        item.get("szChlname")
+        or item.get("ChannelName")
+        or item.get("channelName")
+        or item.get("name")
+        or item.get("CameraName")
+        or item.get("cameraName")
+        or ""
+    )
+    address = (
+        item.get("szServer")
+        or item.get("Address")
+        or item.get("address")
+        or item.get("IP")
+        or item.get("ip")
+        or item.get("IpAddr")
+        or ""
+    )
+    port = item.get("nPort") or item.get("Port") or item.get("port") or 0
     status_val = item.get("status") or item.get("Status") or item.get("OnlineStatus") or ""
     channel = item.get("channel") or item.get("Channel") or item.get("ChannelNo") or 0
-    model = (item.get("productModel") or item.get("Model") or
-             item.get("model") or item.get("ProductModel") or "")
-    protocol = (item.get("manufacturerName") or item.get("Protocol") or
-                item.get("protocol") or "")
+    model = item.get("productModel") or item.get("Model") or item.get("model") or item.get("ProductModel") or ""
+    protocol = item.get("manufacturerName") or item.get("Protocol") or item.get("protocol") or ""
 
     if not name and not address:
         return None
@@ -638,8 +673,10 @@ def _normalize_camera(item: dict) -> dict | None:
 
 if __name__ == "__main__":
     import sys
-    from dotenv import load_dotenv
-    load_dotenv()
+
+    import dotenv
+
+    dotenv.load_dotenv()
 
     ip = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("TVT_HOST", "192.168.1.100")
     user = os.environ.get("TVT_USERNAME", "admin")

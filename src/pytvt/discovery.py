@@ -41,12 +41,7 @@ SSDP_PORT = 1900
 SSDP_ST = "urn:schemas-upnp-org:service:EmbeddedNetDeviceControl:1"
 
 SSDP_MSEARCH = (
-    "M-SEARCH * HTTP/1.1\r\n"
-    f"HOST:{SSDP_ADDR}:{SSDP_PORT}\r\n"
-    f'Man:"ssdp:discover"\r\n'
-    f"ST:{SSDP_ST}\r\n"
-    "MX:3\r\n"
-    "\r\n"
+    f'M-SEARCH * HTTP/1.1\r\nHOST:{SSDP_ADDR}:{SSDP_PORT}\r\nMan:"ssdp:discover"\r\nST:{SSDP_ST}\r\nMX:3\r\n\r\n'
 )
 
 # Device type mapping (from IPTool English language file + SDK header)
@@ -333,8 +328,7 @@ def discover_subnet(
     hosts = [str(h) for h in network.hosts()]  # excludes network & broadcast
 
     if progress:
-        print(f"Sweeping {len(hosts)} hosts in {network} (concurrency={concurrency})...",
-              file=sys.stderr)
+        print(f"Sweeping {len(hosts)} hosts in {network} (concurrency={concurrency})...", file=sys.stderr)
 
     seen: dict[str, dict] = {}
     udp_misses: list[str] = []
@@ -353,8 +347,10 @@ def discover_subnet(
                     if key not in seen:
                         seen[key] = device
                         if progress:
-                            print(f"  [{done_count}/{len(hosts)}] {ip} — FOUND ({device['product_model'] or 'TVT device'})",
-                                  file=sys.stderr)
+                            print(
+                                f"  [{done_count}/{len(hosts)}] {ip} — FOUND ({device['product_model'] or 'TVT device'})",
+                                file=sys.stderr,
+                            )
                 else:
                     udp_misses.append(ip)
             except Exception:
@@ -363,11 +359,9 @@ def discover_subnet(
     # Phase 2: TCP port probe fallback
     if tcp_fallback and udp_misses:
         if progress:
-            print(f"UDP: {len(seen)} found. TCP fallback on {len(udp_misses)} remaining hosts...",
-                  file=sys.stderr)
+            print(f"UDP: {len(seen)} found. TCP fallback on {len(udp_misses)} remaining hosts...", file=sys.stderr)
         with ThreadPoolExecutor(max_workers=concurrency) as pool:
-            futures = {pool.submit(_tcp_probe_tvt, ip, tcp_port, timeout): ip
-                       for ip in udp_misses}
+            futures = {pool.submit(_tcp_probe_tvt, ip, tcp_port, timeout): ip for ip in udp_misses}
             for future in as_completed(futures):
                 ip = futures[future]
                 try:
@@ -377,8 +371,7 @@ def discover_subnet(
                         if key not in seen:
                             seen[key] = device
                             if progress:
-                                print(f"  {ip} — FOUND via TCP (port {tcp_port})",
-                                      file=sys.stderr)
+                                print(f"  {ip} — FOUND via TCP (port {tcp_port})", file=sys.stderr)
                 except Exception:
                     pass
 
@@ -391,17 +384,11 @@ def print_discovery_report(devices: list[dict]) -> None:
         print("No TVT devices found on the network.")
         return
 
-    print(f"\n{'='*100}")
+    print(f"\n{'=' * 100}")
     print(f"  TVT LAN Device Discovery — {len(devices)} device(s) found")
-    print(f"{'='*100}")
-    print(
-        f"  {'Type':<8} {'IP Address':<18} {'MAC':<20} "
-        f"{'Model':<20} {'Name':<20} {'FW':<12} {'Ports'}"
-    )
-    print(
-        f"  {'----':<8} {'-'*17:<18} {'-'*19:<20} "
-        f"{'-'*19:<20} {'-'*19:<20} {'-'*11:<12} {'-----'}"
-    )
+    print(f"{'=' * 100}")
+    print(f"  {'Type':<8} {'IP Address':<18} {'MAC':<20} {'Model':<20} {'Name':<20} {'FW':<12} {'Ports'}")
+    print(f"  {'----':<8} {'-' * 17:<18} {'-' * 19:<20} {'-' * 19:<20} {'-' * 19:<20} {'-' * 11:<12} {'-----'}")
     for d in devices:
         ports = []
         if d["data_port"]:
@@ -509,21 +496,23 @@ def discovery_to_scanner_format(devices: list[dict], site: str = "Discovered", s
     """
     scanner_devices = []
     for d in devices:
-        scanner_devices.append({
-            "ip": d["ip"],
-            "port": scan_port,
-            "data_port": d["data_port"] or 9008,
-            "http_port": d["http_port"] or 0,
-            "mac": d["mac"],
-            "hostname": d["device_name"] or d["product_model"] or d["ip"],
-            "site": site,
-            "manufacturer": "TVT",
-            "model": d["product_model"],
-            "firmware": d["software_version"],
-            "device_type": d["device_type"],
-            "serial": "",
-            "_discovered": True,
-        })
+        scanner_devices.append(
+            {
+                "ip": d["ip"],
+                "port": scan_port,
+                "data_port": d["data_port"] or 9008,
+                "http_port": d["http_port"] or 0,
+                "mac": d["mac"],
+                "hostname": d["device_name"] or d["product_model"] or d["ip"],
+                "site": site,
+                "manufacturer": "TVT",
+                "model": d["product_model"],
+                "firmware": d["software_version"],
+                "device_type": d["device_type"],
+                "serial": "",
+                "_discovered": True,
+            }
+        )
     return scanner_devices
 
 
@@ -534,13 +523,15 @@ def main():
         description="TVT Device Discovery — find TVT NVRs/IPCs via multicast or subnet sweep"
     )
     parser.add_argument(
-        "--timeout", "-t",
+        "--timeout",
+        "-t",
         type=float,
         default=5.0,
         help="Seconds to wait for responses per probe (default: 5)",
     )
     parser.add_argument(
-        "--retries", "-r",
+        "--retries",
+        "-r",
         type=int,
         default=2,
         help="Number of M-SEARCH probes to send in multicast mode (default: 2)",
@@ -553,8 +544,7 @@ def main():
         "--subnet",
         action="append",
         metavar="CIDR",
-        help="Scan a remote subnet via unicast probes (e.g. 10.200.50.0/24). "
-             "Can be specified multiple times.",
+        help="Scan a remote subnet via unicast probes (e.g. 10.200.50.0/24). Can be specified multiple times.",
     )
     parser.add_argument(
         "--concurrency",
