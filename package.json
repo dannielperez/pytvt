@@ -8,7 +8,7 @@
   },
   "keywords": ["tvt", "nvr", "camera", "scanner", "sdk"],
   "author": "dperez",
-  "license": "AGPL-3.0-or-later",
+  "license": "MIT",
   "type": "commonjs",
   "dependencies": {
     "koffi": "^2.15.2"

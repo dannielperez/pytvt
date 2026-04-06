@@ -487,4 +487,6 @@ See `tvt/proto/` for Wireshark dissector scripts that decode the full protocol.
 
 ## License
 
-[AGPL-3.0](LICENSE)
+This project is licensed under the [MIT License](LICENSE).
+
+Starting from version 1.0.0, this project is licensed under the MIT License. Previous versions were licensed under AGPLv3.
