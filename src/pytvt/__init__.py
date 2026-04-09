@@ -8,16 +8,18 @@ Public API:
     Web API:   WebApiClient (TVT HTTP API / LAPI)
     Net SDK:   pytvt.netsdk — ctypes bindings for libdvrnetsdk.so (Linux only)
     SDK HTTP:  SdkHttpClient — typed client for tvt-api Docker container
+    Unified:   DeviceManager — auto-selects netsdk or sdk_http backend
     Config:    load_config
     Scanner:   scan_single_nvr, load_devices, filter_tvt_devices
     Output:    save_csv, save_json, save_xlsx_per_site, save_failed_devices
     Diff:      diff_scans, load_scan_file, ScanDiff, DeviceDiff
 """
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 from .config import load_config
 from .constants import BackendFamily, CompositeStrategy, ExecutionPlan, IntegrationMode, resolve_backend
+from .device_manager import Backend, DeviceManager, NoBackendAvailable, available_backends
 from .diff import DeviceDiff, ScanDiff, diff_scans, load_scan_file
 from .exceptions import BackendError, PytvtError, RegistryError
 from .models import (
@@ -72,6 +74,11 @@ __all__ = [
     "DeviceInfoResult",
     "DeviceTimeResult",
     "RtspUrlResult",
+    # Unified device manager (auto backend selection)
+    "DeviceManager",
+    "Backend",
+    "NoBackendAvailable",
+    "available_backends",
     # Config
     "load_config",
     # Scanner

@@ -33,9 +33,12 @@ from .constants import (
     SmartEventType,
     StreamType,
 )
+from .loader import NetSdkUnavailable, is_netsdk_available
 
 __all__ = [
     "NetSdkClient",
+    "NetSdkUnavailable",
+    "is_netsdk_available",
     "AlarmType",
     "CameraType",
     "ConnectType",

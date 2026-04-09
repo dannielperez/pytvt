@@ -10,6 +10,8 @@ It also supports LAN auto-discovery via SSDP multicast and remote subnet sweeps,
 
 Since v0.3.0, pytvt includes a **Web API client** for the TVT HTTP API (LAPI protocol), providing direct per-device management via HTTP Basic auth — device info, snapshots, password changes, image/stream configuration, and recording queries — all in pure Python with no binary dependencies.
 
+Since v0.5.0, the **`DeviceManager`** provides a unified facade for device operations that auto-selects the best available backend — native SDK (`netsdk` ctypes) on Linux, or the tvt-api Docker container over HTTP — so the same code works on any platform.
+
 ## Architecture
 
 ```
@@ -134,6 +136,37 @@ The Web API service must be enabled on the device. Use `ensure_webapi_available(
 client = WebApiClient("192.168.1.100", "admin", "password")
 client.ensure_webapi_available()  # enables via NvrClient if disabled
 ```
+
+## DeviceManager (v0.5.0+)
+
+The `DeviceManager` provides a unified facade for TVT device operations that automatically selects the best available backend:
+
+1. **Native SDK** (`netsdk`) — direct ctypes calls to `libdvrnetsdk.so` on Linux x86_64/aarch64
+2. **SDK HTTP** (`sdk_http`) — HTTP calls to the tvt-api Docker container (any platform)
+
+```python
+from pytvt import DeviceManager, available_backends
+
+# Check what's available
+print(available_backends())  # [Backend.SDK_HTTP] on macOS, [Backend.NETSDK, Backend.SDK_HTTP] on Linux
+
+# Auto-detect best backend
+with DeviceManager("10.200.50.251", "admin", "password") as mgr:
+    print(f"Using: {mgr.backend}")
+
+    info = mgr.device_info()
+    print(f"{info.device_model} — SN {info.serial_number}")
+
+    time = mgr.device_time()
+    jpeg = mgr.snapshot(channel=0)
+    url  = mgr.rtsp_url(channel=0)
+    mgr.reboot()
+
+# Force a specific backend
+mgr = DeviceManager("10.200.50.251", "admin", "password", backend="sdk_http")
+```
+
+All methods return the same result types regardless of which backend is active. If no backend is available, `NoBackendAvailable` is raised.
 
 ## Installation
 
@@ -418,10 +451,19 @@ pytvt/
 │   ├── discovery.py           # SSDP multicast + subnet sweep discovery
 │   ├── diff.py                # Scan diffing / change detection
 │   ├── sdk_http.py            # SDK HTTP API backend (compat mode → tvt-api)
+│   ├── sdk_http_client.py     # Typed SDK HTTP client (tvt-api Docker container)
+│   ├── device_manager.py      # Unified facade with auto-backend selection
 │   ├── sdk_local.py           # SDK local subprocess backend (direct mode)
 │   ├── output.py              # CSV / JSON / XLSX formatters
 │   ├── nvr_api.py             # NVR web CGI client
-│   └── snapshot.py            # Camera snapshot capture
+│   ├── snapshot.py            # Camera snapshot capture
+│   └── netsdk/                # Native SDK ctypes bindings (Linux only)
+│       ├── __init__.py        # Package exports
+│       ├── loader.py          # Library search + loading
+│       ├── bindings.py        # ctypes function prototypes
+│       ├── types.py           # ctypes structure definitions
+│       ├── constants.py       # Enums (PtzCommand, StreamType, etc.)
+│       └── client.py          # NetSdkClient + DeviceSession
 ├── bridges/
 │   └── sdk_local/             # Node.js SDK bridge (direct mode)
 │       ├── scan_nvr.mjs       # SDK FFI subprocess script
@@ -439,6 +481,9 @@ pytvt/
 │   ├── test_diff.py           # Scan diffing + CLI tests
 │   ├── test_cli.py            # CLI parser + helpers
 │   ├── test_sdk_http.py       # SDK HTTP backend (mocked)
+│   ├── test_sdk_http_client.py # SdkHttpClient tests
+│   ├── test_netsdk_client.py  # netsdk ctypes binding tests
+│   ├── test_device_manager.py # DeviceManager facade tests
 │   └── test_sdk_local.py      # JSON extraction tests
 ├── tools/                     # Operational utilities (import from pytvt)
 │   └── enable_nvr_services.py # Batch NVR RTSP + API enablement

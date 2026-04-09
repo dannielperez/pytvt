@@ -5,6 +5,56 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] — 2026-04-09
+
+### Added
+
+- **`DeviceManager` unified facade** — single API for TVT device operations with
+  automatic backend selection. Probes native SDK availability first, then falls
+  back to the tvt-api Docker container. Supports forced backend selection.
+  - `device_info()`, `device_time()`, `snapshot()`, `rtsp_url()`, `ptz()`,
+    `ptz_preset()`, `reboot()` — all return the same result types regardless
+    of backend.
+  - `available_backends()` — probe what's available on the current platform.
+  - `Backend` enum, `NoBackendAvailable` exception.
+- **`is_netsdk_available()` probe** — check if the native SDK is loadable without
+  actually loading it (platform + architecture + file existence check).
+- **Expanded netsdk loader** — searches env var → vendored → tvt-api submodule →
+  tvt repo → system. Added `_arch_dir()` for platform-specific directory selection,
+  pre-loading of companion `.so` dependencies.
+- **aarch64 support** — loader recognizes `linux-arm64` bin directory for ARM64 Linux.
+
+### Changed
+
+- `netsdk/__init__.py` now exports `is_netsdk_available` and `NetSdkUnavailable`.
+- Public `__init__.py` exports `DeviceManager`, `Backend`, `NoBackendAvailable`,
+  `available_backends`.
+
+## [0.4.0] — 2026-04-08
+
+### Added
+
+- **`pytvt.netsdk` package** — ctypes bindings for the TVT NetSDK C++ library
+  (`libdvrnetsdk.so`). `NetSdkClient` + `DeviceSession` with 25+ methods covering
+  device info, PTZ, snapshots, RTSP URLs, alarms, recording, firmware, disks,
+  users, time sync, and more.
+- **`SdkHttpClient`** — typed Python client for the tvt-api Docker container with
+  10 methods: `health()`, `scan()`, `device_info()`, `device_time()`, `snapshot()`,
+  `rtsp_url()`, `ptz()`, `ptz_preset()`, `reboot()`.
+- **Result dataclasses** — `DeviceInfoResult`, `DeviceTimeResult`, `RtspUrlResult`,
+  `CommandResult` for SDK HTTP responses.
+- **135 netsdk tests** + **26 SdkHttpClient tests** (161 new tests).
+
+## [0.3.0] — 2026-04-07
+
+### Added
+
+- **`WebApiClient`** — TVT HTTP API (LAPI protocol) client with HTTP Basic auth.
+  Per-device management: capability detection, device info, channels, disks,
+  date/time, password management, image/stream/audio/OSD configuration, snapshots
+  with RTSP fallback, recording status and search.
+- **66 new tests** for the Web API client.
+
 ## [0.2.0] — 2026-04-06
 
 First packaged release. Restructured from flat scripts into an installable Python
@@ -58,4 +108,7 @@ comprehensive test coverage.
 
 - Licensed under MIT starting from 1.0.0. Previous versions were AGPLv3.
 
+[0.5.0]: https://github.com/dannielperez/pytvt/compare/v0.4.0...v0.5.0
+[0.4.0]: https://github.com/dannielperez/pytvt/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/dannielperez/pytvt/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/dannielperez/pytvt/releases/tag/v0.2.0
