@@ -6,13 +6,15 @@ Public API:
     Models:    ScannerConfig, DeviceEntry, CameraInfo, ScanResult, NvrApiError
     NVR API:   NvrClient, Channel, RtspServerConfig, ApiServerConfig, PortConfig
     Web API:   WebApiClient (TVT HTTP API / LAPI)
+    Net SDK:   pytvt.netsdk — ctypes bindings for libdvrnetsdk.so (Linux only)
+    SDK HTTP:  SdkHttpClient — typed client for tvt-api Docker container
     Config:    load_config
     Scanner:   scan_single_nvr, load_devices, filter_tvt_devices
     Output:    save_csv, save_json, save_xlsx_per_site, save_failed_devices
     Diff:      diff_scans, load_scan_file, ScanDiff, DeviceDiff
 """
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 from .config import load_config
 from .constants import BackendFamily, CompositeStrategy, ExecutionPlan, IntegrationMode, resolve_backend
@@ -33,6 +35,7 @@ from .nvr_api import NvrClient
 from .output import save_csv, save_failed_devices, save_json, save_xlsx_per_site
 from .registry import resolve_execution_plan
 from .scanner import filter_tvt_devices, load_devices, scan_single_nvr
+from .sdk_http_client import CommandResult, DeviceInfoResult, DeviceTimeResult, RtspUrlResult, SdkHttpClient
 from .webapi import WebApiClient
 
 __all__ = [
@@ -63,6 +66,12 @@ __all__ = [
     "NvrClient",
     # Web API client (TVT HTTP API / LAPI / Basic auth)
     "WebApiClient",
+    # SDK HTTP client (tvt-api Docker container)
+    "SdkHttpClient",
+    "CommandResult",
+    "DeviceInfoResult",
+    "DeviceTimeResult",
+    "RtspUrlResult",
     # Config
     "load_config",
     # Scanner
