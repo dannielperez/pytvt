@@ -8,6 +8,8 @@ Bulk-scan TVT NVRs and enumerate every connected IP camera — pure Python, no v
 
 It also supports LAN auto-discovery via SSDP multicast and remote subnet sweeps, so you can find devices without an inventory file.
 
+Since v0.3.0, pytvt includes a **Web API client** for the TVT HTTP API (LAPI protocol), providing direct per-device management via HTTP Basic auth — device info, snapshots, password changes, image/stream configuration, and recording queries — all in pure Python with no binary dependencies.
+
 ## Architecture
 
 ```
@@ -52,6 +54,13 @@ The scanner supports three backends (integration modes), each suited to differen
 - Failed device tracking with automatic retry support
 - Camera snapshot capture (SDK-based)
 - NVR web CGI client for configuration management
+- **TVT HTTP Web API client (LAPI)** — per-device management via HTTP Basic auth:
+  - Capability detection (GetSupportedAPIs)
+  - Device info, channels, disks, date/time
+  - Password management
+  - Image, video stream, audio stream, and OSD configuration
+  - Snapshots with automatic fallback (Web API → RTSP)
+  - Recording status and search
 
 ## Backend Comparison
 
@@ -86,6 +95,44 @@ pytvt-discover
 
 # Discover and scan in one command
 pytvt --discover -u admin -p password --xlsx files/
+```
+
+## Web API Client (v0.3.0+)
+
+The `WebApiClient` provides direct HTTP access to TVT devices (NVRs and IPCs) using the TVT LAPI protocol. Unlike the NVR CGI client (`NvrClient`), it uses HTTP Basic auth per request and targets individual devices.
+
+```python
+from pytvt.webapi import WebApiClient
+
+client = WebApiClient("192.168.1.100", "admin", "password")
+
+# Check what the device supports
+apis = client.get_supported_apis()
+
+# Device info
+info = client.get_device_info()
+print(f"{info.device_model} — FW {info.firmware_version}")
+
+# Channels
+for ch in client.get_channel_info():
+    status = "online" if ch.online else "offline"
+    print(f"  CH{ch.channel_id}: {ch.channel_name} ({status})")
+
+# Snapshot (Web API with RTSP fallback)
+result = client.get_snapshot(channel_id=1)
+if result.success:
+    with open("snapshot.jpg", "wb") as f:
+        f.write(result.image_data)
+
+# Change password
+client.modify_password("old_pass", "new_pass")
+```
+
+The Web API service must be enabled on the device. Use `ensure_webapi_available()` to auto-enable it via the NVR CGI if needed:
+
+```python
+client = WebApiClient("192.168.1.100", "admin", "password")
+client.ensure_webapi_available()  # enables via NvrClient if disabled
 ```
 
 ## Installation
