@@ -1,0 +1,93 @@
+name: Publish to PyPI
+
+# Trigger: when a GitHub Release is published (tag must be v*).
+# Manually dispatch with workflow_dispatch for a dry-run without publishing.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run (build + validate only, no upload)"
+        required: false
+        default: "true"
+        type: choice
+        options: ["true", "false"]
+
+permissions:
+  contents: read
+
+jobs:
+  # ── Run the full test + build CI suite ──────────────────────────────
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  # ── Build sdist + wheel and validate with twine ─────────────────────
+  build:
+    needs: ci
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build tools
+        run: pip install build twine
+
+      - name: Build sdist and wheel
+        run: python -m build
+
+      - name: Validate artifacts with twine
+        run: twine check --strict dist/*
+
+      - name: Extract version
+        id: meta
+        run: |
+          VERSION=$(python -c "import importlib.metadata; print(importlib.metadata.version('pytvt'))" 2>/dev/null \
+                    || python -c "import tomllib; d=tomllib.load(open('pyproject.toml','rb')); print(d['project']['version'])")
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload dist artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ steps.meta.outputs.version }}
+          path: dist/
+          if-no-files-found: error
+
+  # ── Publish to PyPI via OIDC Trusted Publishing ──────────────────────
+  #
+  # Prerequisites (one-time setup on PyPI):
+  #   1. Go to pypi.org → your project → Publishing → Add a Trusted Publisher.
+  #   2. Set:  owner=dannielperez  repo=pytvt  workflow=publish.yml
+  #   3. Create a GitHub Environment named "pypi" on this repo and add a
+  #      protection rule (e.g. require review, restrict to tag refs).
+  #
+  # No API tokens are needed; PyPI uses the GitHub OIDC token directly.
+  publish:
+    needs: build
+    if: >
+      github.event_name == 'release' ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'false')
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write  # required for OIDC Trusted Publishing
+      contents: read
+
+    steps:
+      - name: Download dist artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist-${{ needs.build.outputs.version }}
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        # Trusted Publishing — no token needed.
+        # To publish to TestPyPI instead, uncomment the next two lines:
+        # with:
+        #   repository-url: https://test.pypi.org/legacy/
