@@ -47,8 +47,17 @@ jobs:
       - name: Extract version
         id: meta
         run: |
-          VERSION=$(python -c "import importlib.metadata; print(importlib.metadata.version('pytvt'))" 2>/dev/null \
-                    || python -c "import tomllib; d=tomllib.load(open('pyproject.toml','rb')); print(d['project']['version'])")
+          # Use tomllib (3.11+) with a regex fallback that works on Python 3.10.
+          VERSION=$(python -c "
+          try:
+              import tomllib
+              with open('pyproject.toml', 'rb') as f:
+                  print(tomllib.load(f)['project']['version'])
+          except ImportError:
+              import re, pathlib
+              m = re.search(r'^version\s*=\s*\"([^\"]+)\"', pathlib.Path('pyproject.toml').read_text(), re.M)
+              print(m.group(1))
+          ")
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Upload dist artifacts
