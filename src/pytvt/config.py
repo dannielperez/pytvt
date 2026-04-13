@@ -18,10 +18,35 @@ from .models import ScannerConfig
 # Default API URL for the TVT SDK Fastify server
 DEFAULT_API_URL: str = os.getenv("TVT_API_URL", "http://localhost:3000")
 
+
 # Path to the standalone scan_nvr.mjs script (for sdk-local backend).
-# Resolved relative to the package root (two levels up from this file).
-_PACKAGE_ROOT: Path = Path(__file__).resolve().parent.parent.parent
-SCAN_SCRIPT: Path = _PACKAGE_ROOT / "bridges" / "sdk_local" / "scan_nvr.mjs"
+#
+# Resolution order:
+#   1. ``$PYTVT_SCAN_SCRIPT`` environment variable — explicit override.
+#   2. Walk up from this file looking for ``bridges/sdk_local/scan_nvr.mjs``
+#      (works in a development / editable-install clone of the repo).
+#
+# The sdk-local backend is not available in a plain ``pip install pytvt``
+# deployment because the Node.js bridge script and native libdvrnetsdk.so are
+# not distributed with the Python package.  The backend will fail cleanly with
+# a descriptive error when the script cannot be found.  Set ``PYTVT_SCAN_SCRIPT``
+# to point at your local copy of ``scan_nvr.mjs`` to enable sdk-local support.
+def _resolve_scan_script() -> Path:
+    env_override = os.getenv("PYTVT_SCAN_SCRIPT")
+    if env_override:
+        return Path(env_override)
+    # Walk up the directory tree looking for the bridge script (dev clone).
+    anchor = Path(__file__).resolve().parent
+    for parent in [anchor, *anchor.parents]:
+        candidate = parent / "bridges" / "sdk_local" / "scan_nvr.mjs"
+        if candidate.exists():
+            return candidate
+    # Return a non-existent path so callers can check ``.exists()`` and report
+    # a clear error rather than silently failing.
+    return Path(__file__).resolve().parent / "_not_found_" / "scan_nvr.mjs"
+
+
+SCAN_SCRIPT: Path = _resolve_scan_script()
 
 # Mapping from config-file / env-var keys → (ScannerConfig field, type cast)
 _FIELD_MAP: dict[str, type] = {

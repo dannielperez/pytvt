@@ -6,6 +6,10 @@ dist/
 build/
 .venv/
 
+# Build / publish artefacts
+*.whl
+*.tar.gz
+
 # Node (bridges/sdk_local)
 bridges/sdk_local/node_modules/
 

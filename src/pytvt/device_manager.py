@@ -34,8 +34,6 @@ from __future__ import annotations
 import logging
 import shutil
 import subprocess
-from dataclasses import dataclass
-from datetime import datetime
 from enum import Enum, unique
 
 from .sdk_http_client import (
@@ -51,6 +49,7 @@ logger = logging.getLogger(__name__)
 
 # ── Backend enum ─────────────────────────────────────────────────────
 
+
 @unique
 class Backend(str, Enum):
     """Which backend is powering the DeviceManager."""
@@ -64,16 +63,19 @@ class Backend(str, Enum):
 
 # ── Exceptions ───────────────────────────────────────────────────────
 
+
 class NoBackendAvailable(RuntimeError):
     """No usable backend could be found."""
 
 
 # ── Availability probes ──────────────────────────────────────────────
 
+
 def _netsdk_available() -> bool:
     """Check if the native SDK can be loaded (Linux + library present)."""
     try:
         from .netsdk.loader import is_netsdk_available
+
         return is_netsdk_available()
     except Exception:
         return False
@@ -121,6 +123,7 @@ def available_backends(
 
 
 # ── DeviceManager ────────────────────────────────────────────────────
+
 
 class DeviceManager:
     """Unified TVT device management with automatic backend selection.
@@ -175,8 +178,7 @@ class DeviceManager:
         if _docker_tvt_api_available(self._api_url, timeout=min(self._timeout, 5)):
             return Backend.SDK_HTTP
         raise NoBackendAvailable(
-            "No backend available. Either run on Linux with libdvrnetsdk.so "
-            "or start the tvt-api Docker container."
+            "No backend available. Either run on Linux with libdvrnetsdk.so or start the tvt-api Docker container."
         )
 
     @property
@@ -199,9 +201,13 @@ class DeviceManager:
         """Return a logged-in DeviceSession (netsdk backend)."""
         if self._netsdk_session is None:
             from .netsdk.client import NetSdkClient
+
             client = NetSdkClient()
             self._netsdk_session = client.login(
-                self._ip, self._username, self._password, port=self._port,
+                self._ip,
+                self._username,
+                self._password,
+                port=self._port,
             )
             # Keep a ref to the client so it doesn't get GC'd
             self._netsdk_session._manager_client = client  # type: ignore[attr-defined]
@@ -214,7 +220,10 @@ class DeviceManager:
         if self._backend == Backend.NETSDK:
             return self._netsdk_device_info()
         return self._get_http().device_info(
-            self._ip, self._username, self._password, port=self._port,
+            self._ip,
+            self._username,
+            self._password,
+            port=self._port,
         )
 
     def device_time(self, *, set_timestamp: int | None = None) -> DeviceTimeResult:
@@ -222,8 +231,11 @@ class DeviceManager:
         if self._backend == Backend.NETSDK:
             return self._netsdk_device_time(set_timestamp=set_timestamp)
         return self._get_http().device_time(
-            self._ip, self._username, self._password,
-            port=self._port, set_timestamp=set_timestamp,
+            self._ip,
+            self._username,
+            self._password,
+            port=self._port,
+            set_timestamp=set_timestamp,
         )
 
     def snapshot(self, *, channel: int = 0) -> bytes | None:
@@ -231,8 +243,11 @@ class DeviceManager:
         if self._backend == Backend.NETSDK:
             return self._netsdk_snapshot(channel=channel)
         return self._get_http().snapshot(
-            self._ip, self._username, self._password,
-            port=self._port, channel=channel,
+            self._ip,
+            self._username,
+            self._password,
+            port=self._port,
+            channel=channel,
         )
 
     def rtsp_url(self, *, channel: int = 0, stream_type: int = 0) -> RtspUrlResult:
@@ -240,8 +255,12 @@ class DeviceManager:
         if self._backend == Backend.NETSDK:
             return self._netsdk_rtsp_url(channel=channel, stream_type=stream_type)
         return self._get_http().rtsp_url(
-            self._ip, self._username, self._password,
-            port=self._port, channel=channel, stream_type=stream_type,
+            self._ip,
+            self._username,
+            self._password,
+            port=self._port,
+            channel=channel,
+            stream_type=stream_type,
         )
 
     def ptz(self, *, channel: int = 0, command: int = 0, speed: int = 4) -> CommandResult:
@@ -249,21 +268,37 @@ class DeviceManager:
         if self._backend == Backend.NETSDK:
             return self._netsdk_ptz(channel=channel, command=command, speed=speed)
         return self._get_http().ptz(
-            self._ip, self._username, self._password,
-            port=self._port, channel=channel, command=command, speed=speed,
+            self._ip,
+            self._username,
+            self._password,
+            port=self._port,
+            channel=channel,
+            command=command,
+            speed=speed,
         )
 
     def ptz_preset(
-        self, *, channel: int = 0, command: int = 16, preset_index: int = 1,
+        self,
+        *,
+        channel: int = 0,
+        command: int = 16,
+        preset_index: int = 1,
     ) -> CommandResult:
         """Manage PTZ presets."""
         if self._backend == Backend.NETSDK:
             return self._netsdk_ptz_preset(
-                channel=channel, command=command, preset_index=preset_index,
+                channel=channel,
+                command=command,
+                preset_index=preset_index,
             )
         return self._get_http().ptz_preset(
-            self._ip, self._username, self._password,
-            port=self._port, channel=channel, command=command, preset_index=preset_index,
+            self._ip,
+            self._username,
+            self._password,
+            port=self._port,
+            channel=channel,
+            command=command,
+            preset_index=preset_index,
         )
 
     def reboot(self) -> CommandResult:
@@ -271,7 +306,10 @@ class DeviceManager:
         if self._backend == Backend.NETSDK:
             return self._netsdk_reboot()
         return self._get_http().reboot(
-            self._ip, self._username, self._password, port=self._port,
+            self._ip,
+            self._username,
+            self._password,
+            port=self._port,
         )
 
     # ── netsdk backend implementations ───────────────────────────
@@ -303,7 +341,9 @@ class DeviceManager:
             if set_timestamp is not None:
                 session.sync_time(set_timestamp)
                 return DeviceTimeResult(
-                    success=True, action="set", timestamp=set_timestamp,
+                    success=True,
+                    action="set",
+                    timestamp=set_timestamp,
                 )
             dt = session.device_time()
             return DeviceTimeResult(
@@ -324,6 +364,7 @@ class DeviceManager:
     def _netsdk_rtsp_url(self, *, channel: int = 0, stream_type: int = 0) -> RtspUrlResult:
         try:
             from .netsdk.constants import StreamType
+
             st = StreamType(stream_type)
             session = self._get_netsdk_session()
             url = session.rtsp_url(channel, st)
@@ -334,6 +375,7 @@ class DeviceManager:
     def _netsdk_ptz(self, *, channel: int = 0, command: int = 0, speed: int = 4) -> CommandResult:
         try:
             from .netsdk.constants import PtzCommand, PtzSpeed
+
             session = self._get_netsdk_session()
             session.ptz(PtzCommand(command), channel=channel, speed=PtzSpeed(speed))
             return CommandResult(success=True)
@@ -341,10 +383,15 @@ class DeviceManager:
             return CommandResult(success=False, error=str(e))
 
     def _netsdk_ptz_preset(
-        self, *, channel: int = 0, command: int = 16, preset_index: int = 1,
+        self,
+        *,
+        channel: int = 0,
+        command: int = 16,
+        preset_index: int = 1,
     ) -> CommandResult:
         try:
             from .netsdk.constants import PtzCommand
+
             session = self._get_netsdk_session()
             session.ptz_preset(PtzCommand(command), preset_index, channel=channel)
             return CommandResult(success=True)

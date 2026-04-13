@@ -1,0 +1,38 @@
+# MANIFEST.in — controls source distribution (sdist) contents.
+#
+# Hatchling does not use MANIFEST.in directly, but this file serves as an
+# explicit record of what is intentionally excluded from the published package
+# and acts as a safety net for other build tools.
+#
+# The published pytvt sdist ships only:
+#   - src/pytvt/**     (pure-Python package)
+#   - tests/**         (test suite)
+#   - pyproject.toml
+#   - README.md
+#   - CHANGELOG.md
+#   - LICENSE
+#
+# Explicitly excluded (not redistributed):
+#   - bridges/         Node.js bridge scripts + native SDK helpers
+#   - tvt-api/         C/C++ SDK submodule (vendor binary, not Python)
+#   - research/        Reverse-engineering research scripts
+#   - tools/           Maintenance utilities
+#   - config.json      Local device inventory example (site-specific)
+#   - .env.example     Local secrets template
+
+include pyproject.toml
+include README.md
+include CHANGELOG.md
+include LICENSE
+
+recursive-include src/pytvt *.py
+recursive-include tests *.py
+
+prune bridges
+prune tvt-api
+prune research
+prune tools
+exclude config.json
+exclude .env.example
+exclude .editorconfig
+exclude .gitmodules

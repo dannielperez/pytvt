@@ -10,18 +10,22 @@ readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
 authors = [
-    { name = "Danniel Perez" },
+    { name = "Danniel Perez", email = "dannielperez@users.noreply.github.com" },
 ]
 keywords = ["tvt", "nvr", "camera", "scanner", "cctv", "ipc", "surveillance"]
 classifiers = [
     "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
     "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Topic :: System :: Networking",
+    "Topic :: System :: Systems Administration",
 ]
 dependencies = [
     "openpyxl>=3.1.0",
@@ -33,6 +37,8 @@ dev = [
     "pytest>=8.0",
     "ruff>=0.4",
     "mypy>=1.10",
+    "build>=1.0",
+    "twine>=5.0",
 ]
 
 [project.scripts]
@@ -49,6 +55,22 @@ Issues = "https://github.com/dannielperez/pytvt/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/pytvt"]
+
+[tool.hatch.build.targets.sdist]
+# Exclude vendor/native SDK artefacts, bridge scripts, research material,
+# local tooling, and dev-only config that must not ship on PyPI.
+exclude = [
+    "/.github",
+    "/.editorconfig",
+    "/.env.example",
+    "/.gitmodules",
+    "/bridges",
+    "/config.json",
+    "/research",
+    "/tools",
+    "/tvt-api",
+    "*.egg-info",
+]
 
 # ── Ruff ─────────────────────────────────────────────────────────────
 

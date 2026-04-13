@@ -5,6 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_call:  # allow the publish workflow to reuse this
 
 permissions:
   contents: read
@@ -28,3 +29,23 @@ jobs:
         run: ruff format --check src/ tests/
       - name: Test
         run: pytest --tb=short -q
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install build tools
+        run: pip install build twine
+      - name: Build sdist and wheel
+        run: python -m build
+      - name: Validate artifacts with twine
+        run: twine check --strict dist/*
+      - name: Upload dist artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error

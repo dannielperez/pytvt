@@ -2,6 +2,32 @@
 
 Bulk-scan TVT NVRs and enumerate every connected IP camera — pure Python, no vendor tools required.
 
+## Installation
+
+```bash
+pip install pytvt
+```
+
+Requires Python 3.10+. No native dependencies are needed for the default `protocol` and `webapi` backends.
+
+### What is included
+
+The PyPI package ships **only pure-Python source code**. It does not include, bundle, or auto-download:
+
+- The TVT C++ SDK (`libdvrnetsdk.so`) or any other native shared library
+- The Node.js bridge scripts (`bridges/sdk_local/`)
+- The `tvt-api` Docker container or its source
+
+### Optional native backends
+
+| Backend | What you need | How to enable |
+|---|---|---|
+| `netsdk` (ctypes) | `libdvrnetsdk.so` on Linux x86-64/aarch64 | Set `$PYTVT_NETSDK_LIB` to the library path |
+| `sdk-local` (Node subprocess) | Node.js 18+ + `libdvrnetsdk.so` + bridge script | Set `$PYTVT_SCAN_SCRIPT` to your `scan_nvr.mjs` path |
+| `sdk` / `sdk_http` | [tvt-api](https://github.com/dannielperez/tvt-api) Docker container | Start the container and set `$TVT_API_URL` |
+
+All three native backends will fail with a clear error message if their dependencies are unavailable. The default `protocol` and `webapi` backends always work with a plain `pip install`.
+
 ## What is pytvt?
 
 `pytvt` is a Python toolkit for managing [TVT](https://en.tvt.net.cn/) (Shenzhen TVT Digital Technology) NVR and IPC devices at scale. It connects to NVRs, authenticates via the proprietary binary protocol, and retrieves full camera channel inventories — names, IPs, ports, models, online status — across dozens of sites in parallel.
