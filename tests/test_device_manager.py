@@ -23,7 +23,6 @@ from pytvt.sdk_http_client import (
     RtspUrlResult,
 )
 
-
 CREDS = dict(ip="10.0.0.1", username="admin", password="pass123")
 
 
@@ -141,9 +140,9 @@ class TestDeviceManagerInit:
 
     def test_auto_detect_none_raises(self) -> None:
         with patch("pytvt.device_manager._netsdk_available", return_value=False), \
-             patch("pytvt.device_manager._docker_tvt_api_available", return_value=False):
-            with pytest.raises(NoBackendAvailable):
-                DeviceManager(**CREDS)
+             patch("pytvt.device_manager._docker_tvt_api_available", return_value=False), \
+             pytest.raises(NoBackendAvailable):
+            DeviceManager(**CREDS)
 
     def test_force_backend(self) -> None:
         mgr = DeviceManager(**CREDS, backend=Backend.SDK_HTTP)

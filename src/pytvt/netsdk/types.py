@@ -9,7 +9,6 @@ from __future__ import annotations
 import ctypes as ct
 from datetime import datetime
 
-
 # ── Time structures ─────────────────────────────────────────────────
 
 class DD_TIME(ct.Structure):
@@ -81,7 +80,7 @@ class DD_TIME_EX(ct.Structure):
 # ── Device info ─────────────────────────────────────────────────────
 
 class NET_SDK_DEVICE_FUNC_IPC(ct.Structure):
-    """IPC AI capability bitfield (32-bit flags + 7×32 reserved)."""
+    """IPC AI capability bitfield (32-bit flags + 7x32 reserved)."""
 
     _pack_ = 4
     _fields_ = [

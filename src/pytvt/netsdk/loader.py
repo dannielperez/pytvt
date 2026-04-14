@@ -13,11 +13,11 @@ library separately from the vendor and point pytvt at that installation.
 from __future__ import annotations
 
 import ctypes as ct
-from ctypes.util import find_library
 import os
 import platform
+from contextlib import suppress
+from ctypes.util import find_library
 from pathlib import Path
-
 
 SDK_PATH_ENV_VAR = "TVT_SDK_PATH"
 LEGACY_SDK_PATH_ENV_VAR = "PYTVT_NETSDK_LIB"
@@ -128,10 +128,8 @@ def load_sdk(sdk_path: str | os.PathLike[str] | None = None) -> ct.CDLL:
         for dep in ("libcrypto.so.1.1", "libcrypto.so", "libShareLib.so", "libNatClientSDK.so.1", "libNatClientSDK.so"):
             dep_path = Path(lib_dir) / dep
             if dep_path.exists():
-                try:
+                with suppress(OSError):
                     ct.CDLL(str(dep_path))
-                except OSError:
-                    pass
 
     try:
         return ct.CDLL(lib_path)

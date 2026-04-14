@@ -24,7 +24,6 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 
-
 # ---------------------------------------------------------------------------
 # Response dataclasses
 # ---------------------------------------------------------------------------
@@ -226,7 +225,7 @@ class SdkHttpClient:
         Returns raw JPEG bytes on success, ``None`` on failure.
         """
         try:
-            status, body, content_type = self._post_raw(
+            _status, body, content_type = self._post_raw(
                 "/snapshot",
                 self._connect_payload(ip, username, password, port, channel=channel),
             )

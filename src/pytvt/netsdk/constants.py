@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from enum import IntEnum, IntFlag
 
-
 # ── Stream types ────────────────────────────────────────────────────
 
 class StreamType(IntEnum):

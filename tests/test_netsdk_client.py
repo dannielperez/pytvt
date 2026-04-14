@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import ctypes as ct
 from datetime import datetime
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
 
+from pytvt.netsdk import bindings as sdk
 from pytvt.netsdk.client import (
     AlarmOutStatus,
     ChannelStatus,
@@ -48,8 +49,6 @@ from pytvt.netsdk.types import (
     NET_SDK_REC_FILE,
     NET_SDK_SMART_SUPPORT,
 )
-from pytvt.netsdk import bindings as sdk
-
 
 # ── Fixtures ────────────────────────────────────────────────────────
 
@@ -98,9 +97,9 @@ class TestNetSdkClientInit:
 
     def test_init_failure(self, mock_lib):
         mock_lib.NET_SDK_Init.return_value = False
-        with patch("pytvt.netsdk.client.load_sdk", return_value=mock_lib):
-            with pytest.raises(NetSdkError, match="Init"):
-                NetSdkClient()
+        with patch("pytvt.netsdk.client.load_sdk", return_value=mock_lib), \
+             pytest.raises(NetSdkError, match="Init"):
+            NetSdkClient()
 
     def test_context_manager(self, mock_lib):
         with patch("pytvt.netsdk.client.load_sdk", return_value=mock_lib):

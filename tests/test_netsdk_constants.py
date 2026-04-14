@@ -21,7 +21,6 @@ from pytvt.netsdk.constants import (
     StreamType,
 )
 
-
 # ── StreamType ──────────────────────────────────────────────────────
 
 class TestStreamType:
@@ -168,7 +167,7 @@ class TestRecordType:
 
     def test_intelligent_composite(self):
         expected = RecordType.OSC | RecordType.AVD | RecordType.TRIPWIRE | RecordType.PERIMETER | RecordType.VFD
-        assert RecordType.INTELLIGENT == expected
+        assert expected == RecordType.INTELLIGENT
 
     def test_all(self):
         assert RecordType.ALL == 0xFFFFFFFF

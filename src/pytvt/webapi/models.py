@@ -7,7 +7,6 @@ a parsed XML response from a specific API endpoint.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
 
 
 @dataclass

@@ -24,7 +24,6 @@ from pytvt.webapi.models import (
     SnapshotResult,
 )
 
-
 # ── Helpers ──────────────────────────────────────────────────────────
 
 def _ok_response(body: bytes, status: int = 200, content_type: str = "application/xml"):

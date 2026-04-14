@@ -95,7 +95,7 @@ def raise_for_status(status_code: int, sub_code: int = 0, status_string: str = "
         exc_class, description = entry
     else:
         exc_class = WebApiError
-        description = f"Unknown error"
+        description = "Unknown error"
 
     msg = f"TVT API error {status_code}"
     if sub_code:

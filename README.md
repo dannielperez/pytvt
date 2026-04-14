@@ -618,7 +618,6 @@ for device in devices:
 
 | Project | Description |
 |---|---|
-| [dannielperez/tvt](https://github.com/dannielperez/tvt) | Fork of 2BAD/tvt — TypeScript SDK FFI bindings |
 | [2BAD/tvt](https://github.com/2BAD/tvt) | Original TVT protocol reverse engineering (TypeScript) |
 | [koffi](https://koffi.dev/) | FFI bindings used by the SDK bridge |
 

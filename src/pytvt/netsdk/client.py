@@ -18,13 +18,11 @@ from __future__ import annotations
 
 import ctypes as ct
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Iterator
 
 from . import bindings as sdk
 from .constants import (
-    AlarmType,
     DiskProperty,
     DiskStatus,
     PtzCommand,

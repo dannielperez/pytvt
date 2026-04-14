@@ -156,7 +156,7 @@ class WebApiClient:
             WebApiError subclass for non-200 responses or TVT error codes.
         """
         full_path = f"{LAPI_BASE}{path}"
-        http_status, data, content_type = self._request("POST", full_path, body)
+        http_status, data, _content_type = self._request("POST", full_path, body)
 
         if http_status == 401:
             raise AuthenticationError(
@@ -192,7 +192,7 @@ class WebApiClient:
     def _get(self, path: str) -> bytes:
         """GET from a LAPI endpoint, check status, return response body bytes."""
         full_path = f"{LAPI_BASE}{path}"
-        http_status, data, content_type = self._request("GET", full_path)
+        http_status, data, _content_type = self._request("GET", full_path)
 
         if http_status == 401:
             raise AuthenticationError(
@@ -676,7 +676,6 @@ class WebApiClient:
 
                 ok = rtsp_snapshot(rtsp_url, output_path, timeout=rtsp_timeout)
                 if ok:
-                    import os
                     with open(output_path, "rb") as f:
                         image_data = f.read()
                     return SnapshotResult(
