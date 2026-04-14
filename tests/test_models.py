@@ -81,6 +81,22 @@ class TestDeviceEntry:
         d = DeviceEntry.from_dict({"ip": "1.1.1.1", "port": "8080"})
         assert d.port == 8080
 
+    def test_from_dict_nat_identifier(self):
+        d = DeviceEntry.from_dict({"identifier": "ABC123456"})
+        assert d.identifier == "ABC123456"
+        assert d.effective_connection_method == "nat"
+        assert d.connect_target == "ABC123456"
+
+    def test_from_dict_identifier_aliases(self):
+        d = DeviceEntry.from_dict({"serial": "ABC123456", "nat_server": "c2020.autonat.com", "nat_port": "8866"})
+        assert d.identifier == "ABC123456"
+        assert d.nat_server == "c2020.autonat.com"
+        assert d.nat_port == 8866
+
+    def test_explicit_connection_method_wins(self):
+        d = DeviceEntry(ip="10.0.0.1", identifier="ABC123456", connection_method="direct")
+        assert d.effective_connection_method == "direct"
+
 
 # ── CameraInfo ───────────────────────────────────────────────────────
 

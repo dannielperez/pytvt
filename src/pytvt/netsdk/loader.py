@@ -15,13 +15,17 @@ from __future__ import annotations
 import ctypes as ct
 import os
 import platform
-from contextlib import suppress
 from ctypes.util import find_library
 from pathlib import Path
 
 SDK_PATH_ENV_VAR = "TVT_SDK_PATH"
 LEGACY_SDK_PATH_ENV_VAR = "PYTVT_NETSDK_LIB"
 LIB_NAME = "libdvrnetsdk.so"
+_OPTIONAL_DEPENDENCY_GROUPS: tuple[tuple[str, ...], ...] = (
+    ("libcrypto.so.1.1", "libcrypto.so"),
+    ("libShareLib.so",),
+)
+_NAT_DEPENDENCY_GROUP: tuple[str, ...] = ("libNatClientSDK.so.1", "libNatClientSDK.so")
 
 
 class NetSdkUnavailable(ImportError):
@@ -98,7 +102,56 @@ def _lib_dir(lib_path: str) -> str | None:
     return None
 
 
-def load_sdk(sdk_path: str | os.PathLike[str] | None = None) -> ct.CDLL:
+def _candidate_targets(names: tuple[str, ...], lib_dir: str | None) -> list[str]:
+    targets: list[str] = []
+    seen: set[str] = set()
+
+    if lib_dir:
+        for name in names:
+            target = str(Path(lib_dir) / name)
+            if target not in seen:
+                seen.add(target)
+                targets.append(target)
+
+    for name in names:
+        if name not in seen:
+            seen.add(name)
+            targets.append(name)
+
+    return targets
+
+
+def _load_first_available(names: tuple[str, ...], lib_dir: str | None) -> tuple[bool, str | None]:
+    errors: list[str] = []
+    for target in _candidate_targets(names, lib_dir):
+        try:
+            ct.CDLL(target)
+            return True, None
+        except OSError as exc:
+            errors.append(f"{target}: {exc}")
+    if not errors:
+        return False, None
+    return False, "; ".join(errors)
+
+
+def _preload_companion_libraries(lib_dir: str | None, *, require_nat: bool = False) -> None:
+    for names in _OPTIONAL_DEPENDENCY_GROUPS:
+        _load_first_available(names, lib_dir)
+
+    nat_loaded, nat_error = _load_first_available(_NAT_DEPENDENCY_GROUP, lib_dir)
+    if require_nat and not nat_loaded:
+        detail = f" Details: {nat_error}" if nat_error else ""
+        raise NetSdkUnavailable(
+            "TVT AutoNAT requires libNatClientSDK.so from the vendor SDK installation. "
+            f"Set {SDK_PATH_ENV_VAR} to the SDK root or library directory.{detail}"
+        )
+
+
+def load_sdk(
+    sdk_path: str | os.PathLike[str] | None = None,
+    *,
+    require_nat: bool = False,
+) -> ct.CDLL:
     """Load and return the SDK shared library handle.
 
     Returns:
@@ -119,15 +172,8 @@ def load_sdk(sdk_path: str | os.PathLike[str] | None = None) -> ct.CDLL:
 
     lib_path = _find_lib(sdk_path)
 
-    # Pre-load companion .so files from the same directory so the
-    # dynamic linker can resolve them without LD_LIBRARY_PATH.
     lib_dir = _lib_dir(lib_path)
-    if lib_dir:
-        for dep in ("libcrypto.so.1.1", "libcrypto.so", "libShareLib.so", "libNatClientSDK.so.1", "libNatClientSDK.so"):
-            dep_path = Path(lib_dir) / dep
-            if dep_path.exists():
-                with suppress(OSError):
-                    ct.CDLL(str(dep_path))
+    _preload_companion_libraries(lib_dir, require_nat=require_nat)
 
     try:
         return ct.CDLL(lib_path)
@@ -139,7 +185,27 @@ def load_sdk(sdk_path: str | os.PathLike[str] | None = None) -> ct.CDLL:
         ) from exc
 
 
-def is_netsdk_available(sdk_path: str | os.PathLike[str] | None = None) -> bool:
+def ensure_nat_support(sdk_path: str | os.PathLike[str] | None = None) -> None:
+    """Validate that the NAT companion library can be loaded."""
+    if platform.system() != "Linux":
+        raise NetSdkUnavailable(
+            f"TVT NetSDK requires Linux (current: {platform.system()}). "
+            f"Install the vendor SDK separately and set {SDK_PATH_ENV_VAR} to its path."
+        )
+
+    arch = platform.machine()
+    if arch not in ("x86_64", "aarch64"):
+        raise NetSdkUnavailable(f"TVT NetSDK supports x86_64 and aarch64 (current: {arch}).")
+
+    lib_path = _find_lib(sdk_path)
+    _preload_companion_libraries(_lib_dir(lib_path), require_nat=True)
+
+
+def is_netsdk_available(
+    sdk_path: str | os.PathLike[str] | None = None,
+    *,
+    require_nat: bool = False,
+) -> bool:
     """Check if the native SDK can be loaded on this platform."""
     if platform.system() != "Linux":
         return False
@@ -147,6 +213,11 @@ def is_netsdk_available(sdk_path: str | os.PathLike[str] | None = None) -> bool:
         return False
     try:
         lib_path = _find_lib(sdk_path)
+    except NetSdkUnavailable:
+        return False
+
+    try:
+        _preload_companion_libraries(_lib_dir(lib_path), require_nat=require_nat)
     except NetSdkUnavailable:
         return False
 

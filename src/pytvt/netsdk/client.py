@@ -18,11 +18,15 @@ from __future__ import annotations
 
 import ctypes as ct
 import logging
+import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Literal
 
 from . import bindings as sdk
 from .constants import (
+    ConnectType,
     DiskProperty,
     DiskStatus,
     PtzCommand,
@@ -31,7 +35,7 @@ from .constants import (
     SdkError,
     StreamType,
 )
-from .loader import load_sdk
+from .loader import NetSdkUnavailable, ensure_nat_support, load_sdk
 from .types import (
     DD_TIME,
     NET_SDK_ALRAM_OUT_STATUS,
@@ -49,6 +53,7 @@ from .types import (
 )
 
 logger = logging.getLogger(__name__)
+ConnectionMethod = Literal["direct", "nat"]
 
 
 # ── Result dataclasses ──────────────────────────────────────────────
@@ -221,6 +226,18 @@ class NetSdkError(Exception):
         super().__init__(f"{message} (error={code})" if code else message)
 
 
+class NatUnavailableError(NetSdkError):
+    """Raised when AutoNAT support is unavailable in the current SDK setup."""
+
+
+class NatLoginFailed(NetSdkError):
+    """Raised when an AutoNAT login attempt fails."""
+
+
+class NatTimeoutError(NatLoginFailed):
+    """Raised when an AutoNAT login attempt times out."""
+
+
 # ── Session (logged-in handle) ──────────────────────────────────────
 
 
@@ -231,9 +248,22 @@ class DeviceSession:
     to ensure logout on exit.
     """
 
-    def __init__(self, handle: int, client: NetSdkClient) -> None:
+    def __init__(
+        self,
+        handle: int,
+        client: NetSdkClient,
+        *,
+        connection_method: ConnectionMethod = "direct",
+        target: str = "",
+        identifier: str | None = None,
+        handshake_duration_ms: int | None = None,
+    ) -> None:
         self._handle = handle
         self._client = client
+        self._connection_method = connection_method
+        self._target = target
+        self._identifier = identifier
+        self._handshake_duration_ms = handshake_duration_ms
 
     def __enter__(self) -> DeviceSession:
         return self
@@ -244,6 +274,22 @@ class DeviceSession:
     @property
     def handle(self) -> int:
         return self._handle
+
+    @property
+    def connection_method(self) -> ConnectionMethod:
+        return self._connection_method
+
+    @property
+    def target(self) -> str:
+        return self._target
+
+    @property
+    def identifier(self) -> str | None:
+        return self._identifier
+
+    @property
+    def handshake_duration_ms(self) -> int | None:
+        return self._handshake_duration_ms
 
     def _check(self, ok: bool, action: str) -> None:
         if not ok:
@@ -803,6 +849,10 @@ class NetSdkClient:
         recv_timeout: int = 5000,
         reconnect_interval: int = 0,
     ) -> None:
+        self._sdk_path = sdk_path
+        self._connect_timeout = connect_timeout
+        self._recv_timeout = recv_timeout
+        self._reconnect_interval = reconnect_interval
         self._lib = load_sdk(sdk_path=sdk_path)
         sdk.bind(self._lib)
         if not self._lib.NET_SDK_Init():
@@ -829,6 +879,22 @@ class NetSdkClient:
 
     def _last_error(self) -> int:
         return sdk._lib.NET_SDK_GetLastError()  # type: ignore[union-attr]
+
+    @staticmethod
+    def _sdk_error(code: int) -> SdkError | int:
+        return SdkError(code) if code in SdkError._value2member_map_ else code
+
+    @contextmanager
+    def _temporary_connect_timeout(self, timeout_ms: int | None):
+        if timeout_ms is None:
+            yield
+            return
+
+        self._lib.NET_SDK_SetConnectTime(timeout_ms, timeout_ms)
+        try:
+            yield
+        finally:
+            self._lib.NET_SDK_SetConnectTime(self._connect_timeout, self._recv_timeout)
 
     # ── Version info ────────────────────────────────────────────
 
@@ -927,6 +993,7 @@ class NetSdkClient:
             NetSdkError: On authentication or connection failure.
         """
         info = NET_SDK_DEVICEINFO()
+        started_at = time.perf_counter()
         handle = self._lib.NET_SDK_Login(
             host.encode("utf-8"),
             port,
@@ -934,21 +1001,172 @@ class NetSdkClient:
             password.encode("utf-8"),
             ct.byref(info),
         )
+        elapsed_ms = int((time.perf_counter() - started_at) * 1000)
         if handle < 0:
             code = self._last_error()
             raise NetSdkError(
                 f"Login to {host}:{port} as {username}",
-                SdkError(code) if code in SdkError._value2member_map_ else code,
+                self._sdk_error(code),
             )
         logger.info(
-            "Logged in to %s:%d — %s (%s) SN=%s",
+            "Connected via direct SDK to %s:%d in %dms — %s (%s) SN=%s",
             host,
             port,
+            elapsed_ms,
             info.deviceName.decode("utf-8", errors="replace"),
             info.firmwareVersion.decode("utf-8", errors="replace"),
             info.szSN.decode("utf-8", errors="replace"),
         )
-        return DeviceSession(handle, self)
+        return DeviceSession(
+            handle,
+            self,
+            connection_method="direct",
+            target=f"{host}:{port}",
+            handshake_duration_ms=elapsed_ms,
+        )
+
+    def login_nat(
+        self,
+        identifier: str,
+        username: str,
+        password: str,
+        timeout: float | None = None,
+        *,
+        nat_server: str | None = None,
+        nat_port: int | None = None,
+        connect_type: ConnectType | int | str = ConnectType.NAT20,
+    ) -> DeviceSession:
+        """Log in to a device through the SDK's NAT/P2P flow."""
+        device_id = identifier.strip()
+        if not device_id:
+            raise ValueError("identifier is required for NAT login")
+
+        try:
+            ensure_nat_support(self._sdk_path)
+        except NetSdkUnavailable as exc:
+            raise NatUnavailableError(str(exc)) from exc
+
+        resolved_connect_type = self._coerce_connect_type(connect_type)
+        timeout_ms = None if timeout is None else max(1, int(timeout * 1000))
+        nat_host = (nat_server or "").strip()
+        nat_service_port = 0 if nat_port is None else nat_port
+
+        if resolved_connect_type is ConnectType.NAT20 and nat_host and nat_service_port > 0:
+            ok = self._lib.NET_SDK_SetNat2Addr(
+                nat_host.encode("utf-8"),
+                nat_service_port,
+            )
+            if not ok:
+                raise NatUnavailableError(
+                    f"Failed to configure NAT2 server {nat_host}:{nat_service_port}",
+                    self._sdk_error(self._last_error()),
+                )
+
+        info = NET_SDK_DEVICEINFO()
+        started_at = time.perf_counter()
+        with self._temporary_connect_timeout(timeout_ms):
+            handle = self._lib.NET_SDK_LoginEx(
+                nat_host.encode("utf-8"),
+                nat_service_port,
+                username.encode("utf-8"),
+                password.encode("utf-8"),
+                ct.byref(info),
+                int(resolved_connect_type),
+                device_id.encode("utf-8"),
+            )
+        elapsed_ms = int((time.perf_counter() - started_at) * 1000)
+
+        if handle < 0:
+            code = self._last_error()
+            error = self._sdk_error(code)
+            message = f"NAT login to {device_id} as {username} via {resolved_connect_type.name}"
+            if error in {SdkError.NETWORK_RECV_TIMEOUT, SdkError.COMMAND_TIMEOUT}:
+                raise NatTimeoutError(message, error)
+            raise NatLoginFailed(message, error)
+
+        logger.info(
+            "Connected via %s SDK to %s in %dms — %s (%s) SN=%s",
+            resolved_connect_type.name.lower(),
+            device_id,
+            elapsed_ms,
+            info.deviceName.decode("utf-8", errors="replace"),
+            info.firmwareVersion.decode("utf-8", errors="replace"),
+            info.szSN.decode("utf-8", errors="replace"),
+        )
+        return DeviceSession(
+            handle,
+            self,
+            connection_method="nat",
+            target=device_id,
+            identifier=device_id,
+            handshake_duration_ms=elapsed_ms,
+        )
+
+    def connect(
+        self,
+        *,
+        method: ConnectionMethod = "direct",
+        username: str,
+        password: str,
+        host: str | None = None,
+        port: int = 9008,
+        identifier: str | None = None,
+        timeout: float | None = None,
+        nat_server: str | None = None,
+        nat_port: int | None = None,
+        connect_type: ConnectType | int | str = ConnectType.NAT20,
+        fallback_to_direct: bool = True,
+    ) -> DeviceSession:
+        """Connect to a device using either direct or NAT-backed login."""
+        if method == "direct":
+            if not host:
+                raise ValueError("host is required for direct connections")
+            return self.login(host, username, password, port=port)
+
+        if method != "nat":
+            raise ValueError(f"Unsupported connection method: {method!r}")
+
+        if not identifier:
+            raise ValueError("identifier is required for NAT connections")
+
+        try:
+            return self.login_nat(
+                identifier,
+                username,
+                password,
+                timeout=timeout,
+                nat_server=nat_server,
+                nat_port=nat_port,
+                connect_type=connect_type,
+            )
+        except (NatUnavailableError, NatLoginFailed, NatTimeoutError) as exc:
+            if fallback_to_direct and host:
+                logger.warning(
+                    "NAT login failed for %s (%s); falling back to direct %s:%d",
+                    identifier,
+                    exc,
+                    host,
+                    port,
+                )
+                return self.login(host, username, password, port=port)
+            raise
+
+    @staticmethod
+    def _coerce_connect_type(connect_type: ConnectType | int | str) -> ConnectType:
+        if isinstance(connect_type, ConnectType):
+            return connect_type
+        if isinstance(connect_type, str):
+            normalized = connect_type.strip().upper()
+            if normalized == "NAT":
+                return ConnectType.NAT
+            if normalized in {"NAT20", "NAT2", "P2P", "P2P2"}:
+                return ConnectType.NAT20
+            raise ValueError(f"Unsupported NAT connect type: {connect_type!r}")
+        return ConnectType(connect_type)
+
+
+class TVTClient(NetSdkClient):
+    """Compatibility-friendly alias for NetSdkClient with ``connect`` support."""
 
     # ── Upgrade progress ────────────────────────────────────────
 

@@ -26,6 +26,12 @@ Legacy environment variables `PYTVT_NETSDK_LIB` and `PYTVT_SCAN_SCRIPT` are stil
 
 All SDK features fail gracefully with clear errors when dependencies are absent. The default `protocol` and `webapi` backends work with a plain `pip install`.
 
+### AutoNAT / P2P SDK Login
+
+On Linux, the vendor SDK also exposes AutoNAT / P2P login through `NET_SDK_LoginEx(...)` with `NET_SDK_CONNECT_NAT` or `NET_SDK_CONNECT_NAT20`. `pytvt` now wraps that SDK-managed flow directly; it does not implement the NAT traversal protocol itself.
+
+Use NAT mode when the recorder is not directly reachable by IP but is provisioned for the vendor's cloud / P2P path. AutoNAT still requires a local SDK installation with both `libdvrnetsdk.so` and `libNatClientSDK.so` present.
+
 ### Example SDK loader
 
 ```python
@@ -186,7 +192,7 @@ client.ensure_webapi_available()  # enables via NvrClient if disabled
 
 The `DeviceManager` provides a unified facade for TVT device operations that automatically selects the best available backend:
 
-1. **Native SDK** (`netsdk`) — direct ctypes calls to `libdvrnetsdk.so` on Linux x86_64/aarch64
+1. **Native SDK** (`netsdk`) — direct ctypes calls to `libdvrnetsdk.so` on Linux x86_64/aarch64, including AutoNAT via `NET_SDK_LoginEx`
 2. **SDK HTTP** (`sdk_http`) — HTTP calls to a compatible SDK bridge service (any platform)
 
 ```python
@@ -209,6 +215,22 @@ with DeviceManager("10.200.50.251", "admin", "password", sdk_path="/opt/tvt-sdk"
 
 # Force a specific backend
 mgr = DeviceManager("10.200.50.251", "admin", "password", backend="sdk_http", api_url="http://localhost:3000")
+```
+
+AutoNAT uses the same facade. Pass a device serial / UID instead of an IP address:
+
+```python
+from pytvt import DeviceManager
+
+with DeviceManager(
+  None,
+  "admin",
+  "password",
+  identifier="ABC123456",
+  sdk_path="/opt/tvt-sdk",
+) as mgr:
+  print(mgr.connection_method)
+  print(mgr.device_info())
 ```
 
 All methods return the same result types regardless of which backend is active. If no backend is available, `NoBackendAvailable` is raised.
@@ -237,6 +259,94 @@ export TVT_SDK_PATH=/opt/tvt-sdk
 export TVT_SCAN_SCRIPT=/opt/pytvt-bridges/scan_nvr.mjs
 pytvt devices.json --backend sdk-local
 ```
+
+### Single-device Connect
+
+```bash
+# Direct SDK login
+pytvt connect --host 10.200.50.251 -u admin -p password --sdk-path /opt/tvt-sdk
+
+# AutoNAT / P2P login by device serial / UID
+pytvt connect --nat --id ABC123456 -u admin -p password --sdk-path /opt/tvt-sdk
+```
+
+Use `--nat-server` and `--nat-port` when your SDK build requires an explicit NAT2 endpoint override.
+
+### Bulk Connect (connect-many)
+
+Connect to many devices concurrently via direct or AutoNAT:
+
+```bash
+# devices.json: [{"ip": "10.0.0.1"}, {"identifier": "ABC123"}, ...]
+pytvt connect-many --file devices.json -u admin -p password --sdk-path /opt/tvt-sdk
+
+# Prefer NAT for devices with identifiers
+pytvt connect-many --file devices.json -u admin -p password --nat --concurrency 20
+
+# JSON output
+pytvt connect-many --file devices.json -u admin -p password --json
+```
+
+Output table:
+
+```
+TARGET                         STATUS     LATENCY    METHOD     DEVICE               ERROR
+----------------------------------------------------------------------------------------------
+10.0.0.1                       OK         42ms       direct     NVR-01
+ABC123                         OK         320ms      nat        NVR-02
+10.0.0.3                       FAIL       5001ms     direct                          Connection timed out
+```
+
+### Scaling AutoNAT Connections
+
+The `ConnectionPool` class provides thread-safe session management for many devices:
+
+```python
+from pytvt.connection_pool import ConnectionPool
+
+pool = ConnectionPool(
+    sdk_path="/opt/tvt-sdk",
+    max_active_sessions=50,    # hard cap on concurrent sessions
+    idle_timeout=300,          # evict idle sessions after 5 min
+    keepalive_interval=60,     # probe idle sessions every 60s
+    reconnect_backoff=5.0,     # base seconds between reconnect retries
+    prefer_nat=True,           # prefer NAT when identifier is available
+)
+
+# Acquire and reuse sessions
+session = pool.acquire(ip="10.0.0.1", username="admin", password="pass")
+info = session.device_info()
+pool.release(session)  # return to pool for reuse
+
+# Session is reused on next acquire for same target
+session2 = pool.acquire(ip="10.0.0.1", username="admin", password="pass")
+assert session2 is session  # same handle
+
+pool.close()
+```
+
+For one-shot bulk operations, use `connect_many()`:
+
+```python
+from pytvt.connection_pool import connect_many
+from pytvt.models import DeviceEntry
+
+devices = [
+    DeviceEntry(ip="10.0.0.1"),
+    DeviceEntry(identifier="ABC123"),
+    DeviceEntry(ip="10.0.0.3", identifier="DEF456", connection_preference="nat"),
+]
+
+results = connect_many(devices, "admin", "password", sdk_path="/opt/tvt-sdk", max_workers=20)
+for r in results:
+    print(f"{r.target}: {'OK' if r.success else 'FAIL'} via {r.connection_method} ({r.latency_ms}ms)")
+```
+
+**Limits of the vendor SDK:**
+- The SDK runs one NAT channel per thread; set `max_workers` / `max_active_sessions` to match your host capacity (typically 50-100).
+- NAT handshakes take 200-3000 ms depending on P2P path; budget `--timeout` accordingly (default: 10s).
+- The SDK keepalive is opaque; `ConnectionPool` uses lightweight `device_info()` probes as a health check.
+- SDK global state (`NET_SDK_Init`) is per-process; avoid running multiple pools in the same process.
 
 ### Enable an SDK bridge service
 

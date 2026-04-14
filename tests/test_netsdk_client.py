@@ -19,13 +19,18 @@ from pytvt.netsdk.client import (
     DiskInfo,
     IpcInfo,
     LogEntry,
+    NatLoginFailed,
+    NatTimeoutError,
+    NatUnavailableError,
     NetSdkClient,
     NetSdkError,
     RecordingDateRange,
     RecordingFile,
     SmartSupport,
+    TVTClient,
 )
 from pytvt.netsdk.constants import (
+    ConnectType,
     DiskProperty,
     DiskStatus,
     PtzCommand,
@@ -34,6 +39,7 @@ from pytvt.netsdk.constants import (
     SdkError,
     StreamType,
 )
+from pytvt.netsdk.loader import NetSdkUnavailable
 from pytvt.netsdk.types import (
     DD_TIME,
     NET_SDK_ALRAM_OUT_STATUS,
@@ -65,6 +71,8 @@ def mock_lib():
     lib.NET_SDK_GetSDKBuildVersion.return_value = 20260116
     lib.NET_SDK_GetLastError.return_value = 0
     lib.NET_SDK_Login.return_value = 1  # valid handle
+    lib.NET_SDK_LoginEx.return_value = 2  # valid NAT handle
+    lib.NET_SDK_SetNat2Addr.return_value = True
     lib.NET_SDK_Logout.return_value = True
     return lib
 
@@ -180,6 +188,91 @@ class TestLogin:
         client.login("10.0.0.1", "admin", "pass", port=9009)
         call_args = mock_lib.NET_SDK_Login.call_args
         assert call_args[0][1] == 9009
+
+
+class TestNatLogin:
+    def test_login_nat_success(self, client, mock_lib):
+        with patch("pytvt.netsdk.client.ensure_nat_support"):
+            session = client.login_nat("ABC123456", "admin", "pass")
+
+        assert session.handle == 2
+        assert session.connection_method == "nat"
+        call_args = mock_lib.NET_SDK_LoginEx.call_args[0]
+        assert call_args[5] == ConnectType.NAT20
+        assert call_args[6] == b"ABC123456"
+
+    def test_login_nat_configures_nat20_server(self, client, mock_lib):
+        with patch("pytvt.netsdk.client.ensure_nat_support"):
+            client.login_nat(
+                "ABC123456",
+                "admin",
+                "pass",
+                nat_server="c2020.autonat.com",
+                nat_port=8866,
+            )
+
+        mock_lib.NET_SDK_SetNat2Addr.assert_called_once_with(b"c2020.autonat.com", 8866)
+
+    def test_login_nat_invalid_identifier(self, client):
+        with pytest.raises(ValueError, match="identifier is required"):
+            client.login_nat("", "admin", "pass")
+
+    def test_login_nat_missing_library(self, client):
+        with (
+            patch("pytvt.netsdk.client.ensure_nat_support", side_effect=NetSdkUnavailable("missing nat lib")),
+            pytest.raises(NatUnavailableError, match="missing nat lib"),
+        ):
+            client.login_nat("ABC123456", "admin", "pass")
+
+    def test_login_nat_failure(self, client, mock_lib):
+        mock_lib.NET_SDK_LoginEx.return_value = -1
+        mock_lib.NET_SDK_GetLastError.return_value = 1
+        with patch("pytvt.netsdk.client.ensure_nat_support"), pytest.raises(NatLoginFailed, match="NAT login"):
+            client.login_nat("ABC123456", "admin", "wrong")
+
+    def test_login_nat_timeout(self, client, mock_lib):
+        mock_lib.NET_SDK_LoginEx.return_value = -1
+        mock_lib.NET_SDK_GetLastError.return_value = SdkError.NETWORK_RECV_TIMEOUT
+        with patch("pytvt.netsdk.client.ensure_nat_support"), pytest.raises(NatTimeoutError, match="NAT login"):
+            client.login_nat("ABC123456", "admin", "pass")
+
+
+class TestConnectFacade:
+    def test_connect_direct_dispatches_to_login(self, client):
+        direct_session = MagicMock(spec=DeviceSession)
+        with patch.object(client, "login", return_value=direct_session) as mock_login:
+            session = client.connect(
+                method="direct",
+                host="10.0.0.1",
+                username="admin",
+                password="pass",
+            )
+
+        assert session is direct_session
+        mock_login.assert_called_once_with("10.0.0.1", "admin", "pass", port=9008)
+
+    def test_connect_nat_falls_back_to_direct(self, client):
+        direct_session = MagicMock(spec=DeviceSession)
+        with (
+            patch.object(client, "login_nat", side_effect=NatTimeoutError("timeout")),
+            patch.object(client, "login", return_value=direct_session) as mock_login,
+        ):
+            session = client.connect(
+                method="nat",
+                host="10.0.0.1",
+                identifier="ABC123456",
+                username="admin",
+                password="pass",
+            )
+
+        assert session is direct_session
+        mock_login.assert_called_once_with("10.0.0.1", "admin", "pass", port=9008)
+
+    def test_tvtclient_inherits_connect(self, mock_lib):
+        with patch("pytvt.netsdk.client.load_sdk", return_value=mock_lib):
+            client = TVTClient()
+            assert isinstance(client, NetSdkClient)
+            client.cleanup()
 
 
 # ── DeviceSession context manager ──────────────────────────────────

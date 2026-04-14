@@ -1,3 +1,44 @@
+# pytvt v0.6.0
+
+AutoNAT / P2P support and scalable connection pooling for managing many devices concurrently through the vendor SDK.
+
+## Highlights
+
+**AutoNAT login** — `pytvt` now wraps the vendor SDK's `NET_SDK_LoginEx` with `ConnectType.NAT` / `ConnectType.NAT20` for P2P device access. Devices that are not directly IP-reachable can be managed by serial / UID identifier through the vendor's cloud relay. Requires `libdvrnetsdk.so` + `libNatClientSDK.so` on Linux.
+
+**Connection pooling** — New `ConnectionPool` provides thread-safe session management with reuse, keepalive probing, stale eviction, reconnection with backoff, and configurable `max_active_sessions`. Per-session `SessionMetrics` track handshake time, idle duration, and health status.
+
+**Bulk connect** — `connect_many()` connects to a list of devices concurrently via ThreadPoolExecutor, returning structured `SessionResult` objects. New `pytvt connect-many` CLI command reads a JSON device file and outputs a status table or JSON.
+
+**Unified connect facade** — `NetSdkClient.connect(method="direct"|"nat", ...)` provides a single entry point for both connection modes with automatic NAT→direct fallback.
+
+## What's new
+
+- `NetSdkClient.login_nat()` and `NetSdkClient.connect()` facade
+- `TVTClient` convenience alias
+- `NatUnavailableError`, `NatLoginFailed`, `NatTimeoutError` exceptions
+- `ensure_nat_support()` / `load_sdk(require_nat=True)` NAT validation
+- `ConnectionPool` with keepalive, eviction, reconnection
+- `connect_many()` bulk concurrent connector
+- `SessionMetrics`, `SessionResult`, `PoolStats` observability types
+- `pytvt connect` — single-device direct or NAT login CLI
+- `pytvt connect-many` — bulk device connection CLI with table/JSON output
+- `DeviceManager.from_device()` classmethod, NAT-aware auto-detect
+- `DeviceEntry` extended: `identifier`, `connection_method`, `nat_server`, `nat_port`, `connection_preference`, `last_connection_method`, `nat_capable`
+- `NET_SDK_LoginEx` and `NET_SDK_SetNat2Addr` ctypes bindings
+- SDK NAT capability documentation in `src/pytvt/sdk/nat_capabilities.md`
+- 47 new tests (583 total), ruff clean
+
+## Upgrade notes
+
+- No breaking changes to existing APIs
+- Direct connection workflows are unaffected
+- NAT features require Linux with the vendor SDK + NAT companion library
+- `DeviceEntry.from_dict()` now accepts `identifier` aliases: `id`, `uid`, `serial`, `sn`
+- New `connection_preference` field on `DeviceEntry` allows per-device NAT/direct/auto preference
+
+---
+
 # pytvt v0.5.1
 
 Release hardening for public PyPI distribution. This release keeps local SDK-enabled workflows intact while ensuring the published package never redistributes proprietary TVT SDK components.

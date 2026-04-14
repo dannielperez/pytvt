@@ -36,6 +36,7 @@ import shutil
 import subprocess
 from enum import Enum, unique
 
+from .models import DeviceEntry
 from .sdk_http_client import (
     CommandResult,
     DeviceInfoResult,
@@ -71,14 +72,25 @@ class NoBackendAvailable(RuntimeError):
 # ── Availability probes ──────────────────────────────────────────────
 
 
-def _netsdk_available(sdk_path: str | None = None) -> bool:
+def _netsdk_available(sdk_path: str | None = None, *, require_nat: bool = False) -> bool:
     """Check if the native SDK can be loaded (Linux + library present)."""
     try:
         from .netsdk.loader import is_netsdk_available
 
-        return is_netsdk_available(sdk_path=sdk_path)
+        return is_netsdk_available(sdk_path=sdk_path, require_nat=require_nat)
     except Exception:
         return False
+
+
+def _resolve_connection_method(ip: str, identifier: str, connection_method: str | None) -> str:
+    method = (connection_method or "").strip().lower()
+    if method in {"direct", "nat"}:
+        return method
+    if identifier:
+        return "nat"
+    if ip:
+        return "direct"
+    raise ValueError("Either ip or identifier is required")
 
 
 def _docker_tvt_api_available(base_url: str, timeout: int = 3) -> bool:
@@ -145,20 +157,30 @@ class DeviceManager:
 
     def __init__(
         self,
-        ip: str,
+        ip: str | None,
         username: str,
         password: str,
         *,
         port: int = 6036,
+        identifier: str | None = None,
+        connection_method: str | None = None,
+        nat_server: str | None = None,
+        nat_port: int | None = None,
+        nat_type: str | int = "nat20",
         backend: Backend | str | None = None,
         api_url: str = "http://localhost:3000",
         sdk_path: str | None = None,
         timeout: int = 30,
     ) -> None:
-        self._ip = ip
+        self._ip = ip or ""
         self._username = username
         self._password = password
         self._port = port
+        self._identifier = (identifier or "").strip()
+        self._connection_method = _resolve_connection_method(self._ip, self._identifier, connection_method)
+        self._nat_server = (nat_server or "").strip() or None
+        self._nat_port = nat_port
+        self._nat_type = nat_type
         self._api_url = api_url
         self._sdk_path = sdk_path
         self._timeout = timeout
@@ -169,7 +191,15 @@ class DeviceManager:
         else:
             self._backend = self._auto_detect()
 
-        logger.info("DeviceManager(%s) using backend=%s", ip, self._backend)
+        if self._connection_method == "nat" and self._backend != Backend.NETSDK:
+            raise NoBackendAvailable("NAT connections require the native netsdk backend.")
+
+        logger.info(
+            "DeviceManager(%s) using backend=%s connection=%s",
+            self.target,
+            self._backend,
+            self._connection_method,
+        )
 
         # Lazy-init holders
         self._http_client: SdkHttpClient | None = None
@@ -177,6 +207,14 @@ class DeviceManager:
 
     def _auto_detect(self) -> Backend:
         """Pick the best available backend."""
+        if self._connection_method == "nat":
+            if _netsdk_available(self._sdk_path, require_nat=True):
+                return Backend.NETSDK
+            raise NoBackendAvailable(
+                "No NAT-capable backend available. Install the vendor SDK, ensure libNatClientSDK.so is present, "
+                "and set TVT_SDK_PATH or pass sdk_path=...."
+            )
+
         if _netsdk_available(self._sdk_path):
             return Backend.NETSDK
         if _docker_tvt_api_available(self._api_url, timeout=min(self._timeout, 5)):
@@ -195,6 +233,46 @@ class DeviceManager:
     def ip(self) -> str:
         return self._ip
 
+    @property
+    def identifier(self) -> str:
+        return self._identifier
+
+    @property
+    def connection_method(self) -> str:
+        return self._connection_method
+
+    @property
+    def target(self) -> str:
+        return self._ip or self._identifier
+
+    @classmethod
+    def from_device(
+        cls,
+        device: DeviceEntry,
+        username: str,
+        password: str,
+        *,
+        backend: Backend | str | None = None,
+        api_url: str = "http://localhost:3000",
+        sdk_path: str | None = None,
+        timeout: int = 30,
+    ) -> DeviceManager:
+        """Create a manager from a :class:`pytvt.models.DeviceEntry`."""
+        return cls(
+            device.ip or None,
+            username,
+            password,
+            port=device.port or 6036,
+            identifier=device.identifier or None,
+            connection_method=device.effective_connection_method,
+            nat_server=device.nat_server or None,
+            nat_port=device.nat_port or None,
+            backend=backend,
+            api_url=api_url,
+            sdk_path=sdk_path,
+            timeout=timeout,
+        )
+
     # ── Internal lazy accessors ──────────────────────────────────
 
     def _get_http(self) -> SdkHttpClient:
@@ -208,11 +286,18 @@ class DeviceManager:
             from .netsdk.client import NetSdkClient
 
             client = NetSdkClient(sdk_path=self._sdk_path)
-            self._netsdk_session = client.login(
-                self._ip,
-                self._username,
-                self._password,
+            self._netsdk_session = client.connect(
+                method=self._connection_method,  # type: ignore[arg-type]
+                username=self._username,
+                password=self._password,
+                host=self._ip or None,
                 port=self._port,
+                identifier=self._identifier or None,
+                timeout=float(self._timeout),
+                nat_server=self._nat_server,
+                nat_port=self._nat_port,
+                connect_type=self._nat_type,
+                fallback_to_direct=bool(self._ip),
             )
             # Keep a ref to the client so it doesn't get GC'd
             self._netsdk_session._manager_client = client  # type: ignore[attr-defined]
@@ -433,4 +518,7 @@ class DeviceManager:
         self.close()
 
     def __repr__(self) -> str:
-        return f"DeviceManager({self._ip!r}, backend={self._backend!r})"
+        return (
+            f"DeviceManager(target={self.target!r}, backend={self._backend!r}, "
+            f"connection_method={self._connection_method!r})"
+        )

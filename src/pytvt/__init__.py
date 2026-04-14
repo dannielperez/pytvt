@@ -29,9 +29,10 @@ in the pip package.  Set ``$TVT_SCAN_SCRIPT`` to the path of your local
 ``scan_nvr.mjs`` bridge script to enable it.
 """
 
-__version__ = "0.5.1"
+__version__ = "0.6.0"
 
 from .config import load_config
+from .connection_pool import ConnectionPool, PoolStats, SessionMetrics, SessionResult, connect_many
 from .constants import BackendFamily, CompositeStrategy, ExecutionPlan, IntegrationMode, resolve_backend
 from .device_manager import Backend, DeviceManager, NoBackendAvailable, available_backends
 from .diff import DeviceDiff, ScanDiff, diff_scans, load_scan_file
@@ -95,6 +96,12 @@ __all__ = [
     "available_backends",
     # Config
     "load_config",
+    # Connection pool
+    "ConnectionPool",
+    "PoolStats",
+    "SessionMetrics",
+    "SessionResult",
+    "connect_many",
     # Scanner
     "filter_tvt_devices",
     "load_devices",

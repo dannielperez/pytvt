@@ -18,7 +18,7 @@ for device management operations not available via HTTP APIs:
 Platform: Linux x86-64 and aarch64 only ($TVT_SDK_PATH or sdk_path=... to override path).
 """
 
-from .client import NetSdkClient
+from .client import NatLoginFailed, NatTimeoutError, NatUnavailableError, NetSdkClient, TVTClient
 from .constants import (
     AlarmType,
     CameraType,
@@ -33,11 +33,16 @@ from .constants import (
     SmartEventType,
     StreamType,
 )
-from .loader import NetSdkUnavailable, is_netsdk_available
+from .loader import NetSdkUnavailable, ensure_nat_support, is_netsdk_available
 
 __all__ = [
     "NetSdkClient",
+    "TVTClient",
     "NetSdkUnavailable",
+    "NatUnavailableError",
+    "NatLoginFailed",
+    "NatTimeoutError",
+    "ensure_nat_support",
     "is_netsdk_available",
     "AlarmType",
     "CameraType",

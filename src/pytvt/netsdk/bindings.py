@@ -50,6 +50,23 @@ def bind(lib: ct.CDLL) -> None:
         ct.POINTER(t.NET_SDK_DEVICEINFO),  # lpDeviceInfo
     ]
 
+    lib.NET_SDK_LoginEx.restype = ct.c_long
+    lib.NET_SDK_LoginEx.argtypes = [
+        ct.c_char_p,  # sDVRIP / NAT server address
+        ct.c_ushort,  # wDVRPort / NAT server port
+        ct.c_char_p,  # sUserName
+        ct.c_char_p,  # sPassword
+        ct.POINTER(t.NET_SDK_DEVICEINFO),  # lpDeviceInfo
+        ct.c_int,  # NET_SDK_CONNECT_TYPE
+        ct.c_char_p,  # sDevSN / UID
+    ]
+
+    lib.NET_SDK_SetNat2Addr.restype = ct.c_bool
+    lib.NET_SDK_SetNat2Addr.argtypes = [
+        ct.c_char_p,  # sServerAddr
+        ct.c_ushort,  # wDVRPort
+    ]
+
     lib.NET_SDK_Logout.restype = ct.c_bool
     lib.NET_SDK_Logout.argtypes = [ct.c_long]
 

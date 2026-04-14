@@ -5,6 +5,59 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] — 2026-04-14
+
+### Added
+
+- **AutoNAT / P2P login** — wrap the vendor SDK's `NET_SDK_LoginEx` with
+  `ConnectType.NAT` and `ConnectType.NAT20` for P2P device access without
+  direct IP reachability. New `login_nat()` and unified `connect()` facade on
+  `NetSdkClient`.
+- **`TVTClient`** — convenience alias for `NetSdkClient` with `connect()`
+  support.
+- **NAT companion library validation** — `ensure_nat_support()` and
+  `load_sdk(require_nat=True)` verify that `libNatClientSDK.so` is present
+  before attempting NAT operations.
+- **NAT-specific exceptions** — `NatUnavailableError`, `NatLoginFailed`,
+  `NatTimeoutError` for granular error handling.
+- **`ConnectionPool`** — thread-safe session pool with configurable
+  `max_active_sessions`, `idle_timeout`, `reconnect_backoff`, and
+  `keepalive_interval`. Background keepalive thread probes idle sessions;
+  stale sessions are evicted automatically.
+- **`connect_many()`** — bulk concurrent device connection via ThreadPoolExecutor.
+  Returns structured `SessionResult` per device with target, success flag,
+  latency, connection method, device info, and error detail.
+- **`SessionMetrics`** — per-session observability: handshake time, idle duration,
+  session duration, keepalive health, reconnect count.
+- **`PoolStats`** — aggregate pool counters (active, idle, connects, failures,
+  reconnects).
+- **`pytvt connect` CLI** — single-device SDK or AutoNAT login with
+  `--nat`/`--direct`, `--id`, `--nat-server`, `--nat-port`, `--nat-type` flags.
+- **`pytvt connect-many` CLI** — bulk device connection from a JSON file with
+  `--concurrency`, `--nat`, `--json` output, and tabular text output.
+- **`DeviceManager` NAT integration** — `from_device()` classmethod,
+  `connection_method`/`identifier` properties, NAT-aware `_auto_detect()`, and
+  `connect()` routing for both direct and NAT sessions.
+- **`DeviceEntry` model extensions** — new fields: `identifier`,
+  `connection_method`, `nat_server`, `nat_port`, `connection_preference`,
+  `last_connection_method`, `nat_capable`. `from_dict()` supports aliases
+  (`id`, `uid`, `serial`, `sn`, `prefer`). `effective_connection_method`
+  respects explicit preference.
+- **ctypes bindings** — `NET_SDK_LoginEx` and `NET_SDK_SetNat2Addr` declarations
+  in `netsdk/bindings.py`.
+- **SDK capability documentation** — `src/pytvt/sdk/nat_capabilities.md`.
+- **47 new tests** — connection pool lifecycle, keepalive, eviction, bulk connect,
+  CLI parsers, model extensions. Total test count: 583.
+
+### Changed
+
+- `DeviceManager._get_netsdk_session()` now uses `client.connect()` (keyword-only)
+  instead of `client.login()` for unified direct/NAT routing.
+- `netsdk/loader.py` refactored companion loading into `_preload_companion_libraries()`
+  with structured dependency groups and explicit NAT validation.
+- `DeviceSession` now carries `connection_method`, `target`, `identifier`, and
+  `handshake_duration_ms` metadata.
+
 ## [0.5.1] — 2026-04-14
 
 ### Changed
@@ -124,6 +177,7 @@ comprehensive test coverage.
 
 - Licensed under MIT starting from 1.0.0. Previous versions were AGPLv3.
 
+[0.6.0]: https://github.com/dannielperez/pytvt/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/dannielperez/pytvt/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/dannielperez/pytvt/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/dannielperez/pytvt/compare/v0.3.0...v0.4.0

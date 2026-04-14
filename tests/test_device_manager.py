@@ -16,6 +16,7 @@ from pytvt.device_manager import (
     _netsdk_available,
     available_backends,
 )
+from pytvt.models import DeviceEntry
 from pytvt.sdk_http_client import (
     CommandResult,
     DeviceInfoResult,
@@ -142,6 +143,20 @@ class TestDeviceManagerInit:
             mock_native.assert_called_once_with("/opt/tvt-sdk")
             mgr.close()
 
+    def test_auto_detect_nat_requires_native_nat_support(self) -> None:
+        with patch("pytvt.device_manager._netsdk_available", return_value=True) as mock_native:
+            mgr = DeviceManager(None, "admin", "pass123", identifier="ABC123456")
+            assert mgr.backend == Backend.NETSDK
+            mock_native.assert_called_once_with(None, require_nat=True)
+            mgr.close()
+
+    def test_auto_detect_nat_without_sdk_raises(self) -> None:
+        with (
+            patch("pytvt.device_manager._netsdk_available", return_value=False),
+            pytest.raises(NoBackendAvailable, match="NAT-capable backend"),
+        ):
+            DeviceManager(None, "admin", "pass123", identifier="ABC123456")
+
     def test_auto_detect_http_fallback(self) -> None:
         with (
             patch("pytvt.device_manager._netsdk_available", return_value=False),
@@ -178,6 +193,18 @@ class TestDeviceManagerInit:
     def test_context_manager(self) -> None:
         with DeviceManager(**CREDS, backend=Backend.SDK_HTTP) as mgr:
             assert mgr.backend == Backend.SDK_HTTP
+
+    def test_from_device_nat(self) -> None:
+        device = DeviceEntry(
+            identifier="ABC123456",
+            connection_method="nat",
+            nat_server="c2020.autonat.com",
+            nat_port=8866,
+        )
+        mgr = DeviceManager.from_device(device, "admin", "pass123", backend=Backend.NETSDK)
+        assert mgr.identifier == "ABC123456"
+        assert mgr.connection_method == "nat"
+        mgr.close()
 
 
 # ── HTTP backend dispatch ────────────────────────────────────────────
@@ -279,6 +306,20 @@ class TestNetsdkDispatch:
         assert result.device_name == "NVR-02"
         assert result.serial_number == "SN2"
 
+    def test_nat_session_uses_connect(self) -> None:
+        mgr = DeviceManager("10.0.0.1", "admin", "pass123", identifier="ABC123456", backend=Backend.NETSDK)
+        mock_session = MagicMock()
+        with patch("pytvt.netsdk.client.NetSdkClient") as mock_cls:
+            mock_cls.return_value.connect.return_value = mock_session
+            session = mgr._get_netsdk_session()
+
+        assert session is mock_session
+        kwargs = mock_cls.return_value.connect.call_args.kwargs
+        assert kwargs["method"] == "nat"
+        assert kwargs["identifier"] == "ABC123456"
+        assert kwargs["fallback_to_direct"] is True
+        mgr.close()
+
     def test_device_info_error(self, mgr: DeviceManager) -> None:
         mock_session = MagicMock()
         mock_session.device_info.side_effect = RuntimeError("Connection refused")
@@ -369,7 +410,7 @@ class TestNetsdkDispatch:
         mgr = DeviceManager(**CREDS, backend=Backend.NETSDK, sdk_path="/opt/tvt-sdk")
         with patch("pytvt.netsdk.client.NetSdkClient") as mock_cls:
             mock_session = MagicMock()
-            mock_cls.return_value.login.return_value = mock_session
+            mock_cls.return_value.connect.return_value = mock_session
             session = mgr._get_netsdk_session()
             assert session is mock_session
             mock_cls.assert_called_once_with(sdk_path="/opt/tvt-sdk")

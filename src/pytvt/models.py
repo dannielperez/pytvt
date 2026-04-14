@@ -49,31 +49,70 @@ class ScannerConfig:
 class DeviceEntry:
     """An NVR from the inventory JSON fed to the scanner.
 
-    At minimum ``ip`` is required; every other field has a sensible default.
+    At minimum ``ip`` or ``identifier`` is required; every other field has a
+    sensible default.
     """
 
-    ip: str
+    ip: str = ""
     site: str = ""
     hostname: str = ""
     mac: str = ""
     port: int = 0  # 0 means "use ScannerConfig.port"
     manufacturer: str = ""
+    identifier: str = ""
+    connection_method: str = ""
+    nat_server: str = ""
+    nat_port: int = 0
+    connection_preference: str = ""  # "nat", "direct", or "auto"
+    last_connection_method: str = ""
+    nat_capable: bool | None = None  # None = unknown
 
     @classmethod
     def from_dict(cls, d: dict) -> DeviceEntry:
         """Construct from a raw JSON dict, ignoring unknown keys."""
+        identifier = str(
+            d.get("identifier")
+            or d.get("id")
+            or d.get("uid")
+            or d.get("serial")
+            or d.get("sn")
+            or ""
+        )
         return cls(
-            ip=d["ip"],
+            ip=d.get("ip", ""),
             site=d.get("site", ""),
             hostname=d.get("hostname", ""),
             mac=d.get("mac", ""),
             port=int(d.get("port", 0)),
             manufacturer=d.get("manufacturer", ""),
+            identifier=identifier,
+            connection_method=str(d.get("connection_method") or d.get("method") or ""),
+            nat_server=str(d.get("nat_server") or ""),
+            nat_port=int(d.get("nat_port", 0) or 0),
+            connection_preference=str(d.get("connection_preference") or d.get("prefer") or ""),
+            last_connection_method=str(d.get("last_connection_method") or ""),
+            nat_capable=d.get("nat_capable"),
         )
 
     def effective_port(self, config: ScannerConfig) -> int:
         """Return the port to connect to, falling back to config default."""
         return self.port or config.port
+
+    @property
+    def effective_connection_method(self) -> str:
+        """Return the preferred connection method for this entry."""
+        method = self.connection_method.strip().lower()
+        if method in {"direct", "nat"}:
+            return method
+        pref = self.connection_preference.strip().lower()
+        if pref in {"direct", "nat"}:
+            return pref
+        return "nat" if self.identifier else "direct"
+
+    @property
+    def connect_target(self) -> str:
+        """Return the best human-readable target for logs and UIs."""
+        return self.ip or self.identifier
 
 
 @dataclass

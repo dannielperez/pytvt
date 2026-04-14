@@ -49,6 +49,16 @@ from .scanner import filter_tvt_devices, load_devices, scan_single_nvr
 
 def main() -> None:
     """Main scanner CLI — the ``pytvt`` command."""
+    if len(sys.argv) > 1 and sys.argv[1] == "connect" and (len(sys.argv) == 2 or sys.argv[2].startswith("-")):
+        _connect_main(sys.argv[2:])
+        return
+
+    if len(sys.argv) > 1 and sys.argv[1] == "connect-many" and (
+        len(sys.argv) == 2 or sys.argv[2].startswith("-")
+    ):
+        _connect_many_main(sys.argv[2:])
+        return
+
     args = _build_parser().parse_args()
     config = load_config(args.config)
 
@@ -184,6 +194,185 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-tcp-fallback", action="store_true", help="Skip TCP fallback during subnet sweep")
 
     return parser
+
+
+def _build_connect_parser() -> argparse.ArgumentParser:
+    """Construct the ``pytvt connect`` argument parser."""
+    parser = argparse.ArgumentParser(
+        prog="pytvt connect",
+        description="Connect to a single TVT device via direct SDK or AutoNAT",
+    )
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--nat", action="store_true", help="Use SDK AutoNAT / P2P login")
+    mode.add_argument("--direct", action="store_true", help="Force direct host/port login")
+    parser.add_argument("--host", help="Direct IP/hostname for SDK login or fallback")
+    parser.add_argument("--port", type=int, default=6036, help="Direct device SDK port (default: 6036)")
+    parser.add_argument("--id", dest="identifier", help="Device serial / UID / cloud identifier")
+    parser.add_argument("--user", "-u", dest="username", required=True, help="Login username")
+    parser.add_argument("--password", "-p", required=True, help="Login password")
+    parser.add_argument("--sdk-path", help="Path to libdvrnetsdk.so or vendor SDK root")
+    parser.add_argument("--timeout", type=float, default=10.0, help="NAT handshake timeout in seconds")
+    parser.add_argument("--nat-server", help="Override NAT/P2P server address for NAT20")
+    parser.add_argument("--nat-port", type=int, help="Override NAT/P2P server port for NAT20")
+    parser.add_argument(
+        "--nat-type",
+        choices=("nat", "nat20"),
+        default="nat20",
+        help="SDK NAT transport to use (default: nat20)",
+    )
+    parser.add_argument("--json", action="store_true", help="Print JSON output")
+    return parser
+
+
+def _connect_main(argv: list[str] | None = None) -> None:
+    """Handle ``pytvt connect``."""
+    from .device_manager import DeviceManager
+
+    parser = _build_connect_parser()
+    args = parser.parse_args(argv)
+
+    method = "nat" if args.nat or (args.identifier and not args.direct) else "direct"
+    if method == "nat" and not args.identifier:
+        parser.error("NAT connections require --id")
+    if method == "direct" and not args.host:
+        parser.error("Direct connections require --host")
+
+    with DeviceManager(
+        args.host,
+        args.username,
+        args.password,
+        port=args.port,
+        identifier=args.identifier,
+        connection_method=method,
+        sdk_path=args.sdk_path,
+        timeout=max(1, int(args.timeout)),
+        nat_server=args.nat_server,
+        nat_port=args.nat_port,
+        nat_type=args.nat_type,
+    ) as manager:
+        result = manager.device_info()
+
+        payload = {
+            "success": result.success,
+            "backend": str(manager.backend),
+            "connection_method": manager.connection_method,
+            "host": manager.ip or None,
+            "identifier": manager.identifier or None,
+            "device_name": result.device_name,
+            "device_model": result.device_model,
+            "serial_number": result.serial_number,
+            "firmware": result.firmware,
+            "error": result.error,
+        }
+
+        if args.json:
+            print(json.dumps(payload, indent=2))
+        elif result.success:
+            print(f"Connected via {manager.connection_method}/{manager.backend} to {manager.target}")
+            print(json.dumps(payload, indent=2))
+        else:
+            print(
+                f"Connection failed via {manager.connection_method}/{manager.backend} to {manager.target}: {result.error}",
+                file=sys.stderr,
+            )
+
+        if not result.success:
+            sys.exit(1)
+
+
+def _build_connect_many_parser() -> argparse.ArgumentParser:
+    """Construct the ``pytvt connect-many`` argument parser."""
+    parser = argparse.ArgumentParser(
+        prog="pytvt connect-many",
+        description="Connect to many TVT devices concurrently via direct SDK or AutoNAT",
+    )
+    parser.add_argument(
+        "--file",
+        "-f",
+        required=True,
+        help="JSON file with device list (each object needs at least ip or identifier)",
+    )
+    parser.add_argument("--user", "-u", dest="username", required=True, help="Login username")
+    parser.add_argument("--password", "-p", required=True, help="Login password")
+    parser.add_argument("--sdk-path", help="Path to libdvrnetsdk.so or vendor SDK root")
+    parser.add_argument("--timeout", type=float, default=10.0, help="Per-device connection timeout in seconds")
+    parser.add_argument("--concurrency", "-c", type=int, default=10, help="Max concurrent connections (default: 10)")
+    parser.add_argument("--nat", action="store_true", help="Prefer NAT connections")
+    parser.add_argument("--json", action="store_true", help="Print JSON output instead of table")
+    return parser
+
+
+def _connect_many_main(argv: list[str] | None = None) -> None:
+    """Handle ``pytvt connect-many``."""
+    from .connection_pool import connect_many
+
+    parser = _build_connect_many_parser()
+    args = parser.parse_args(argv)
+
+    file_path = Path(args.file)
+    if not file_path.exists():
+        print(f"File not found: {args.file}", file=sys.stderr)
+        sys.exit(1)
+
+    raw = json.loads(file_path.read_text())
+    if isinstance(raw, dict):
+        raw = raw.get("devices", raw.get("data", [raw]))
+    if not isinstance(raw, list):
+        print("Expected a JSON array of device objects", file=sys.stderr)
+        sys.exit(1)
+
+    devices = [DeviceEntry.from_dict(d) for d in raw]
+    if not devices:
+        print("No devices found in file", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Connecting to {len(devices)} devices (concurrency={args.concurrency})...", file=sys.stderr)
+
+    results = connect_many(
+        devices,
+        args.username,
+        args.password,
+        sdk_path=args.sdk_path,
+        max_workers=args.concurrency,
+        timeout=args.timeout,
+        prefer_nat=args.nat,
+    )
+
+    if args.json:
+        payload = [
+            {
+                "target": r.target,
+                "success": r.success,
+                "connection_method": r.connection_method,
+                "latency_ms": r.latency_ms,
+                "device_name": r.device_name,
+                "serial_number": r.serial_number,
+                "firmware": r.firmware,
+                "error": r.error,
+            }
+            for r in results
+        ]
+        print(json.dumps(payload, indent=2))
+    else:
+        _print_connect_many_table(results)
+
+    failed = sum(1 for r in results if not r.success)
+    if failed:
+        print(f"\n{failed}/{len(results)} connections failed.", file=sys.stderr)
+        sys.exit(1)
+
+
+def _print_connect_many_table(results: list) -> None:
+    """Print a text table of connect-many results."""
+    header = f"{'TARGET':<30} {'STATUS':<10} {'LATENCY':<10} {'METHOD':<10} {'DEVICE':<20} {'ERROR'}"
+    print(header)
+    print("-" * len(header))
+    for r in results:
+        status = "OK" if r.success else "FAIL"
+        latency = f"{r.latency_ms}ms"
+        device = r.device_name or r.serial_number or ""
+        error = r.error or ""
+        print(f"{r.target:<30} {status:<10} {latency:<10} {r.connection_method:<10} {device:<20} {error}")
 
 
 # ── Private orchestration helpers ────────────────────────────────────
