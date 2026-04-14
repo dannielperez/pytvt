@@ -15,38 +15,47 @@ from pathlib import Path
 
 from .models import ScannerConfig
 
-# Default API URL for the TVT SDK Fastify server
+# Default API URL for an SDK HTTP bridge service.
 DEFAULT_API_URL: str = os.getenv("TVT_API_URL", "http://localhost:3000")
 
 
-# Path to the standalone scan_nvr.mjs script (for sdk-local backend).
-#
-# Resolution order:
-#   1. ``$PYTVT_SCAN_SCRIPT`` environment variable — explicit override.
-#   2. Walk up from this file looking for ``bridges/sdk_local/scan_nvr.mjs``
-#      (works in a development / editable-install clone of the repo).
-#
-# The sdk-local backend is not available in a plain ``pip install pytvt``
-# deployment because the Node.js bridge script and native libdvrnetsdk.so are
-# not distributed with the Python package.  The backend will fail cleanly with
-# a descriptive error when the script cannot be found.  Set ``PYTVT_SCAN_SCRIPT``
-# to point at your local copy of ``scan_nvr.mjs`` to enable sdk-local support.
-def _resolve_scan_script() -> Path:
-    env_override = os.getenv("PYTVT_SCAN_SCRIPT")
-    if env_override:
-        return Path(env_override)
-    # Walk up the directory tree looking for the bridge script (dev clone).
+def _first_env(*names: str) -> str | None:
+    for name in names:
+        value = os.getenv(name)
+        if value:
+            return value
+    return None
+
+
+def resolve_scan_script(scan_script: str | os.PathLike[str] | None = None) -> Path | None:
+    """Resolve the sdk-local bridge script path.
+
+    Resolution order:
+        1. Explicit ``scan_script`` argument.
+        2. ``$TVT_SCAN_SCRIPT``.
+        3. Legacy ``$PYTVT_SCAN_SCRIPT``.
+        4. Local repo checkout fallback (developer workflow only).
+
+    Returns ``None`` when no candidate can be found.
+    """
+    raw_path: str | None
+    if scan_script is not None:
+        raw_path = os.fspath(scan_script)
+    else:
+        raw_path = _first_env("TVT_SCAN_SCRIPT", "PYTVT_SCAN_SCRIPT")
+
+    if raw_path:
+        return Path(raw_path).expanduser()
+
     anchor = Path(__file__).resolve().parent
     for parent in [anchor, *anchor.parents]:
         candidate = parent / "bridges" / "sdk_local" / "scan_nvr.mjs"
         if candidate.exists():
             return candidate
-    # Return a non-existent path so callers can check ``.exists()`` and report
-    # a clear error rather than silently failing.
-    return Path(__file__).resolve().parent / "_not_found_" / "scan_nvr.mjs"
+    return None
 
 
-SCAN_SCRIPT: Path = _resolve_scan_script()
+SCAN_SCRIPT: Path | None = resolve_scan_script()
 
 # Mapping from config-file / env-var keys → (ScannerConfig field, type cast)
 _FIELD_MAP: dict[str, type] = {
@@ -56,6 +65,8 @@ _FIELD_MAP: dict[str, type] = {
     "timeout": int,
     "max_channels": int,
     "concurrency": int,
+    "sdk_path": str,
+    "scan_script": str,
 }
 
 
@@ -87,6 +98,8 @@ def load_config(config_path: str | None = None) -> ScannerConfig:
         "timeout": os.getenv("TVT_TIMEOUT"),
         "max_channels": os.getenv("TVT_MAX_CHANNELS"),
         "concurrency": os.getenv("TVT_CONCURRENCY"),
+        "sdk_path": _first_env("TVT_SDK_PATH", "PYTVT_NETSDK_LIB"),
+        "scan_script": _first_env("TVT_SCAN_SCRIPT", "PYTVT_SCAN_SCRIPT"),
     }
     for key, raw in _env.items():
         if raw is not None:

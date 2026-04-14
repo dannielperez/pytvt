@@ -5,13 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] — 2026-04-14
+
+### Changed
+
+- **Release hardening for PyPI** — native TVT SDK components are now loaded only
+  at runtime from explicit user-provided paths or environment variables.
+- **SDK path configuration** — added `TVT_SDK_PATH` and `TVT_SCAN_SCRIPT`
+  support across config loading, `DeviceManager`, `NetSdkClient`, and the
+  local Node.js bridge, while preserving legacy env vars for local workflows.
+- **Packaging safety** — expanded build exclusions, MANIFEST rules, and
+  `.gitignore` patterns to prevent native SDK binaries, headers, and local SDK
+  workspaces from being published or accidentally committed.
+- **Documentation** — clarified that the proprietary TVT SDK is never
+  redistributed, documented runtime SDK setup, and separated SDK-backed
+  features from SDK-free features.
+
 ## [0.5.0] — 2026-04-09
 
 ### Added
 
 - **`DeviceManager` unified facade** — single API for TVT device operations with
   automatic backend selection. Probes native SDK availability first, then falls
-  back to the tvt-api Docker container. Supports forced backend selection.
+  back to an SDK bridge service. Supports forced backend selection.
   - `device_info()`, `device_time()`, `snapshot()`, `rtsp_url()`, `ptz()`,
     `ptz_preset()`, `reboot()` — all return the same result types regardless
     of backend.
@@ -19,8 +35,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `Backend` enum, `NoBackendAvailable` exception.
 - **`is_netsdk_available()` probe** — check if the native SDK is loadable without
   actually loading it (platform + architecture + file existence check).
-- **Expanded netsdk loader** — searches env var → vendored → tvt-api submodule →
-  tvt repo → system. Added `_arch_dir()` for platform-specific directory selection,
+- **Expanded netsdk loader** — searches explicit path/env var → SDK root →
+  system. Added `_arch_dir()` for platform-specific directory selection,
   pre-loading of companion `.so` dependencies.
 - **aarch64 support** — loader recognizes `linux-arm64` bin directory for ARM64 Linux.
 
@@ -38,7 +54,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`libdvrnetsdk.so`). `NetSdkClient` + `DeviceSession` with 25+ methods covering
   device info, PTZ, snapshots, RTSP URLs, alarms, recording, firmware, disks,
   users, time sync, and more.
-- **`SdkHttpClient`** — typed Python client for the tvt-api Docker container with
+- **`SdkHttpClient`** — typed Python client for an SDK bridge service with
   10 methods: `health()`, `scan()`, `device_info()`, `device_time()`, `snapshot()`,
   `rtsp_url()`, `ptz()`, `ptz_preset()`, `reboot()`.
 - **Result dataclasses** — `DeviceInfoResult`, `DeviceTimeResult`, `RtspUrlResult`,
@@ -108,6 +124,7 @@ comprehensive test coverage.
 
 - Licensed under MIT starting from 1.0.0. Previous versions were AGPLv3.
 
+[0.5.1]: https://github.com/dannielperez/pytvt/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/dannielperez/pytvt/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/dannielperez/pytvt/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/dannielperez/pytvt/compare/v0.2.0...v0.3.0

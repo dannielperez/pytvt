@@ -1,21 +1,27 @@
-"""Locate and load the libdvrnetsdk.so shared library.
+"""Locate and load a vendor-supplied ``libdvrnetsdk.so`` shared library.
 
 Search order:
-1. ``$PYTVT_NETSDK_LIB`` environment variable (explicit path)
-2. ``<package>/lib/libdvrnetsdk.so`` (vendored alongside this module)
-3. ``tvt-api/tvt/bin/linux*/`` submodule in the project tree
-4. System library path (LD_LIBRARY_PATH)
+1. Explicit ``sdk_path`` argument passed to :func:`load_sdk`
+2. ``$TVT_SDK_PATH`` environment variable
+3. Legacy ``$PYTVT_NETSDK_LIB`` environment variable
+4. System library search path
 
-Raises :class:`NetSdkUnavailable` if the library cannot be loaded
-(wrong platform, missing file, etc.).
+No SDK binary is bundled with the public package. Users must obtain the
+library separately from the vendor and point pytvt at that installation.
 """
 
 from __future__ import annotations
 
 import ctypes as ct
+from ctypes.util import find_library
 import os
 import platform
 from pathlib import Path
+
+
+SDK_PATH_ENV_VAR = "TVT_SDK_PATH"
+LEGACY_SDK_PATH_ENV_VAR = "PYTVT_NETSDK_LIB"
+LIB_NAME = "libdvrnetsdk.so"
 
 
 class NetSdkUnavailable(ImportError):
@@ -30,43 +36,69 @@ def _arch_dir() -> str:
     return "linux"
 
 
-def _find_lib() -> str:
-    """Resolve the path to libdvrnetsdk.so."""
-    # 1. Explicit override
-    env = os.environ.get("PYTVT_NETSDK_LIB")
-    if env:
-        return env
+def _requested_sdk_path(sdk_path: str | os.PathLike[str] | None = None) -> str | None:
+    if sdk_path is not None:
+        return os.fspath(sdk_path)
+    return os.environ.get(SDK_PATH_ENV_VAR) or os.environ.get(LEGACY_SDK_PATH_ENV_VAR)
 
-    # 2. Vendored copy next to this file  (<package>/netsdk/lib/)
-    pkg_lib = Path(__file__).parent / "lib" / "libdvrnetsdk.so"
-    if pkg_lib.exists():
-        return str(pkg_lib)
 
-    # 3. tvt-api submodule in the project tree (walk up to find it)
+def _sdk_root_candidates(root: Path) -> list[Path]:
     arch_dir = _arch_dir()
-    anchor = Path(__file__).resolve().parent  # .../src/pytvt/netsdk/
-    for parent in anchor.parents:
-        candidate = parent / "tvt-api" / "tvt" / "bin" / arch_dir / "libdvrnetsdk.so"
-        if candidate.exists():
-            return str(candidate)
-        # Also check tvt repo directly (e.g. if cloned alongside)
-        candidate = parent / "tvt" / "bin" / arch_dir / "libdvrnetsdk.so"
-        if candidate.exists():
-            return str(candidate)
+    return [
+        root / LIB_NAME,
+        root / "lib" / LIB_NAME,
+        root / arch_dir / LIB_NAME,
+        root / "bin" / LIB_NAME,
+        root / "bin" / arch_dir / LIB_NAME,
+        root / "tvt" / "bin" / arch_dir / LIB_NAME,
+    ]
 
-    # 4. System search
-    return "libdvrnetsdk.so"
+
+def _resolve_explicit_lib_path(raw_path: str) -> str:
+    candidate = Path(raw_path).expanduser()
+
+    if candidate.exists() and candidate.is_dir():
+        for path in _sdk_root_candidates(candidate):
+            if path.exists():
+                return str(path)
+        raise NetSdkUnavailable(
+            f"No {LIB_NAME} found under {candidate}. Set {SDK_PATH_ENV_VAR} to the library file "
+            "or to the vendor SDK root directory."
+        )
+
+    if candidate.exists():
+        return str(candidate)
+
+    if any(sep in raw_path for sep in (os.sep, "/", "\\")) or raw_path.startswith("."):
+        raise NetSdkUnavailable(
+            f"Configured SDK path {raw_path!r} does not exist. Set {SDK_PATH_ENV_VAR} to the library file "
+            "or to the vendor SDK root directory."
+        )
+
+    return raw_path
+
+
+def _find_system_lib() -> str:
+    return find_library("dvrnetsdk") or find_library("libdvrnetsdk") or LIB_NAME
+
+
+def _find_lib(sdk_path: str | os.PathLike[str] | None = None) -> str:
+    """Resolve the path or soname for ``libdvrnetsdk.so``."""
+    requested = _requested_sdk_path(sdk_path)
+    if requested:
+        return _resolve_explicit_lib_path(requested)
+    return _find_system_lib()
 
 
 def _lib_dir(lib_path: str) -> str | None:
     """Return the directory containing the library, or None for system search."""
-    p = Path(lib_path)
-    if p.is_absolute() and p.parent.is_dir():
-        return str(p.parent)
+    p = Path(lib_path).expanduser()
+    if p.name != lib_path and p.parent.is_dir():
+        return str(p.parent.resolve())
     return None
 
 
-def load_sdk() -> ct.CDLL:
+def load_sdk(sdk_path: str | os.PathLike[str] | None = None) -> ct.CDLL:
     """Load and return the SDK shared library handle.
 
     Returns:
@@ -78,7 +110,7 @@ def load_sdk() -> ct.CDLL:
     if platform.system() != "Linux":
         raise NetSdkUnavailable(
             f"TVT NetSDK requires Linux (current: {platform.system()}). "
-            "Set $PYTVT_NETSDK_LIB to override."
+            f"Install the vendor SDK separately and set {SDK_PATH_ENV_VAR} to its path."
         )
 
     arch = platform.machine()
@@ -87,7 +119,7 @@ def load_sdk() -> ct.CDLL:
             f"TVT NetSDK supports x86_64 and aarch64 (current: {arch})."
         )
 
-    lib_path = _find_lib()
+    lib_path = _find_lib(sdk_path)
 
     # Pre-load companion .so files from the same directory so the
     # dynamic linker can resolve them without LD_LIBRARY_PATH.
@@ -106,24 +138,28 @@ def load_sdk() -> ct.CDLL:
     except OSError as exc:
         raise NetSdkUnavailable(
             f"Cannot load TVT NetSDK from {lib_path!r}: {exc}. "
-            "Ensure libdvrnetsdk.so and its dependencies "
-            "(libShareLib.so, libNatClientSDK.so, libcrypto.so.1.1) "
-            "are available."
+            f"Install the vendor SDK separately and set {SDK_PATH_ENV_VAR} to the library file or SDK root. "
+            "Required companion libraries typically include libShareLib.so, libNatClientSDK.so, and libcrypto.so.1.1."
         ) from exc
 
 
-def is_netsdk_available() -> bool:
-    """Check if the native SDK can be loaded on this platform.
-
-    Returns True if we're on Linux with the right arch and the library
-    file can be found. Does NOT actually load the library.
-    """
+def is_netsdk_available(sdk_path: str | os.PathLike[str] | None = None) -> bool:
+    """Check if the native SDK can be loaded on this platform."""
     if platform.system() != "Linux":
         return False
     if platform.machine() not in ("x86_64", "aarch64"):
         return False
-    lib_path = _find_lib()
-    # If it resolved to a bare filename, check if it exists anywhere
-    if not Path(lib_path).is_absolute():
+    try:
+        lib_path = _find_lib(sdk_path)
+    except NetSdkUnavailable:
         return False
-    return Path(lib_path).exists()
+
+    path_obj = Path(lib_path).expanduser()
+    if path_obj.exists():
+        return True
+
+    try:
+        ct.CDLL(lib_path)
+    except OSError:
+        return False
+    return True

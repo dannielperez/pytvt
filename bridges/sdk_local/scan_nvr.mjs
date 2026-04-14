@@ -8,7 +8,7 @@
  */
 
 import { platform } from 'node:os'
-import { resolve, dirname } from 'node:path'
+import { resolve, dirname, isAbsolute } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -35,11 +35,37 @@ if (platform() !== 'linux') {
   process.exit(1)
 }
 
-// Load the native SDK library
-const libPath = resolve(__dirname, 'tvt/bin/linux/libdvrnetsdk.so')
+function resolveSdkLibraryPath() {
+  const configuredPath = process.env.TVT_SDK_PATH || process.env.PYTVT_NETSDK_LIB
+  if (!configuredPath) {
+    throw new Error('TVT SDK not configured. Set TVT_SDK_PATH to libdvrnetsdk.so or the vendor SDK root directory.')
+  }
+
+  const archDir = process.arch === 'arm64' ? 'linux-arm64' : 'linux'
+  const basePath = isAbsolute(configuredPath) ? configuredPath : resolve(process.cwd(), configuredPath)
+  const candidates = [
+    basePath,
+    resolve(basePath, 'libdvrnetsdk.so'),
+    resolve(basePath, 'lib', 'libdvrnetsdk.so'),
+    resolve(basePath, archDir, 'libdvrnetsdk.so'),
+    resolve(basePath, 'bin', archDir, 'libdvrnetsdk.so'),
+    resolve(basePath, 'tvt', 'bin', archDir, 'libdvrnetsdk.so')
+  ]
+
+  for (const candidate of candidates) {
+    try {
+      return koffi.load(candidate)
+    } catch {
+      // try the next candidate
+    }
+  }
+
+  throw new Error(`Failed to load SDK library from ${configuredPath}`)
+}
+
 let lib
 try {
-  lib = koffi.load(libPath)
+  lib = resolveSdkLibraryPath()
 } catch (e) {
   console.error(JSON.stringify({ error: `Failed to load SDK library: ${e.message}` }))
   process.exit(1)

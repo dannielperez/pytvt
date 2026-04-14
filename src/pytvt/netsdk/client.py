@@ -11,7 +11,7 @@ Usage::
             jpg  = session.capture_jpeg(channel=0)
             session.ptz(PtzCommand.LEFT, speed=PtzSpeed.SPEED_4, channel=0)
 
-Requires Linux x86_64 or aarch64 with libdvrnetsdk.so available.
+Requires Linux x86_64 or aarch64 with a vendor-supplied libdvrnetsdk.so.
 """
 
 from __future__ import annotations
@@ -756,11 +756,12 @@ class NetSdkClient:
     def __init__(
         self,
         *,
+        sdk_path: str | None = None,
         connect_timeout: int = 5000,
         recv_timeout: int = 5000,
         reconnect_interval: int = 0,
     ) -> None:
-        self._lib = load_sdk()
+        self._lib = load_sdk(sdk_path=sdk_path)
         sdk.bind(self._lib)
         if not self._lib.NET_SDK_Init():
             raise NetSdkError("NET_SDK_Init failed")

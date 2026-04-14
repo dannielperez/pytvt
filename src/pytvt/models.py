@@ -41,6 +41,8 @@ class ScannerConfig:
     max_channels: int = 64
     concurrency: int = 4
     api_url: str = "http://localhost:3000"
+    sdk_path: str | None = None
+    scan_script: str | None = None
 
 
 @dataclass

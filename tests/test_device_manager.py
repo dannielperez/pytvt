@@ -47,7 +47,7 @@ class TestNativeDetection:
             mock_path_inst.is_absolute.return_value = True
             mock_path_inst.exists.return_value = True
             mock_path.return_value = mock_path_inst
-            # But the parent iteration won't find a vendored lib,
+            # But the explicit test path avoids system lookup,
             # so _find_lib returns "libdvrnetsdk.so" (bare)
             # We need to mock _find_lib directly for a clean test
             with patch("pytvt.netsdk.loader._find_lib", return_value="/fake/libdvrnetsdk.so"):
@@ -95,6 +95,13 @@ class TestAvailableBackends:
             result = available_backends()
             assert result == [Backend.NETSDK, Backend.SDK_HTTP]
 
+    def test_sdk_path_passed_to_native_probe(self) -> None:
+        with patch("pytvt.device_manager._netsdk_available", return_value=True) as mock_native, \
+             patch("pytvt.device_manager._docker_tvt_api_available", return_value=False):
+            result = available_backends(sdk_path="/opt/tvt-sdk")
+            assert result == [Backend.NETSDK]
+            mock_native.assert_called_once_with("/opt/tvt-sdk")
+
     def test_only_http(self) -> None:
         with patch("pytvt.device_manager._netsdk_available", return_value=False), \
              patch("pytvt.device_manager._docker_tvt_api_available", return_value=True):
@@ -116,6 +123,13 @@ class TestDeviceManagerInit:
         with patch("pytvt.device_manager._netsdk_available", return_value=True):
             mgr = DeviceManager(**CREDS)
             assert mgr.backend == Backend.NETSDK
+            mgr.close()
+
+    def test_auto_detect_netsdk_with_sdk_path(self) -> None:
+        with patch("pytvt.device_manager._netsdk_available", return_value=True) as mock_native:
+            mgr = DeviceManager(**CREDS, sdk_path="/opt/tvt-sdk")
+            assert mgr.backend == Backend.NETSDK
+            mock_native.assert_called_once_with("/opt/tvt-sdk")
             mgr.close()
 
     def test_auto_detect_http_fallback(self) -> None:
@@ -336,6 +350,16 @@ class TestNetsdkDispatch:
         result = mgr.ptz_preset(command=16, preset_index=1)
         assert result.success is True
 
+    def test_netsdk_client_receives_sdk_path(self) -> None:
+        mgr = DeviceManager(**CREDS, backend=Backend.NETSDK, sdk_path="/opt/tvt-sdk")
+        with patch("pytvt.netsdk.client.NetSdkClient") as mock_cls:
+            mock_session = MagicMock()
+            mock_cls.return_value.login.return_value = mock_session
+            session = mgr._get_netsdk_session()
+            assert session is mock_session
+            mock_cls.assert_called_once_with(sdk_path="/opt/tvt-sdk")
+        mgr.close()
+
 
 # ── Backend enum ─────────────────────────────────────────────────────
 
@@ -369,7 +393,28 @@ class TestLoaderUpdates:
             from pytvt.netsdk.loader import _arch_dir
             assert _arch_dir() == "linux-arm64"
 
-    def test_find_lib_env_override(self) -> None:
-        with patch.dict("os.environ", {"PYTVT_NETSDK_LIB": "/custom/path.so"}):
+    def test_find_lib_env_override(self, tmp_path) -> None:
+        lib_path = tmp_path / "libdvrnetsdk.so"
+        lib_path.write_text("", encoding="utf-8")
+
+        with patch.dict("os.environ", {"TVT_SDK_PATH": str(lib_path)}):
             from pytvt.netsdk.loader import _find_lib
-            assert _find_lib() == "/custom/path.so"
+            assert _find_lib() == str(lib_path)
+
+    def test_find_lib_legacy_env_override(self, tmp_path) -> None:
+        lib_path = tmp_path / "legacy-libdvrnetsdk.so"
+        lib_path.write_text("", encoding="utf-8")
+
+        with patch.dict("os.environ", {"PYTVT_NETSDK_LIB": str(lib_path)}, clear=True):
+            from pytvt.netsdk.loader import _find_lib
+            assert _find_lib() == str(lib_path)
+
+    def test_find_lib_sdk_root_directory(self, tmp_path) -> None:
+        sdk_root = tmp_path / "vendor-sdk"
+        lib_path = sdk_root / "bin" / "linux" / "libdvrnetsdk.so"
+        lib_path.parent.mkdir(parents=True)
+        lib_path.write_text("", encoding="utf-8")
+
+        from pytvt.netsdk.loader import _find_lib
+
+        assert _find_lib(str(sdk_root)) == str(lib_path)

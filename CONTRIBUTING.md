@@ -5,7 +5,7 @@ Thanks for your interest in contributing. This is a solo-maintained project, but
 ## Getting Started
 
 ```bash
-git clone --recurse-submodules https://github.com/dannielperez/pytvt.git
+git clone https://github.com/dannielperez/pytvt.git
 cd pytvt
 pip install -e ".[dev]"
 ```
@@ -53,8 +53,8 @@ pytvt separates code into three tiers. Understand which tier you are working in:
 
 | Tier | Location | CI-gated | Imported at runtime |
 |---|---|---|---|
-| **Supported runtime** | `src/pytvt/`, `bridges/` | Yes | Yes |
-| **Compatibility runtime** | `tvt-api/` | Separate repo | Via HTTP (sdk backend) |
+| **Published package** | `src/pytvt/` | Yes | Yes |
+| **Local helper runtimes** | `bridges/`, `tvt-api/` | No | Optional, developer-managed |
 | **Research / reference** | `research/` | No | **No** — never import |
 | **Operational tools** | `tools/` | No | Imports *from* pytvt |
 

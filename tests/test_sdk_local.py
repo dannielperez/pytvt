@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from pytvt.sdk_local import _extract_json
+from unittest.mock import MagicMock, patch
+
+from pytvt.models import ScannerConfig
+from pytvt.sdk_local import _extract_json, sdk_scan_local
 
 
 class TestExtractJson:
@@ -29,3 +32,31 @@ class TestExtractJson:
         result = _extract_json(stdout)
         assert '"a": 1' in result
         assert '"b": 2' in result
+
+
+class TestSdkScanLocal:
+    def test_missing_scan_script_reports_configuration(self, sample_device):
+        cfg = ScannerConfig(username="admin", password="test123", scan_script="/missing/scan_nvr.mjs")
+        result = sdk_scan_local(sample_device, cfg)
+        assert result.success is False
+        assert "TVT_SCAN_SCRIPT" in (result.error or "")
+
+    def test_sdk_path_forwarded_to_subprocess(self, sample_device, tmp_path):
+        script = tmp_path / "scan_nvr.mjs"
+        script.write_text("// bridge", encoding="utf-8")
+        cfg = ScannerConfig(
+            username="admin",
+            password="test123",
+            sdk_path="/opt/tvt-sdk",
+            scan_script=str(script),
+        )
+
+        proc = MagicMock()
+        proc.stdout = '___JSON_START___{"success": true, "cameras": []}___JSON_END___'
+        proc.stderr = ""
+
+        with patch("pytvt.sdk_local.subprocess.run", return_value=proc) as mock_run:
+            result = sdk_scan_local(sample_device, cfg)
+
+        assert result.success is True
+        assert mock_run.call_args.kwargs["env"]["TVT_SDK_PATH"] == "/opt/tvt-sdk"

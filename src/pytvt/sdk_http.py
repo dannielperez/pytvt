@@ -1,6 +1,6 @@
-"""SDK HTTP API backend — scans NVRs via the tvt-api Fastify server.
+"""SDK HTTP API backend — scans NVRs via a compatible SDK bridge service.
 
-The Fastify server (``tvt-api``) wraps the native TVT SDK and exposes a
+The bridge service wraps the native TVT SDK and exposes a
 ``/scan`` endpoint. This module posts a scan request and converts the
 response into a :class:`~pytvt.models.ScanResult`.
 """

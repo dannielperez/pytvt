@@ -9,7 +9,7 @@ Terminology
 
 **Integration mode** — *how* an SDK-family scan reaches the native library:
 
-- ``compat_bridge`` — HTTP POST to a tvt-api Fastify server (typically Docker).
+- ``compat_bridge`` — HTTP POST to a compatible SDK bridge service.
 - ``direct_sdk`` — Node.js subprocess calling ``libdvrnetsdk.so`` via FFI.
 
 The protocol family has no integration modes; it connects directly to the NVR.

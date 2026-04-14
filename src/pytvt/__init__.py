@@ -7,8 +7,8 @@ Public API:
     NVR API:   NvrClient, Channel, RtspServerConfig, ApiServerConfig, PortConfig
     Web API:   WebApiClient (TVT HTTP API / LAPI)
     Net SDK:   pytvt.netsdk — ctypes bindings for libdvrnetsdk.so (Linux only;
-               requires the native shared library — NOT included in this package)
-    SDK HTTP:  SdkHttpClient — typed client for tvt-api Docker container
+               requires a vendor-supplied shared library — NOT included in this package)
+    SDK HTTP:  SdkHttpClient — typed client for a compatible SDK bridge service
     Unified:   DeviceManager — auto-selects netsdk or sdk_http backend
     Config:    load_config
     Scanner:   scan_single_nvr, load_devices, filter_tvt_devices
@@ -19,17 +19,17 @@ Native / vendor SDK note
 ------------------------
 The ``netsdk`` sub-package provides ctypes bindings for ``libdvrnetsdk.so``,
 the proprietary TVT C++ SDK binary.  This native library is **not** distributed
-with ``pytvt`` on PyPI.  On Linux x86-64/aarch64, point ``$PYTVT_NETSDK_LIB``
-at your local copy of the library to enable netsdk support.  All other backends
+with ``pytvt`` on PyPI.  On Linux x86-64/aarch64, set ``$TVT_SDK_PATH``
+or pass ``sdk_path=...`` to point at your local copy of the library. All other backends
 (``protocol``, ``sdk_http``, ``webapi``) are pure-Python and work on any platform
 without any native dependencies.
 
 The ``sdk-local`` backend (Node.js subprocess + native SDK) is also not included
-in the pip package.  Set ``$PYTVT_SCAN_SCRIPT`` to the path of your local
+in the pip package.  Set ``$TVT_SCAN_SCRIPT`` to the path of your local
 ``scan_nvr.mjs`` bridge script to enable it.
 """
 
-__version__ = "0.5.0"
+__version__ = "0.5.1"
 
 from .config import load_config
 from .constants import BackendFamily, CompositeStrategy, ExecutionPlan, IntegrationMode, resolve_backend
@@ -82,7 +82,7 @@ __all__ = [
     "NvrClient",
     # Web API client (TVT HTTP API / LAPI / Basic auth)
     "WebApiClient",
-    # SDK HTTP client (tvt-api Docker container)
+    # SDK HTTP client
     "SdkHttpClient",
     "CommandResult",
     "DeviceInfoResult",

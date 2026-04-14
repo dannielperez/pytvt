@@ -57,9 +57,9 @@ Scope & limitations
   IPC cameras have a completely different web interface (webpagev5 /
   NetAIIPCamera with LAPI REST + OCX plugin auth) and are NOT compatible.
 - **IPC password change** — ``update_device_credentials()`` only updates
-  the credentials the NVR *stores* for connecting to IPCs.  To change the
-  actual password on an IPC camera you need the TVT SDK (port 9008) via
-  the tvt-api Docker container.
+    the credentials the NVR *stores* for connecting to IPCs.  To change the
+    actual password on an IPC camera you need the TVT SDK (port 9008) via
+    a compatible SDK bridge.
 - **addUser / editUser** — the NVR web CGI does not support creating or
   editing users (returns empty or permission errors).  Only
   ``editUserPassword`` (change own password) works.

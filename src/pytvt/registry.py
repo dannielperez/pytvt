@@ -87,7 +87,7 @@ def _install_defaults() -> None:
 
     register(BackendFamily.PROTOCOL, None, _protocol_scan)
 
-    # SDK family — compat bridge (HTTP API → tvt-api Docker)
+    # SDK family — compat bridge (HTTP API → SDK bridge service)
     from .sdk_http import sdk_scan
 
     register(BackendFamily.SDK, IntegrationMode.COMPAT_BRIDGE, sdk_scan)

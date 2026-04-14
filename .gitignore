@@ -6,9 +6,25 @@ dist/
 build/
 .venv/
 
+# pypi
+.pyirc
+
 # Build / publish artefacts
 *.whl
 *.tar.gz
+
+# Proprietary/native SDK artefacts
+*.so
+*.so.*
+*.dll
+*.dylib
+*.lib
+*.a
+*.h
+
+# Local vendor SDK checkouts/extractions
+bridges/sdk_local/tvt/
+tvt-api/tvt/
 
 # Node (bridges/sdk_local)
 bridges/sdk_local/node_modules/

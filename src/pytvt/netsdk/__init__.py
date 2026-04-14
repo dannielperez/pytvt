@@ -15,7 +15,7 @@ for device management operations not available via HTTP APIs:
 - User management
 - Time synchronisation
 
-Platform: Linux x86-64 and aarch64 only ($PYTVT_NETSDK_LIB to override path).
+Platform: Linux x86-64 and aarch64 only ($TVT_SDK_PATH or sdk_path=... to override path).
 """
 
 from .client import NetSdkClient

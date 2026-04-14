@@ -7,7 +7,7 @@ Two operating modes
               No Docker container needed.  Logs into the NVR, queries
               channels, then captures each IPC camera directly.
 
-*(default)*   Via the **tvt-api** Docker container which wraps the TVT SDK.
+*(default)*   Via an SDK HTTP bridge service that wraps the TVT SDK.
               Required for IPC cameras that aren't behind an NVR, or when
               you need SDK-specific operations (e.g. changing IPC passwords).
 
@@ -15,8 +15,8 @@ Scope & limitations
 -------------------
 - ``--direct`` mode only works with **NVR devices** running NVMS-9000.
   It does NOT work with standalone IPC cameras (different web interface).
-- For standalone IPC cameras, use the default SDK mode with the tvt-api
-  Docker container (connects on port 9008).
+- For standalone IPC cameras, use the default SDK bridge mode
+    (connects on port 9008).
 - The NVR's own RTSP relay returns 401; direct mode bypasses it by
   connecting to each IPC camera's RTSP stream at ``rtsp://…@IPC_IP:554/profile1``.
 
@@ -29,7 +29,7 @@ Usage
     python tvt_snapshot.py --direct --ip 192.168.1.100 --channel 3 -o snap.jpg -p 'YourPassword'
     python tvt_snapshot.py --direct --from-json nvrs.json --all-channels -o ./snapshots/ -p 'YourPassword'
 
-    # --- SDK mode (tvt-api Docker container — works with NVRs and IPCs) ---
+    # --- SDK mode (external SDK bridge — works with NVRs and IPCs) ---
     python tvt_snapshot.py --ip 192.168.1.100 --channel 0 -o snapshot.jpg
     python tvt_snapshot.py --ip 192.168.1.100 --all-channels --max-channels 16 -o ./snapshots/
     python tvt_snapshot.py --ip 192.168.1.100 --channel 0 --rtsp-url
@@ -70,7 +70,7 @@ def capture_snapshot(
     api_url: str = DEFAULT_API_URL,
     timeout: int = DEFAULT_TIMEOUT,
 ) -> bytes | None:
-    """Capture a JPEG snapshot from a TVT device channel via tvt-api.
+    """Capture a JPEG snapshot from a TVT device channel via an SDK bridge.
 
     Args:
         ip: Device IP address (NVR or IPC camera)
@@ -78,7 +78,7 @@ def capture_snapshot(
         port: Device protocol port (default 6036)
         username: Device login username
         password: Device login password
-        api_url: tvt-api base URL
+        api_url: SDK bridge base URL
         timeout: Request timeout in seconds
 
     Returns:
@@ -167,7 +167,7 @@ def get_rtsp_url(
         port: Device protocol port (default 6036)
         username: Login username
         password: Login password
-        api_url: tvt-api base URL
+        api_url: SDK bridge base URL
         timeout: Request timeout in seconds
 
     Returns:
@@ -358,7 +358,7 @@ def snapshot_from_json(
         all_channels: If True, capture all channels on each device
         max_channels: Max channels when scanning
         username/password: Device credentials
-        api_url: tvt-api URL
+        api_url: SDK bridge URL
         timeout: Request timeout
 
     Returns:
@@ -653,7 +653,7 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=textwrap.dedent("""\
             modes:
-              Default (SDK):   Uses tvt-api Docker container on port 9008/6036
+              Default (SDK):   Uses an SDK bridge service on port 9008/6036
               --direct:        Uses NVR web API (port 80) + ffmpeg RTSP — no Docker needed
 
             examples:
@@ -673,7 +673,7 @@ def main():
 
     # Mode selection
     parser.add_argument(
-        "--direct", action="store_true", help="Use NVR web API + ffmpeg RTSP directly (no tvt-api Docker container)"
+        "--direct", action="store_true", help="Use NVR web API + ffmpeg RTSP directly (no SDK bridge service)"
     )
 
     # Target selection
@@ -722,7 +722,7 @@ def main():
     )
     parser.add_argument("--password", "-p", default=DEFAULT_PASSWORD, help="Device password")
     parser.add_argument(
-        "--api-url", default=DEFAULT_API_URL, help=f"tvt-api URL for SDK mode (default: {DEFAULT_API_URL})"
+        "--api-url", default=DEFAULT_API_URL, help=f"SDK bridge URL for SDK mode (default: {DEFAULT_API_URL})"
     )
     parser.add_argument(
         "--timeout", type=int, default=DEFAULT_TIMEOUT, help=f"Request timeout seconds (default: {DEFAULT_TIMEOUT})"

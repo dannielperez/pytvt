@@ -13,10 +13,11 @@
 #   - LICENSE
 #
 # Explicitly excluded (not redistributed):
-#   - bridges/         Node.js bridge scripts + native SDK helpers
-#   - tvt-api/         C/C++ SDK submodule (vendor binary, not Python)
+#   - bridges/         Local Node.js bridge scripts
+#   - tvt-api/         Local SDK helper workspace
 #   - research/        Reverse-engineering research scripts
 #   - tools/           Maintenance utilities
+#   - files/           Sample and local scan outputs
 #   - config.json      Local device inventory example (site-specific)
 #   - .env.example     Local secrets template
 
@@ -27,8 +28,10 @@ include LICENSE
 
 recursive-include src/pytvt *.py
 recursive-include tests *.py
+global-exclude *.so *.so.* *.dll *.dylib *.lib *.a *.h
 
 prune bridges
+prune files
 prune tvt-api
 prune research
 prune tools

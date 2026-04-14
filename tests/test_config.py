@@ -13,7 +13,18 @@ from pytvt.config import load_config
 class TestLoadConfig:
     def test_defaults_without_file(self, monkeypatch):
         # Clear any env vars that might leak from .env
-        for key in ("TVT_USERNAME", "TVT_PASSWORD", "TVT_PORT", "TVT_TIMEOUT", "TVT_MAX_CHANNELS", "TVT_CONCURRENCY"):
+        for key in (
+            "TVT_USERNAME",
+            "TVT_PASSWORD",
+            "TVT_PORT",
+            "TVT_TIMEOUT",
+            "TVT_MAX_CHANNELS",
+            "TVT_CONCURRENCY",
+            "TVT_SDK_PATH",
+            "TVT_SCAN_SCRIPT",
+            "PYTVT_NETSDK_LIB",
+            "PYTVT_SCAN_SCRIPT",
+        ):
             monkeypatch.delenv(key, raising=False)
         cfg = load_config(None)
         assert cfg.username == "admin"
@@ -22,6 +33,8 @@ class TestLoadConfig:
         assert cfg.timeout == 10
         assert cfg.max_channels == 64
         assert cfg.concurrency == 4
+        assert cfg.sdk_path is None
+        assert cfg.scan_script is None
 
     def test_json_file_overrides_defaults(self, tmp_path):
         cfg_file = tmp_path / "config.json"
@@ -44,9 +57,13 @@ class TestLoadConfig:
     def test_env_only(self, monkeypatch):
         monkeypatch.setenv("TVT_PASSWORD", "secret")
         monkeypatch.setenv("TVT_CONCURRENCY", "16")
+        monkeypatch.setenv("TVT_SDK_PATH", "/opt/tvt-sdk")
+        monkeypatch.setenv("TVT_SCAN_SCRIPT", "/opt/scan_nvr.mjs")
         cfg = load_config(None)
         assert cfg.password == "secret"
         assert cfg.concurrency == 16
+        assert cfg.sdk_path == "/opt/tvt-sdk"
+        assert cfg.scan_script == "/opt/scan_nvr.mjs"
 
     def test_nonexistent_file_ignored(self):
         cfg = load_config("/nonexistent/config.json")
@@ -67,7 +84,18 @@ class TestLoadConfig:
         importlib.reload(pytvt.config)
 
     def test_all_fields_from_json(self, tmp_path, monkeypatch):
-        for key in ("TVT_USERNAME", "TVT_PASSWORD", "TVT_PORT", "TVT_TIMEOUT", "TVT_MAX_CHANNELS", "TVT_CONCURRENCY"):
+        for key in (
+            "TVT_USERNAME",
+            "TVT_PASSWORD",
+            "TVT_PORT",
+            "TVT_TIMEOUT",
+            "TVT_MAX_CHANNELS",
+            "TVT_CONCURRENCY",
+            "TVT_SDK_PATH",
+            "TVT_SCAN_SCRIPT",
+            "PYTVT_NETSDK_LIB",
+            "PYTVT_SCAN_SCRIPT",
+        ):
             monkeypatch.delenv(key, raising=False)
         data = {
             "username": "u",
@@ -76,6 +104,8 @@ class TestLoadConfig:
             "timeout": 2,
             "max_channels": 8,
             "concurrency": 1,
+            "sdk_path": "/opt/vendor-sdk",
+            "scan_script": "/opt/scan_nvr.mjs",
         }
         cfg_file = tmp_path / "config.json"
         cfg_file.write_text(json.dumps(data))
@@ -86,6 +116,15 @@ class TestLoadConfig:
         assert cfg.timeout == 2
         assert cfg.max_channels == 8
         assert cfg.concurrency == 1
+        assert cfg.sdk_path == "/opt/vendor-sdk"
+        assert cfg.scan_script == "/opt/scan_nvr.mjs"
+
+    def test_legacy_sdk_env_supported(self, monkeypatch):
+        monkeypatch.setenv("PYTVT_NETSDK_LIB", "/legacy/path.so")
+        monkeypatch.setenv("PYTVT_SCAN_SCRIPT", "/legacy/scan_nvr.mjs")
+        cfg = load_config(None)
+        assert cfg.sdk_path == "/legacy/path.so"
+        assert cfg.scan_script == "/legacy/scan_nvr.mjs"
 
     def test_unknown_json_keys_ignored(self, tmp_path):
         cfg_file = tmp_path / "config.json"

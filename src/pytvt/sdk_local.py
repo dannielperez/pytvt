@@ -8,9 +8,10 @@ stdout is safely ignored.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 
-from .config import SCAN_SCRIPT
+from .config import resolve_scan_script
 from .models import CameraInfo, DeviceEntry, ScannerConfig, ScanResult
 
 # Sentinel markers emitted by scan_nvr.mjs around the JSON payload.
@@ -31,22 +32,38 @@ def sdk_scan_local(device: DeviceEntry, config: ScannerConfig) -> ScanResult:
     """
     result = ScanResult.for_device(device, config, backend="sdk-local")
     timeout = config.timeout + 30
+    scan_script = resolve_scan_script(config.scan_script)
 
-    if not SCAN_SCRIPT.exists():
-        result.error = f"scan_nvr.mjs not found at {SCAN_SCRIPT}"
+    if scan_script is None:
+        result.error = (
+            "sdk-local backend requires a bridge script. Set TVT_SCAN_SCRIPT or "
+            "ScannerConfig(scan_script=...) to your local scan_nvr.mjs path."
+        )
         return result
+
+    if not scan_script.exists():
+        result.error = (
+            f"sdk-local bridge script not found at {scan_script}. Set TVT_SCAN_SCRIPT or "
+            "ScannerConfig(scan_script=...) to a valid path."
+        )
+        return result
+
+    env = os.environ.copy()
+    if config.sdk_path and not env.get("TVT_SDK_PATH") and not env.get("PYTVT_NETSDK_LIB"):
+        env["TVT_SDK_PATH"] = config.sdk_path
 
     try:
         proc = subprocess.run(
             [
                 "node",
-                str(SCAN_SCRIPT),
+                str(scan_script),
                 device.ip,
                 str(device.effective_port(config)),
                 config.username,
                 config.password,
             ],
             capture_output=True,
+            env=env,
             text=True,
             timeout=timeout,
         )
@@ -70,7 +87,7 @@ def sdk_scan_local(device: DeviceEntry, config: ScannerConfig) -> ScanResult:
     except subprocess.TimeoutExpired:
         result.error = f"Subprocess timeout after {timeout}s"
     except json.JSONDecodeError as e:
-        result.error = f"Invalid JSON from scan_nvr.mjs: {e}"
+        result.error = f"Invalid JSON from {scan_script.name}: {e}"
     except FileNotFoundError:
         result.error = "node not found in PATH"
 

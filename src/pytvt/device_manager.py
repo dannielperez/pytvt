@@ -4,9 +4,9 @@
 transparently uses the best available backend:
 
 1. **Native SDK** (``netsdk``) — direct ctypes calls to ``libdvrnetsdk.so``.
-   Available on Linux x86_64/aarch64 when the shared library is present.
-2. **SDK HTTP** (``sdk_http``) — HTTP calls to the tvt-api Docker container.
-   Available on any platform when the container is reachable.
+    Available on Linux x86_64/aarch64 when a vendor SDK installation is present.
+2. **SDK HTTP** (``sdk_http``) — HTTP calls to a compatible SDK bridge service.
+    Available on any platform when that service is reachable.
 
 The manager probes backends at construction time and picks the first one
 that works.  You can also force a specific backend or inspect what was
@@ -71,18 +71,18 @@ class NoBackendAvailable(RuntimeError):
 # ── Availability probes ──────────────────────────────────────────────
 
 
-def _netsdk_available() -> bool:
+def _netsdk_available(sdk_path: str | None = None) -> bool:
     """Check if the native SDK can be loaded (Linux + library present)."""
     try:
         from .netsdk.loader import is_netsdk_available
 
-        return is_netsdk_available()
+        return is_netsdk_available(sdk_path=sdk_path)
     except Exception:
         return False
 
 
 def _docker_tvt_api_available(base_url: str, timeout: int = 3) -> bool:
-    """Check if the tvt-api container is reachable."""
+    """Check if the SDK bridge service is reachable."""
     try:
         client = SdkHttpClient(base_url, timeout=timeout)
         return client.health()
@@ -108,6 +108,7 @@ def _docker_running() -> bool:
 
 def available_backends(
     api_url: str = "http://localhost:3000",
+    sdk_path: str | None = None,
 ) -> list[Backend]:
     """Probe and return all available backends in priority order.
 
@@ -115,7 +116,7 @@ def available_backends(
         List of backends that are ready to use (best first).
     """
     backends: list[Backend] = []
-    if _netsdk_available():
+    if _netsdk_available(sdk_path):
         backends.append(Backend.NETSDK)
     if _docker_tvt_api_available(api_url):
         backends.append(Backend.SDK_HTTP)
@@ -134,7 +135,8 @@ class DeviceManager:
         password: Login password.
         port: SDK/protocol port (default 6036).
         backend: Force a specific backend (``None`` = auto-detect).
-        api_url: Base URL for the tvt-api container (used by sdk_http backend).
+        api_url: Base URL for the SDK bridge service (used by sdk_http backend).
+        sdk_path: Optional vendor SDK path for the netsdk backend.
         timeout: HTTP/connection timeout in seconds.
 
     Raises:
@@ -150,6 +152,7 @@ class DeviceManager:
         port: int = 6036,
         backend: Backend | str | None = None,
         api_url: str = "http://localhost:3000",
+        sdk_path: str | None = None,
         timeout: int = 30,
     ) -> None:
         self._ip = ip
@@ -157,6 +160,7 @@ class DeviceManager:
         self._password = password
         self._port = port
         self._api_url = api_url
+        self._sdk_path = sdk_path
         self._timeout = timeout
 
         # Resolve backend
@@ -173,12 +177,13 @@ class DeviceManager:
 
     def _auto_detect(self) -> Backend:
         """Pick the best available backend."""
-        if _netsdk_available():
+        if _netsdk_available(self._sdk_path):
             return Backend.NETSDK
         if _docker_tvt_api_available(self._api_url, timeout=min(self._timeout, 5)):
             return Backend.SDK_HTTP
         raise NoBackendAvailable(
-            "No backend available. Either run on Linux with libdvrnetsdk.so or start the tvt-api Docker container."
+            "No backend available. Install the vendor SDK and set TVT_SDK_PATH or pass sdk_path=..., "
+            "or provide a reachable SDK HTTP service via api_url."
         )
 
     @property
@@ -202,7 +207,7 @@ class DeviceManager:
         if self._netsdk_session is None:
             from .netsdk.client import NetSdkClient
 
-            client = NetSdkClient()
+            client = NetSdkClient(sdk_path=self._sdk_path)
             self._netsdk_session = client.login(
                 self._ip,
                 self._username,

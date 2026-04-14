@@ -1,6 +1,6 @@
-"""High-level SDK HTTP client — wraps all tvt-api endpoints.
+"""High-level SDK HTTP client — wraps all SDK bridge HTTP endpoints.
 
-Provides a Pythonic interface over the tvt-api Fastify container that
+Provides a Pythonic interface over an SDK bridge service that
 proxies the native TVT C++ SDK.  Each method performs a single HTTP
 request and returns typed dataclass results.
 
@@ -75,10 +75,10 @@ class CommandResult:
 # ---------------------------------------------------------------------------
 
 class SdkHttpClient:
-    """Typed wrapper around the tvt-api Fastify HTTP endpoints.
+    """Typed wrapper around SDK bridge HTTP endpoints.
 
     Args:
-        base_url: Base URL of the tvt-api container (e.g. ``http://localhost:3000``).
+        base_url: Base URL of the SDK bridge service (e.g. ``http://localhost:3000``).
         timeout: Default HTTP timeout in seconds.
     """
 
@@ -124,7 +124,7 @@ class SdkHttpClient:
     # -- public API ---------------------------------------------------------
 
     def health(self) -> bool:
-        """Check if the tvt-api server is reachable."""
+        """Check if the SDK bridge service is reachable."""
         try:
             req = urllib.request.Request(f"{self._base_url}/health")
             with urllib.request.urlopen(req, timeout=self._timeout) as resp:

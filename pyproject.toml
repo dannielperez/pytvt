@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pytvt"
-version = "0.5.0"
+version = "0.5.1"
 description = "Bulk TVT NVR camera scanner and management toolkit"
 readme = "README.md"
 license = "MIT"
@@ -53,6 +53,17 @@ Homepage = "https://github.com/dannielperez/pytvt"
 Repository = "https://github.com/dannielperez/pytvt"
 Issues = "https://github.com/dannielperez/pytvt/issues"
 
+[tool.hatch.build]
+exclude = [
+    "**/*.so",
+    "**/*.so.*",
+    "**/*.dll",
+    "**/*.dylib",
+    "**/*.lib",
+    "**/*.a",
+    "**/*.h",
+]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/pytvt"]
 
@@ -66,6 +77,7 @@ exclude = [
     "/.gitmodules",
     "/bridges",
     "/config.json",
+    "/files",
     "/research",
     "/tools",
     "/tvt-api",
