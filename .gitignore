@@ -7,7 +7,7 @@ build/
 .venv/
 
 # pypi
-.pyirc
+.pypirc
 
 # Build / publish artefacts
 *.whl

@@ -1,12 +1,16 @@
 name: Publish to PyPI
 
-# Trigger: when a GitHub Release is published (tag must be v*).
-# Manually dispatch with workflow_dispatch for a dry-run without publishing.
 on:
   release:
     types: [published]
   workflow_dispatch:
     inputs:
+      publish_target:
+        description: "Publish target"
+        required: true
+        default: "testpypi"
+        type: choice
+        options: ["testpypi", "pypi"]
       dry_run:
         description: "Dry run (build + validate only, no upload)"
         required: false
@@ -14,15 +18,17 @@ on:
         type: choice
         options: ["true", "false"]
 
+concurrency:
+  group: publish-${{ github.workflow }}-${{ github.ref || github.run_id }}
+  cancel-in-progress: false
+
 permissions:
   contents: read
 
 jobs:
-  # ── Run the full test + build CI suite ──────────────────────────────
   ci:
     uses: ./.github/workflows/ci.yml
 
-  # ── Build sdist + wheel and validate with twine ─────────────────────
   build:
     needs: ci
     runs-on: ubuntu-latest
@@ -47,7 +53,6 @@ jobs:
       - name: Extract version
         id: meta
         run: |
-          # Use tomllib (3.11+) with a regex fallback that works on Python 3.10.
           VERSION=$(python -c "
           try:
               import tomllib
@@ -67,24 +72,101 @@ jobs:
           path: dist/
           if-no-files-found: error
 
-  # ── Publish to PyPI via OIDC Trusted Publishing ──────────────────────
-  #
-  # Prerequisites (one-time setup on PyPI):
-  #   1. Go to pypi.org → your project → Publishing → Add a Trusted Publisher.
-  #   2. Set:  owner=dannielperez  repo=pytvt  workflow=publish.yml
-  #   3. Create a GitHub Environment named "pypi" on this repo and add a
-  #      protection rule (e.g. require review, restrict to tag refs).
-  #
-  # No API tokens are needed; PyPI uses the GitHub OIDC token directly.
-  publish:
+  # Configure a trusted publisher on TestPyPI with:
+  # owner=dannielperez repo=pytvt workflow=publish.yml environment=testpypi
+  publish_testpypi:
     needs: build
     if: >
       github.event_name == 'release' ||
       (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'false')
     runs-on: ubuntu-latest
+    environment: testpypi
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Download dist artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist-${{ needs.build.outputs.version }}
+          path: dist/
+
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
+  validate_testpypi:
+    needs: [build, publish_testpypi]
+    if: >
+      github.event_name == 'release' ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'false')
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install from TestPyPI with retries
+        run: |
+          set -euo pipefail
+          python -m venv .venv-testpypi
+          VERSION="${{ needs.build.outputs.version }}"
+          for attempt in 1 2 3 4 5; do
+            if .venv-testpypi/bin/pip install --no-cache-dir \
+              --index-url https://test.pypi.org/simple/ \
+              --extra-index-url https://pypi.org/simple \
+              "pytvt==${VERSION}"; then
+              break
+            fi
+            if [ "$attempt" -eq 5 ]; then
+              exit 1
+            fi
+            sleep 15
+          done
+
+      - name: Smoke test TestPyPI package
+        run: |
+          set -euo pipefail
+          .venv-testpypi/bin/python - <<'PY'
+          import pytvt
+          from pytvt import DeviceManager, NoBackendAvailable, ScannerConfig
+          from pytvt.netsdk.loader import NetSdkUnavailable, load_sdk
+
+          assert pytvt.__version__ == "${{ needs.build.outputs.version }}"
+          cfg = ScannerConfig()
+          assert cfg.username == "admin"
+          assert cfg.sdk_path is None
+          assert cfg.scan_script is None
+
+          try:
+              load_sdk()
+          except NetSdkUnavailable:
+              pass
+          else:
+              raise SystemExit("load_sdk unexpectedly succeeded without SDK")
+
+          try:
+              DeviceManager("127.0.0.1", "admin", "x")
+          except NoBackendAvailable:
+              pass
+          else:
+              raise SystemExit("DeviceManager unexpectedly succeeded without SDK or bridge")
+          PY
+
+  # Configure a trusted publisher on PyPI with:
+  # owner=dannielperez repo=pytvt workflow=publish.yml environment=pypi
+  publish:
+    needs: [build, validate_testpypi]
+    if: >
+      github.event_name == 'release' ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.publish_target == 'pypi' && github.event.inputs.dry_run == 'false')
+    runs-on: ubuntu-latest
     environment: pypi
     permissions:
-      id-token: write  # required for OIDC Trusted Publishing
+      id-token: write
       contents: read
 
     steps:
@@ -96,7 +178,3 @@ jobs:
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
-        # Trusted Publishing — no token needed.
-        # To publish to TestPyPI instead, uncomment the next two lines:
-        # with:
-        #   repository-url: https://test.pypi.org/legacy/

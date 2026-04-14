@@ -31,6 +31,24 @@ ruff format src/ tests/
 mypy src/pytvt/
 ```
 
+## Releases
+
+Releases should use GitHub Actions OIDC trusted publishing, not manual `twine upload` tokens.
+
+Configure trusted publishers on both TestPyPI and PyPI with these values:
+
+- Owner: `dannielperez`
+- Repository: `pytvt`
+- Workflow: `publish.yml`
+- Environment: `testpypi` for TestPyPI, `pypi` for production PyPI
+
+The publish workflow is designed to:
+
+- run CI and build validation
+- publish to TestPyPI via OIDC
+- install and smoke-test the TestPyPI package
+- publish to PyPI via OIDC only after TestPyPI validation succeeds
+
 ## Code Style
 
 - Python 3.10+ — use modern syntax (`X | Y` unions, etc.)
