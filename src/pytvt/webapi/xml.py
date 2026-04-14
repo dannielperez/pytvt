@@ -45,9 +45,7 @@ def build_set_request(tag: str, fields: dict[str, Any]) -> str:
     Returns:
         Complete XML string with declaration.
     """
-    children = "".join(
-        f"<{k}>{v}</{k}>" for k, v in fields.items() if v is not None
-    )
+    children = "".join(f"<{k}>{v}</{k}>" for k, v in fields.items() if v is not None)
     return wrap_request(f"<{tag}>{children}</{tag}>")
 
 
@@ -115,11 +113,7 @@ def find_bool(element: ET.Element, path: str, default: bool = False) -> bool:
 
 def find_all_text(element: ET.Element, path: str) -> list[str]:
     """Find all matching descendant elements and return their text content."""
-    return [
-        (node.text or "").strip()
-        for node in element.findall(path)
-        if node.text
-    ]
+    return [(node.text or "").strip() for node in element.findall(path) if node.text]
 
 
 def extract_status(root: ET.Element) -> tuple[int, int, str]:

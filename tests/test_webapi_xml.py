@@ -98,13 +98,7 @@ class TestFindText:
 class TestFindInt:
     @pytest.fixture()
     def root(self):
-        return ET.fromstring(
-            b"<Root>"
-            b"  <count>42</count>"
-            b"  <bad>abc</bad>"
-            b"  <empty></empty>"
-            b"</Root>"
-        )
+        return ET.fromstring(b"<Root>  <count>42</count>  <bad>abc</bad>  <empty></empty></Root>")
 
     def test_parses_integer(self, root):
         assert find_int(root, "count") == 42
@@ -152,13 +146,7 @@ class TestFindBool:
 
 class TestFindAllText:
     def test_collects_multiple(self):
-        root = ET.fromstring(
-            b"<Root>"
-            b"  <item>a</item>"
-            b"  <item>b</item>"
-            b"  <item>c</item>"
-            b"</Root>"
-        )
+        root = ET.fromstring(b"<Root>  <item>a</item>  <item>b</item>  <item>c</item></Root>")
         assert find_all_text(root, "item") == ["a", "b", "c"]
 
     def test_empty_when_none(self):

@@ -26,6 +26,7 @@ from pytvt.webapi.models import (
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
+
 def _ok_response(body: bytes, status: int = 200, content_type: str = "application/xml"):
     """Build a mock HTTPResponse."""
     resp = MagicMock()
@@ -67,6 +68,7 @@ def client():
 
 # ── Constructor ──────────────────────────────────────────────────────
 
+
 class TestClientInit:
     def test_basic_auth_header(self, client):
         expected = b64encode(b"admin:test123").decode()
@@ -80,6 +82,7 @@ class TestClientInit:
 
 
 # ── get_supported_apis ───────────────────────────────────────────────
+
 
 class TestGetSupportedAPIs:
     @patch("pytvt.webapi.client.http.client.HTTPConnection")
@@ -103,11 +106,7 @@ class TestGetSupportedAPIs:
 
     @patch("pytvt.webapi.client.http.client.HTTPConnection")
     def test_supports_cached(self, mock_conn_cls, client):
-        body = _xml_ok(
-            "<SupportedAPIs>"
-            "  <SupportedAPI><apiName>GetDeviceInfo</apiName></SupportedAPI>"
-            "</SupportedAPIs>"
-        )
+        body = _xml_ok("<SupportedAPIs>  <SupportedAPI><apiName>GetDeviceInfo</apiName></SupportedAPI></SupportedAPIs>")
         mock_conn = MagicMock()
         mock_conn_cls.return_value = mock_conn
         mock_conn.getresponse.return_value = _ok_response(body)
@@ -119,6 +118,7 @@ class TestGetSupportedAPIs:
 
 
 # ── get_device_info ──────────────────────────────────────────────────
+
 
 class TestGetDeviceInfo:
     @patch("pytvt.webapi.client.http.client.HTTPConnection")
@@ -151,6 +151,7 @@ class TestGetDeviceInfo:
 
 
 # ── get_channel_info ─────────────────────────────────────────────────
+
 
 class TestGetChannelInfo:
     @patch("pytvt.webapi.client.http.client.HTTPConnection")
@@ -186,6 +187,7 @@ class TestGetChannelInfo:
 
 # ── get_disk_info ────────────────────────────────────────────────────
 
+
 class TestGetDiskInfo:
     @patch("pytvt.webapi.client.http.client.HTTPConnection")
     def test_parses_disks(self, mock_conn_cls, client):
@@ -216,6 +218,7 @@ class TestGetDiskInfo:
 
 # ── get_date_and_time ────────────────────────────────────────────────
 
+
 class TestGetDateAndTime:
     @patch("pytvt.webapi.client.http.client.HTTPConnection")
     def test_parses_datetime(self, mock_conn_cls, client):
@@ -241,6 +244,7 @@ class TestGetDateAndTime:
 
 
 # ── modify_password ──────────────────────────────────────────────────
+
 
 class TestModifyPassword:
     @patch("pytvt.webapi.client.http.client.HTTPConnection")
@@ -276,6 +280,7 @@ class TestModifyPassword:
 
 # ── get_image_config ─────────────────────────────────────────────────
 
+
 class TestGetImageConfig:
     @patch("pytvt.webapi.client.http.client.HTTPConnection")
     def test_parses_image_config(self, mock_conn_cls, client):
@@ -301,6 +306,7 @@ class TestGetImageConfig:
 
 
 # ── Snapshot routing ─────────────────────────────────────────────────
+
 
 class TestSnapshotRouting:
     @patch("pytvt.webapi.client.http.client.HTTPConnection")
@@ -368,6 +374,7 @@ class TestSnapshotRouting:
 
 
 # ── Error handling ───────────────────────────────────────────────────
+
 
 class TestErrorHandling:
     @patch("pytvt.webapi.client.http.client.HTTPConnection")

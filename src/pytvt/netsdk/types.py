@@ -11,6 +11,7 @@ from datetime import datetime
 
 # ── Time structures ─────────────────────────────────────────────────
 
+
 class DD_TIME(ct.Structure):
     """Recording time (month 0-11, year = actual - 1900)."""
 
@@ -21,8 +22,8 @@ class DD_TIME(ct.Structure):
         ("hour", ct.c_ubyte),
         ("wday", ct.c_ubyte),
         ("mday", ct.c_ubyte),
-        ("month", ct.c_ubyte),       # 0-11
-        ("year", ct.c_ushort),       # actual year - 1900
+        ("month", ct.c_ubyte),  # 0-11
+        ("year", ct.c_ushort),  # actual year - 1900
         ("nTotalseconds", ct.c_int),
         ("nMicrosecond", ct.c_int),
     ]
@@ -60,8 +61,8 @@ class DD_TIME_EX(ct.Structure):
         ("hour", ct.c_ubyte),
         ("wday", ct.c_ubyte),
         ("mday", ct.c_ubyte),
-        ("month", ct.c_ubyte),       # 1-12
-        ("year", ct.c_ushort),       # actual year
+        ("month", ct.c_ubyte),  # 1-12
+        ("year", ct.c_ushort),  # actual year
         ("nTotalseconds", ct.c_int),
         ("nMicrosecond", ct.c_int),
     ]
@@ -78,6 +79,7 @@ class DD_TIME_EX(ct.Structure):
 
 
 # ── Device info ─────────────────────────────────────────────────────
+
 
 class NET_SDK_DEVICE_FUNC_IPC(ct.Structure):
     """IPC AI capability bitfield (32-bit flags + 7x32 reserved)."""
@@ -225,6 +227,7 @@ class NET_SDK_DEVICEINFO(ct.Structure):
 
 # ── Discovery info ──────────────────────────────────────────────────
 
+
 class NET_SDK_DEVICE_DISCOVERY_INFO(ct.Structure):
     """Device found via NET_SDK_DiscoverDevice."""
 
@@ -260,6 +263,7 @@ class NET_SDK_DEVICE_DISCOVERY_INFO(ct.Structure):
 
 # ── IPC device info (from NVR) ─────────────────────────────────────
 
+
 class NET_SDK_IPC_DEVICE_INFO(ct.Structure):
     """IPC channel info from NVR via NET_SDK_GetDeviceIPCInfo."""
 
@@ -294,6 +298,7 @@ class NET_SDK_IPC_DEVICE_INFO(ct.Structure):
 
 DD_MAX_CAMERA_NAME_BUF_LEN = 64
 
+
 class NET_SDK_CH_DEVICE_STATUS(ct.Structure):
     """Channel device status from NET_SDK_GetDeviceCHStatus."""
 
@@ -312,6 +317,7 @@ class NET_SDK_CH_DEVICE_STATUS(ct.Structure):
 
 
 # ── Device support ──────────────────────────────────────────────────
+
 
 class NET_SDK_DEV_SUPPORT(ct.Structure):
     """Device capability flags from NET_SDK_GetDeviceSupportFunction."""
@@ -344,6 +350,7 @@ class NET_SDK_DEV_SUPPORT(ct.Structure):
 
 
 # ── Smart event support ────────────────────────────────────────────
+
 
 class NET_SDK_SMART_SUPPORT(ct.Structure):
     """Smart event capability flags from NET_SDK_GetSmarEventSupport."""
@@ -380,6 +387,7 @@ class NET_SDK_SMART_SUPPORT(ct.Structure):
 
 # ── Disk info ───────────────────────────────────────────────────────
 
+
 class NET_SDK_DISK_INFO(ct.Structure):
     """Disk information from NET_SDK_GetNextDiskInfo."""
 
@@ -388,12 +396,13 @@ class NET_SDK_DISK_INFO(ct.Structure):
         ("diskIndex", ct.c_long),
         ("diskStatus", ct.c_short),
         ("diskProperty", ct.c_short),
-        ("diskTotalSpace", ct.c_uint),   # MB
-        ("diskFreeSpace", ct.c_uint),    # MB
+        ("diskTotalSpace", ct.c_uint),  # MB
+        ("diskFreeSpace", ct.c_uint),  # MB
     ]
 
 
 # ── Alarm info ──────────────────────────────────────────────────────
+
 
 class NET_SDK_ALARMINFO(ct.Structure):
     """Alarm event from device message callback."""
@@ -424,6 +433,7 @@ class NET_SDK_ALARMINFO_EX(ct.Structure):
 
 # ── Recording file info ────────────────────────────────────────────
 
+
 class NET_SDK_REC_FILE(ct.Structure):
     """Recording file information from NET_SDK_FindNextFile."""
 
@@ -451,6 +461,7 @@ class NET_SDK_REC_TIME(ct.Structure):
 
 
 # ── JPEG params ─────────────────────────────────────────────────────
+
 
 class NET_SDK_JPEGPARA(ct.Structure):
     """JPEG capture parameters."""
@@ -484,6 +495,7 @@ class NET_SDK_LOG(ct.Structure):
 
 # ── NVR disk recording dates ───────────────────────────────────────
 
+
 class NET_SDK_NVR_DISKREC_DATE_ITEM(ct.Structure):
     """NVR disk recording date range."""
 
@@ -498,6 +510,7 @@ class NET_SDK_NVR_DISKREC_DATE_ITEM(ct.Structure):
 
 
 # ── Alarm output status ────────────────────────────────────────────
+
 
 class NET_SDK_ALRAM_OUT_STATUS(ct.Structure):
     """Alarm relay output status."""

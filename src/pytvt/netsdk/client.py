@@ -53,6 +53,7 @@ logger = logging.getLogger(__name__)
 
 # ── Result dataclasses ──────────────────────────────────────────────
 
+
 @dataclass(frozen=True, slots=True)
 class DiscoveredDevice:
     """Device found via LAN discovery."""
@@ -211,6 +212,7 @@ class DeviceSupport:
 
 # ── Errors ──────────────────────────────────────────────────────────
 
+
 class NetSdkError(Exception):
     """Raised when an SDK call fails."""
 
@@ -220,6 +222,7 @@ class NetSdkError(Exception):
 
 
 # ── Session (logged-in handle) ──────────────────────────────────────
+
 
 class DeviceSession:
     """Authenticated session to a single device.
@@ -282,7 +285,10 @@ class DeviceSession:
         count = ct.c_long(0)
         self._check(
             sdk._lib.NET_SDK_GetDeviceCHStatus(  # type: ignore[union-attr]
-                self._handle, buf, max_channels, ct.byref(count),
+                self._handle,
+                buf,
+                max_channels,
+                ct.byref(count),
             ),
             "GetDeviceCHStatus",
         )
@@ -302,7 +308,10 @@ class DeviceSession:
         count = ct.c_long(0)
         self._check(
             sdk._lib.NET_SDK_GetDeviceIPCInfo(  # type: ignore[union-attr]
-                self._handle, buf, max_channels, ct.byref(count),
+                self._handle,
+                buf,
+                max_channels,
+                ct.byref(count),
             ),
             "GetDeviceIPCInfo",
         )
@@ -341,7 +350,9 @@ class DeviceSession:
         s = NET_SDK_SMART_SUPPORT()
         self._check(
             sdk._lib.NET_SDK_GetSmarEventSupport(  # type: ignore[union-attr]
-                self._handle, channel, ct.byref(s),
+                self._handle,
+                channel,
+                ct.byref(s),
             ),
             "GetSmarEventSupport",
         )
@@ -378,7 +389,10 @@ class DeviceSession:
         buf = ct.create_string_buffer(256)
         self._check(
             sdk._lib.NET_SDK_GetRtspUrl(  # type: ignore[union-attr]
-                self._handle, channel, stream, buf,
+                self._handle,
+                channel,
+                stream,
+                buf,
             ),
             "GetRtspUrl",
         )
@@ -410,8 +424,12 @@ class DeviceSession:
         returned = ct.c_uint(0)
         self._check(
             sdk._lib.NET_SDK_CaptureJPEGData_V2(  # type: ignore[union-attr]
-                self._handle, channel, ct.byref(para),
-                buf, buf_size, ct.byref(returned),
+                self._handle,
+                channel,
+                ct.byref(para),
+                buf,
+                buf_size,
+                ct.byref(returned),
             ),
             "CaptureJPEGData_V2",
         )
@@ -429,7 +447,10 @@ class DeviceSession:
         """Send a PTZ command (pan/tilt/zoom/focus/iris)."""
         self._check(
             sdk._lib.NET_SDK_PTZControl_Other(  # type: ignore[union-attr]
-                self._handle, channel, command, speed,
+                self._handle,
+                channel,
+                command,
+                speed,
             ),
             "PTZControl_Other",
         )
@@ -444,7 +465,10 @@ class DeviceSession:
         """Manage PTZ presets (set / go to / delete)."""
         self._check(
             sdk._lib.NET_SDK_PTZPreset_Other(  # type: ignore[union-attr]
-                self._handle, channel, command, preset_index,
+                self._handle,
+                channel,
+                command,
+                preset_index,
             ),
             "PTZPreset_Other",
         )
@@ -459,7 +483,10 @@ class DeviceSession:
         """Manage PTZ cruises (run / stop / delete)."""
         self._check(
             sdk._lib.NET_SDK_PTZCruise_Other(  # type: ignore[union-attr]
-                self._handle, channel, command, cruise_index,
+                self._handle,
+                channel,
+                command,
+                cruise_index,
             ),
             "PTZCruise_Other",
         )
@@ -487,7 +514,10 @@ class DeviceSession:
         count = ct.c_long(0)
         self._check(
             sdk._lib.NET_SDK_GetAlarmOutStatus(  # type: ignore[union-attr]
-                self._handle, buf, max_outputs, ct.byref(count),
+                self._handle,
+                buf,
+                max_outputs,
+                ct.byref(count),
             ),
             "GetAlarmOutStatus",
         )
@@ -523,7 +553,11 @@ class DeviceSession:
         t_start = DD_TIME.from_datetime(start)
         t_stop = DD_TIME.from_datetime(stop)
         find_handle = sdk._lib.NET_SDK_FindFile(  # type: ignore[union-attr]
-            self._handle, channel, record_type, ct.byref(t_start), ct.byref(t_stop),
+            self._handle,
+            channel,
+            record_type,
+            ct.byref(t_start),
+            ct.byref(t_stop),
         )
         if find_handle < 0:
             code = sdk._lib.NET_SDK_GetLastError()  # type: ignore[union-attr]
@@ -601,7 +635,10 @@ class DeviceSession:
         count = ct.c_long(0)
         self._check(
             sdk._lib.NET_SDK_GetNvrRecordDays(  # type: ignore[union-attr]
-                self._handle, buf, max_items, ct.byref(count),
+                self._handle,
+                buf,
+                max_items,
+                ct.byref(count),
             ),
             "GetNvrRecordDays",
         )
@@ -637,7 +674,10 @@ class DeviceSession:
         t_start = DD_TIME.from_datetime(start)
         t_stop = DD_TIME.from_datetime(stop)
         find_handle = sdk._lib.NET_SDK_FindDVRLog(  # type: ignore[union-attr]
-            self._handle, log_type, ct.byref(t_start), ct.byref(t_stop),
+            self._handle,
+            log_type,
+            ct.byref(t_start),
+            ct.byref(t_stop),
         )
         if find_handle < 0:
             code = sdk._lib.NET_SDK_GetLastError()  # type: ignore[union-attr]
@@ -701,7 +741,8 @@ class DeviceSession:
         """Export device configuration to a file."""
         self._check(
             sdk._lib.NET_SDK_GetConfigFile(  # type: ignore[union-attr]
-                self._handle, file_path.encode("utf-8"),
+                self._handle,
+                file_path.encode("utf-8"),
             ),
             "GetConfigFile",
         )
@@ -710,7 +751,8 @@ class DeviceSession:
         """Import device configuration from a file."""
         self._check(
             sdk._lib.NET_SDK_SetConfigFile(  # type: ignore[union-attr]
-                self._handle, file_path.encode("utf-8"),
+                self._handle,
+                file_path.encode("utf-8"),
             ),
             "SetConfigFile",
         )
@@ -723,7 +765,8 @@ class DeviceSession:
         Check progress with :meth:`NetSdkClient.upgrade_progress`.
         """
         handle = sdk._lib.NET_SDK_Upgrade(  # type: ignore[union-attr]
-            self._handle, firmware_path.encode("utf-8"),
+            self._handle,
+            firmware_path.encode("utf-8"),
         )
         if handle < 0:
             code = sdk._lib.NET_SDK_GetLastError()  # type: ignore[union-attr]
@@ -741,6 +784,7 @@ class DeviceSession:
 
 
 # ── NetSdkClient ────────────────────────────────────────────────────
+
 
 class NetSdkClient:
     """Main entry point for the TVT NetSDK.
@@ -843,7 +887,9 @@ class NetSdkClient:
     def activate(self, ip: str, port: int, password: str) -> None:
         """Activate an uninitialized device with a new admin password."""
         ok = self._lib.NET_SDK_ActiveDevice(
-            ip.encode("utf-8"), port, password.encode("utf-8"),
+            ip.encode("utf-8"),
+            port,
+            password.encode("utf-8"),
         )
         if not ok:
             raise NetSdkError("ActiveDevice", self._last_error())
@@ -851,7 +897,8 @@ class NetSdkClient:
     def activate_by_mac(self, mac: str, password: str) -> None:
         """Activate a device by MAC address."""
         ok = self._lib.NET_SDK_ActiveDeviceByMac(
-            mac.encode("utf-8"), password.encode("utf-8"),
+            mac.encode("utf-8"),
+            password.encode("utf-8"),
         )
         if not ok:
             raise NetSdkError("ActiveDeviceByMac", self._last_error())
@@ -895,7 +942,8 @@ class NetSdkClient:
             )
         logger.info(
             "Logged in to %s:%d — %s (%s) SN=%s",
-            host, port,
+            host,
+            port,
             info.deviceName.decode("utf-8", errors="replace"),
             info.firmwareVersion.decode("utf-8", errors="replace"),
             info.szSN.decode("utf-8", errors="replace"),
@@ -909,7 +957,8 @@ class NetSdkClient:
         """Check firmware upgrade progress (0-100, or negative on error)."""
         progress = ct.c_int(0)
         ret = sdk._lib.NET_SDK_GetUpgradeProgress(  # type: ignore[union-attr]
-            upgrade_handle, ct.byref(progress),
+            upgrade_handle,
+            ct.byref(progress),
         )
         return progress.value if ret >= 0 else ret
 
@@ -920,6 +969,7 @@ class NetSdkClient:
 
 
 # ── Helpers ─────────────────────────────────────────────────────────
+
 
 def _device_info_from(info: NET_SDK_DEVICEINFO) -> DeviceInfo:
     return DeviceInfo(

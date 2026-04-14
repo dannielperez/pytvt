@@ -23,6 +23,7 @@ from pytvt.netsdk.constants import (
 
 # ── StreamType ──────────────────────────────────────────────────────
 
+
 class TestStreamType:
     def test_values(self):
         assert StreamType.MAIN == 0
@@ -35,6 +36,7 @@ class TestStreamType:
 
 
 # ── DeviceType ──────────────────────────────────────────────────────
+
 
 class TestDeviceType:
     def test_nvr(self):
@@ -49,6 +51,7 @@ class TestDeviceType:
 
 # ── ConnectType ─────────────────────────────────────────────────────
 
+
 class TestConnectType:
     def test_tcp(self):
         assert ConnectType.TCP == 0
@@ -58,6 +61,7 @@ class TestConnectType:
 
 
 # ── PtzCommand ──────────────────────────────────────────────────────
+
 
 class TestPtzCommand:
     def test_directional(self):
@@ -85,6 +89,7 @@ class TestPtzCommand:
 
 # ── PtzSpeed ────────────────────────────────────────────────────────
 
+
 class TestPtzSpeed:
     def test_range(self):
         assert PtzSpeed.SPEED_1 == 1
@@ -95,6 +100,7 @@ class TestPtzSpeed:
 
 
 # ── AlarmType ───────────────────────────────────────────────────────
+
 
 class TestAlarmType:
     def test_motion(self):
@@ -120,6 +126,7 @@ class TestAlarmType:
 
 # ── SmartEventType ──────────────────────────────────────────────────
 
+
 class TestSmartEventType:
     def test_face_detection(self):
         assert SmartEventType.VFD == 0x0C
@@ -133,6 +140,7 @@ class TestSmartEventType:
 
 # ── DiskStatus ──────────────────────────────────────────────────────
 
+
 class TestDiskStatus:
     def test_values(self):
         assert DiskStatus.NORMAL == 0
@@ -141,6 +149,7 @@ class TestDiskStatus:
 
 
 # ── DiskProperty ────────────────────────────────────────────────────
+
 
 class TestDiskProperty:
     def test_values(self):
@@ -151,6 +160,7 @@ class TestDiskProperty:
 
 # ── ImageMode ───────────────────────────────────────────────────────
 
+
 class TestImageMode:
     def test_values(self):
         assert ImageMode.JPG == 0
@@ -159,6 +169,7 @@ class TestImageMode:
 
 
 # ── RecordType (IntFlag) ───────────────────────────────────────────
+
 
 class TestRecordType:
     def test_bitmask_combination(self):
@@ -180,6 +191,7 @@ class TestRecordType:
 
 # ── SearchDeviceType (IntFlag) ──────────────────────────────────────
 
+
 class TestSearchDeviceType:
     def test_individual(self):
         assert SearchDeviceType.ONVIF == 0x002
@@ -192,6 +204,7 @@ class TestSearchDeviceType:
 
 
 # ── SdkError ────────────────────────────────────────────────────────
+
 
 class TestSdkError:
     def test_success(self):
@@ -213,6 +226,7 @@ class TestSdkError:
 
 
 # ── CameraType ──────────────────────────────────────────────────────
+
 
 class TestCameraType:
     def test_values(self):

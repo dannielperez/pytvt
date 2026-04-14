@@ -28,6 +28,7 @@ from dataclasses import dataclass
 # Response dataclasses
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class DeviceInfoResult:
     success: bool
@@ -65,6 +66,7 @@ class RtspUrlResult:
 @dataclass(frozen=True)
 class CommandResult:
     """Generic success/error for simple commands (reboot, ptz, etc.)."""
+
     success: bool
     error: str | None = None
 
@@ -72,6 +74,7 @@ class CommandResult:
 # ---------------------------------------------------------------------------
 # Client
 # ---------------------------------------------------------------------------
+
 
 class SdkHttpClient:
     """Typed wrapper around SDK bridge HTTP endpoints.
@@ -88,7 +91,12 @@ class SdkHttpClient:
     # -- internal helpers ---------------------------------------------------
 
     def _connect_payload(
-        self, ip: str, username: str, password: str, port: int = 6036, **extra: object,
+        self,
+        ip: str,
+        username: str,
+        password: str,
+        port: int = 6036,
+        **extra: object,
     ) -> bytes:
         body: dict[str, object] = {
             "ip": ip,
@@ -133,7 +141,12 @@ class SdkHttpClient:
             return False
 
     def device_info(
-        self, ip: str, username: str, password: str, *, port: int = 6036,
+        self,
+        ip: str,
+        username: str,
+        password: str,
+        *,
+        port: int = 6036,
     ) -> DeviceInfoResult:
         """Get full device information (name, model, SN, firmware, etc.)."""
         try:
@@ -197,7 +210,12 @@ class SdkHttpClient:
             return DeviceTimeResult(success=False, error=f"Timeout after {self._timeout}s")
 
     def reboot(
-        self, ip: str, username: str, password: str, *, port: int = 6036,
+        self,
+        ip: str,
+        username: str,
+        password: str,
+        *,
+        port: int = 6036,
     ) -> CommandResult:
         """Reboot the device."""
         try:
@@ -254,8 +272,12 @@ class SdkHttpClient:
             data = self._post_json(
                 "/rtsp-url",
                 self._connect_payload(
-                    ip, username, password, port,
-                    channel=channel, stream_type=stream_type,
+                    ip,
+                    username,
+                    password,
+                    port,
+                    channel=channel,
+                    stream_type=stream_type,
                 ),
             )
             return RtspUrlResult(
@@ -289,8 +311,13 @@ class SdkHttpClient:
             data = self._post_json(
                 "/ptz",
                 self._connect_payload(
-                    ip, username, password, port,
-                    channel=channel, command=command, speed=speed,
+                    ip,
+                    username,
+                    password,
+                    port,
+                    channel=channel,
+                    command=command,
+                    speed=speed,
                 ),
             )
             return CommandResult(success=data.get("success", False), error=data.get("error"))
@@ -318,8 +345,13 @@ class SdkHttpClient:
             data = self._post_json(
                 "/ptz/preset",
                 self._connect_payload(
-                    ip, username, password, port,
-                    channel=channel, command=command, preset_index=preset_index,
+                    ip,
+                    username,
+                    password,
+                    port,
+                    channel=channel,
+                    command=command,
+                    preset_index=preset_index,
                 ),
             )
             return CommandResult(success=data.get("success", False), error=data.get("error"))
@@ -345,7 +377,11 @@ class SdkHttpClient:
             return self._post_json(
                 "/scan",
                 self._connect_payload(
-                    ip, username, password, port, maxCameras=max_cameras,
+                    ip,
+                    username,
+                    password,
+                    port,
+                    maxCameras=max_cameras,
                 ),
             )
         except urllib.error.URLError as e:

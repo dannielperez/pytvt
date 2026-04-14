@@ -115,9 +115,7 @@ def load_sdk(sdk_path: str | os.PathLike[str] | None = None) -> ct.CDLL:
 
     arch = platform.machine()
     if arch not in ("x86_64", "aarch64"):
-        raise NetSdkUnavailable(
-            f"TVT NetSDK supports x86_64 and aarch64 (current: {arch})."
-        )
+        raise NetSdkUnavailable(f"TVT NetSDK supports x86_64 and aarch64 (current: {arch}).")
 
     lib_path = _find_lib(sdk_path)
 

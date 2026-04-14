@@ -52,6 +52,7 @@ from pytvt.netsdk.types import (
 
 # ── Fixtures ────────────────────────────────────────────────────────
 
+
 @pytest.fixture
 def mock_lib():
     """Create a mock library that passes all SDK calls."""
@@ -86,6 +87,7 @@ def session(mock_lib, client):
 
 # ── NetSdkClient init/cleanup ──────────────────────────────────────
 
+
 class TestNetSdkClientInit:
     def test_init_calls_sdk(self, mock_lib):
         with patch("pytvt.netsdk.client.load_sdk", return_value=mock_lib):
@@ -97,8 +99,7 @@ class TestNetSdkClientInit:
 
     def test_init_failure(self, mock_lib):
         mock_lib.NET_SDK_Init.return_value = False
-        with patch("pytvt.netsdk.client.load_sdk", return_value=mock_lib), \
-             pytest.raises(NetSdkError, match="Init"):
+        with patch("pytvt.netsdk.client.load_sdk", return_value=mock_lib), pytest.raises(NetSdkError, match="Init"):
             NetSdkClient()
 
     def test_context_manager(self, mock_lib):
@@ -125,6 +126,7 @@ class TestNetSdkClientVersion:
 
 # ── Discovery ───────────────────────────────────────────────────────
 
+
 class TestDiscover:
     def test_discover_empty(self, client, mock_lib):
         mock_lib.NET_SDK_DiscoverDevice.return_value = 0
@@ -139,6 +141,7 @@ class TestDiscover:
 
 
 # ── Activation ──────────────────────────────────────────────────────
+
 
 class TestActivate:
     def test_activate_success(self, client, mock_lib):
@@ -160,6 +163,7 @@ class TestActivate:
 
 # ── Login ───────────────────────────────────────────────────────────
 
+
 class TestLogin:
     def test_login_success(self, client, mock_lib):
         session = client.login("10.0.0.1", "admin", "pass")
@@ -180,6 +184,7 @@ class TestLogin:
 
 # ── DeviceSession context manager ──────────────────────────────────
 
+
 class TestDeviceSession:
     def test_context_manager(self, session, mock_lib):
         with session:
@@ -198,10 +203,11 @@ class TestDeviceSession:
 
 # ── DeviceSession.device_info ──────────────────────────────────────
 
+
 class TestSessionDeviceInfo:
     def test_device_info(self, session, mock_lib):
         def fill_info(handle, info_ptr):
-            info = info_ptr._obj if hasattr(info_ptr, '_obj') else info_ptr.contents
+            info = info_ptr._obj if hasattr(info_ptr, "_obj") else info_ptr.contents
             info.szSN = b"ABC123456"
             info.deviceProduct = b"TD-3316E2"
             info.deviceName = b"MyNVR"
@@ -230,6 +236,7 @@ class TestSessionDeviceInfo:
 
 # ── DeviceSession.capture_jpeg ─────────────────────────────────────
 
+
 class TestSessionCapture:
     def test_capture_jpeg(self, session, mock_lib):
         jpeg_data = b"\xff\xd8\xff\xe0" + b"\x00" * 100
@@ -247,12 +254,16 @@ class TestSessionCapture:
 
 # ── DeviceSession.ptz ──────────────────────────────────────────────
 
+
 class TestSessionPtz:
     def test_ptz_left(self, session, mock_lib):
         mock_lib.NET_SDK_PTZControl_Other.return_value = True
         session.ptz(PtzCommand.LEFT, channel=0, speed=PtzSpeed.SPEED_4)
         mock_lib.NET_SDK_PTZControl_Other.assert_called_once_with(
-            1, 0, PtzCommand.LEFT, PtzSpeed.SPEED_4,
+            1,
+            0,
+            PtzCommand.LEFT,
+            PtzSpeed.SPEED_4,
         )
 
     def test_ptz_failure(self, session, mock_lib):
@@ -265,11 +276,15 @@ class TestSessionPtz:
         mock_lib.NET_SDK_PTZPreset_Other.return_value = True
         session.ptz_preset(PtzCommand.PRESET_GO, 5, channel=0)
         mock_lib.NET_SDK_PTZPreset_Other.assert_called_once_with(
-            1, 0, PtzCommand.PRESET_GO, 5,
+            1,
+            0,
+            PtzCommand.PRESET_GO,
+            5,
         )
 
 
 # ── DeviceSession.rtsp_url ─────────────────────────────────────────
+
 
 class TestSessionRtspUrl:
     def test_rtsp_url(self, session, mock_lib):
@@ -284,6 +299,7 @@ class TestSessionRtspUrl:
 
 
 # ── DeviceSession.alarm ────────────────────────────────────────────
+
 
 class TestSessionAlarm:
     def test_alarm_subscribe(self, session, mock_lib):
@@ -305,6 +321,7 @@ class TestSessionAlarm:
 
 # ── DeviceSession.find_recordings ──────────────────────────────────
 
+
 class TestSessionRecordings:
     def test_find_recordings_empty(self, session, mock_lib):
         mock_lib.NET_SDK_FindFile.return_value = 1000
@@ -312,7 +329,9 @@ class TestSessionRecordings:
         mock_lib.NET_SDK_FindClose.return_value = True
 
         result = session.find_recordings(
-            0, datetime(2024, 1, 1), datetime(2024, 1, 2),
+            0,
+            datetime(2024, 1, 1),
+            datetime(2024, 1, 2),
         )
         assert result == []
         mock_lib.NET_SDK_FindClose.assert_called_once_with(1000)
@@ -322,11 +341,14 @@ class TestSessionRecordings:
         mock_lib.NET_SDK_GetLastError.return_value = 36
         with pytest.raises(NetSdkError, match="FindFile"):
             session.find_recordings(
-                0, datetime(2024, 1, 1), datetime(2024, 1, 2),
+                0,
+                datetime(2024, 1, 1),
+                datetime(2024, 1, 2),
             )
 
 
 # ── DeviceSession.disk_info ────────────────────────────────────────
+
 
 class TestSessionDiskInfo:
     def test_disk_info_empty(self, session, mock_lib):
@@ -347,6 +369,7 @@ class TestSessionDiskInfo:
 
 # ── DeviceSession.find_logs ────────────────────────────────────────
 
+
 class TestSessionLogs:
     def test_find_logs_empty(self, session, mock_lib):
         mock_lib.NET_SDK_FindDVRLog.return_value = 3000
@@ -359,6 +382,7 @@ class TestSessionLogs:
 
 
 # ── DeviceSession management ───────────────────────────────────────
+
 
 class TestSessionManagement:
     def test_reboot(self, session, mock_lib):
@@ -389,6 +413,7 @@ class TestSessionManagement:
 
 # ── NetSdkError ─────────────────────────────────────────────────────
 
+
 class TestNetSdkError:
     def test_with_code(self):
         err = NetSdkError("test", SdkError.PASSWORD_ERROR)
@@ -407,24 +432,39 @@ class TestNetSdkError:
 
 # ── Dataclass construction ──────────────────────────────────────────
 
+
 class TestDataclasses:
     def test_discovered_device(self):
         d = DiscoveredDevice(
-            ip="10.0.0.1", mac="AA:BB:CC:DD:EE:FF", product="NVR",
-            device_name="Test", net_port=9008, http_port=80,
-            activated=True, firmware_build=20240101,
+            ip="10.0.0.1",
+            mac="AA:BB:CC:DD:EE:FF",
+            product="NVR",
+            device_name="Test",
+            net_port=9008,
+            http_port=80,
+            activated=True,
+            firmware_build=20240101,
         )
         assert d.ip == "10.0.0.1"
         assert d.activated is True
 
     def test_device_info(self):
         d = DeviceInfo(
-            serial_number="SN123", product="NVR", device_name="Test",
-            device_type=3, mac="AA:BB:CC:DD:EE:FF", ip="10.0.0.1",
-            port=9008, firmware="V5.0", hardware_version="HW1",
-            kernel_version="K3", build_date="2024-01-01",
-            video_inputs=16, audio_inputs=1,
-            sensor_inputs=4, sensor_outputs=2,
+            serial_number="SN123",
+            product="NVR",
+            device_name="Test",
+            device_type=3,
+            mac="AA:BB:CC:DD:EE:FF",
+            ip="10.0.0.1",
+            port=9008,
+            firmware="V5.0",
+            hardware_version="HW1",
+            kernel_version="K3",
+            build_date="2024-01-01",
+            video_inputs=16,
+            audio_inputs=1,
+            sensor_inputs=4,
+            sensor_outputs=2,
         )
         assert d.serial_number == "SN123"
         assert d.video_inputs == 16
@@ -435,8 +475,11 @@ class TestDataclasses:
 
     def test_disk_info(self):
         d = DiskInfo(
-            index=0, status=DiskStatus.NORMAL, property=DiskProperty.READ_WRITE,
-            total_mb=1024000, free_mb=512000,
+            index=0,
+            status=DiskStatus.NORMAL,
+            property=DiskProperty.READ_WRITE,
+            total_mb=1024000,
+            free_mb=512000,
         )
         assert d.total_mb == 1024000
 

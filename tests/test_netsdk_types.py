@@ -30,14 +30,15 @@ from pytvt.netsdk.types import (
 
 # ── DD_TIME ─────────────────────────────────────────────────────────
 
+
 class TestDDTime:
     def test_pack_alignment(self):
         assert DD_TIME._pack_ == 4
 
     def test_to_datetime(self):
         t = DD_TIME()
-        t.year = 124    # 2024 - 1900
-        t.month = 5     # June (0-indexed)
+        t.year = 124  # 2024 - 1900
+        t.month = 5  # June (0-indexed)
         t.mday = 15
         t.hour = 10
         t.minute = 30
@@ -47,8 +48,8 @@ class TestDDTime:
     def test_from_datetime(self):
         dt = datetime(2025, 1, 20, 14, 5, 30)
         t = DD_TIME.from_datetime(dt)
-        assert t.year == 125     # 2025 - 1900
-        assert t.month == 0      # January = 0
+        assert t.year == 125  # 2025 - 1900
+        assert t.month == 0  # January = 0
         assert t.mday == 20
         assert t.hour == 14
         assert t.minute == 5
@@ -74,6 +75,7 @@ class TestDDTime:
 
 # ── DD_TIME_EX ──────────────────────────────────────────────────────
 
+
 class TestDDTimeEX:
     def test_to_datetime(self):
         t = DD_TIME_EX()
@@ -87,6 +89,7 @@ class TestDDTimeEX:
 
 
 # ── NET_SDK_DEVICEINFO ──────────────────────────────────────────────
+
 
 class TestDeviceInfo:
     def test_pack_alignment(self):
@@ -121,6 +124,7 @@ class TestDeviceInfo:
 
 
 # ── NET_SDK_DEVICE_FUNC_IPC ────────────────────────────────────────
+
 
 class TestDeviceFuncIpc:
     def test_no_flags(self):
@@ -162,6 +166,7 @@ class TestDeviceFuncIpc:
 
 # ── NET_SDK_DEVICE_DISCOVERY_INFO ──────────────────────────────────
 
+
 class TestDeviceDiscoveryInfo:
     def test_mac_str(self):
         info = NET_SDK_DEVICE_DISCOVERY_INFO()
@@ -182,6 +187,7 @@ class TestDeviceDiscoveryInfo:
 
 # ── NET_SDK_IPC_DEVICE_INFO ────────────────────────────────────────
 
+
 class TestIpcDeviceInfo:
     def test_is_online(self):
         info = NET_SDK_IPC_DEVICE_INFO()
@@ -196,6 +202,7 @@ class TestIpcDeviceInfo:
 
 # ── NET_SDK_CH_DEVICE_STATUS ───────────────────────────────────────
 
+
 class TestChDeviceStatus:
     def test_is_online(self):
         s = NET_SDK_CH_DEVICE_STATUS()
@@ -209,6 +216,7 @@ class TestChDeviceStatus:
 
 
 # ── NET_SDK_DEV_SUPPORT ────────────────────────────────────────────
+
 
 class TestDevSupport:
     def test_no_support(self):
@@ -230,6 +238,7 @@ class TestDevSupport:
 
 # ── NET_SDK_DISK_INFO ──────────────────────────────────────────────
 
+
 class TestDiskInfo:
     def test_fields(self):
         d = NET_SDK_DISK_INFO()
@@ -243,6 +252,7 @@ class TestDiskInfo:
 
 # ── NET_SDK_JPEGPARA ───────────────────────────────────────────────
 
+
 class TestJpegPara:
     def test_default_values(self):
         p = NET_SDK_JPEGPARA()
@@ -253,6 +263,7 @@ class TestJpegPara:
 
 
 # ── NET_SDK_REC_FILE ───────────────────────────────────────────────
+
 
 class TestRecFile:
     def test_time_fields(self):
@@ -268,6 +279,7 @@ class TestRecFile:
 
 # ── NET_SDK_LOG ─────────────────────────────────────────────────────
 
+
 class TestLog:
     def test_content_field(self):
         log = NET_SDK_LOG()
@@ -282,6 +294,7 @@ class TestLog:
 
 # ── NET_SDK_SMART_SUPPORT ──────────────────────────────────────────
 
+
 class TestSmartSupport:
     def test_default_zero(self):
         s = NET_SDK_SMART_SUPPORT()
@@ -295,17 +308,33 @@ class TestSmartSupport:
 
 # ── Struct size sanity checks ──────────────────────────────────────
 
+
 class TestStructSizes:
     """Ensure struct sizes are reasonable (not zero, aligned to pack=4)."""
 
-    @pytest.mark.parametrize("struct_cls", [
-        DD_TIME, DD_TIME_EX, NET_SDK_DEVICEINFO, NET_SDK_DEVICE_FUNC_IPC,
-        NET_SDK_DEVICE_DISCOVERY_INFO, NET_SDK_IPC_DEVICE_INFO,
-        NET_SDK_CH_DEVICE_STATUS, NET_SDK_DEV_SUPPORT, NET_SDK_SMART_SUPPORT,
-        NET_SDK_DISK_INFO, NET_SDK_ALARMINFO, NET_SDK_ALARMINFO_EX,
-        NET_SDK_REC_FILE, NET_SDK_REC_TIME, NET_SDK_JPEGPARA, NET_SDK_LOG,
-        NET_SDK_NVR_DISKREC_DATE_ITEM, NET_SDK_ALRAM_OUT_STATUS,
-    ])
+    @pytest.mark.parametrize(
+        "struct_cls",
+        [
+            DD_TIME,
+            DD_TIME_EX,
+            NET_SDK_DEVICEINFO,
+            NET_SDK_DEVICE_FUNC_IPC,
+            NET_SDK_DEVICE_DISCOVERY_INFO,
+            NET_SDK_IPC_DEVICE_INFO,
+            NET_SDK_CH_DEVICE_STATUS,
+            NET_SDK_DEV_SUPPORT,
+            NET_SDK_SMART_SUPPORT,
+            NET_SDK_DISK_INFO,
+            NET_SDK_ALARMINFO,
+            NET_SDK_ALARMINFO_EX,
+            NET_SDK_REC_FILE,
+            NET_SDK_REC_TIME,
+            NET_SDK_JPEGPARA,
+            NET_SDK_LOG,
+            NET_SDK_NVR_DISKREC_DATE_ITEM,
+            NET_SDK_ALRAM_OUT_STATUS,
+        ],
+    )
     def test_size_positive(self, struct_cls):
         assert ct.sizeof(struct_cls) > 0
 

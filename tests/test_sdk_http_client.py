@@ -21,6 +21,7 @@ from pytvt.sdk_http_client import (
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def client() -> SdkHttpClient:
     return SdkHttpClient("http://test:3000", timeout=5)
@@ -49,6 +50,7 @@ CREDS = ("10.0.0.1", "admin", "pass123")
 # health
 # ---------------------------------------------------------------------------
 
+
 class TestHealth:
     def test_healthy(self, client: SdkHttpClient) -> None:
         with patch("pytvt.sdk_http_client.urllib.request.urlopen") as mock_open:
@@ -64,6 +66,7 @@ class TestHealth:
 # ---------------------------------------------------------------------------
 # device_info
 # ---------------------------------------------------------------------------
+
 
 class TestDeviceInfo:
     def test_success(self, client: SdkHttpClient) -> None:
@@ -96,6 +99,7 @@ class TestDeviceInfo:
 
     def test_connection_error(self, client: SdkHttpClient) -> None:
         import urllib.error
+
         with patch("pytvt.sdk_http_client.urllib.request.urlopen") as mock_open:
             mock_open.side_effect = urllib.error.URLError("refused")
             result = client.device_info(*CREDS)
@@ -116,15 +120,18 @@ class TestDeviceInfo:
 # device_time
 # ---------------------------------------------------------------------------
 
+
 class TestDeviceTime:
     def test_get_time(self, client: SdkHttpClient) -> None:
         with patch("pytvt.sdk_http_client.urllib.request.urlopen") as mock_open:
-            mock_open.return_value = _mock_response({
-                "success": True,
-                "action": "get",
-                "device_time": "2025-01-15T10:30:00",
-                "error": None,
-            })
+            mock_open.return_value = _mock_response(
+                {
+                    "success": True,
+                    "action": "get",
+                    "device_time": "2025-01-15T10:30:00",
+                    "error": None,
+                }
+            )
             result = client.device_time(*CREDS)
 
         assert result.success is True
@@ -133,12 +140,14 @@ class TestDeviceTime:
 
     def test_set_time(self, client: SdkHttpClient) -> None:
         with patch("pytvt.sdk_http_client.urllib.request.urlopen") as mock_open:
-            mock_open.return_value = _mock_response({
-                "success": True,
-                "action": "set",
-                "timestamp": 1700000000,
-                "error": None,
-            })
+            mock_open.return_value = _mock_response(
+                {
+                    "success": True,
+                    "action": "set",
+                    "timestamp": 1700000000,
+                    "error": None,
+                }
+            )
             result = client.device_time(*CREDS, set_timestamp=1700000000)
 
         assert result.success is True
@@ -159,6 +168,7 @@ class TestDeviceTime:
 # ---------------------------------------------------------------------------
 # reboot
 # ---------------------------------------------------------------------------
+
 
 class TestReboot:
     def test_success(self, client: SdkHttpClient) -> None:
@@ -182,6 +192,7 @@ class TestReboot:
 # snapshot
 # ---------------------------------------------------------------------------
 
+
 class TestSnapshot:
     def test_success_returns_bytes(self, client: SdkHttpClient) -> None:
         jpeg = b"\xff\xd8\xff\xe0" + b"\x00" * 100  # fake JPEG
@@ -196,7 +207,8 @@ class TestSnapshot:
     def test_failure_returns_none(self, client: SdkHttpClient) -> None:
         with patch("pytvt.sdk_http_client.urllib.request.urlopen") as mock_open:
             mock_open.return_value = _mock_response(
-                {"success": False, "error": "fail"}, content_type="application/json",
+                {"success": False, "error": "fail"},
+                content_type="application/json",
             )
             result = client.snapshot(*CREDS, channel=0)
 
@@ -214,14 +226,17 @@ class TestSnapshot:
 # rtsp_url
 # ---------------------------------------------------------------------------
 
+
 class TestRtspUrl:
     def test_main_stream(self, client: SdkHttpClient) -> None:
         with patch("pytvt.sdk_http_client.urllib.request.urlopen") as mock_open:
-            mock_open.return_value = _mock_response({
-                "success": True,
-                "rtsp_url": "rtsp://10.0.0.1:554/chID=0&streamType=main",
-                "error": None,
-            })
+            mock_open.return_value = _mock_response(
+                {
+                    "success": True,
+                    "rtsp_url": "rtsp://10.0.0.1:554/chID=0&streamType=main",
+                    "error": None,
+                }
+            )
             result = client.rtsp_url(*CREDS, channel=0, stream_type=0)
 
         assert result.success is True
@@ -229,11 +244,13 @@ class TestRtspUrl:
 
     def test_sub_stream(self, client: SdkHttpClient) -> None:
         with patch("pytvt.sdk_http_client.urllib.request.urlopen") as mock_open:
-            mock_open.return_value = _mock_response({
-                "success": True,
-                "rtsp_url": "rtsp://10.0.0.1:554/chID=1&streamType=sub",
-                "error": None,
-            })
+            mock_open.return_value = _mock_response(
+                {
+                    "success": True,
+                    "rtsp_url": "rtsp://10.0.0.1:554/chID=1&streamType=sub",
+                    "error": None,
+                }
+            )
             result = client.rtsp_url(*CREDS, channel=1, stream_type=1)
 
         assert isinstance(result, RtspUrlResult)
@@ -243,6 +260,7 @@ class TestRtspUrl:
 # ---------------------------------------------------------------------------
 # ptz
 # ---------------------------------------------------------------------------
+
 
 class TestPtz:
     def test_stop(self, client: SdkHttpClient) -> None:
@@ -268,6 +286,7 @@ class TestPtz:
 # ptz_preset
 # ---------------------------------------------------------------------------
 
+
 class TestPtzPreset:
     def test_goto(self, client: SdkHttpClient) -> None:
         with patch("pytvt.sdk_http_client.urllib.request.urlopen") as mock_open:
@@ -291,14 +310,17 @@ class TestPtzPreset:
 # scan
 # ---------------------------------------------------------------------------
 
+
 class TestScan:
     def test_success(self, client: SdkHttpClient) -> None:
         with patch("pytvt.sdk_http_client.urllib.request.urlopen") as mock_open:
-            mock_open.return_value = _mock_response({
-                "success": True,
-                "device_name": "NVR",
-                "cameras": [{"channel": 0, "name": "Cam1"}],
-            })
+            mock_open.return_value = _mock_response(
+                {
+                    "success": True,
+                    "device_name": "NVR",
+                    "cameras": [{"channel": 0, "name": "Cam1"}],
+                }
+            )
             result = client.scan(*CREDS)
 
         assert result["success"] is True
@@ -306,6 +328,7 @@ class TestScan:
 
     def test_connection_error(self, client: SdkHttpClient) -> None:
         import urllib.error
+
         with patch("pytvt.sdk_http_client.urllib.request.urlopen") as mock_open:
             mock_open.side_effect = urllib.error.URLError("refused")
             result = client.scan(*CREDS)
@@ -316,6 +339,7 @@ class TestScan:
 # ---------------------------------------------------------------------------
 # constructor / defaults
 # ---------------------------------------------------------------------------
+
 
 class TestClientInit:
     def test_default_url(self) -> None:

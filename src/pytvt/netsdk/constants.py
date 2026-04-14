@@ -10,6 +10,7 @@ from enum import IntEnum, IntFlag
 
 # ── Stream types ────────────────────────────────────────────────────
 
+
 class StreamType(IntEnum):
     """NET_SDK_STREAM_TYPE — video stream selection."""
 
@@ -20,6 +21,7 @@ class StreamType(IntEnum):
 
 
 # ── Device types ────────────────────────────────────────────────────
+
 
 class DeviceType(IntEnum):
     """NET_SDK_DEVICE_TYPE — type of TVT device."""
@@ -35,6 +37,7 @@ class DeviceType(IntEnum):
 
 # ── Connect types ──────────────────────────────────────────────────
 
+
 class ConnectType(IntEnum):
     """NET_SDK_CONNECT_TYPE — SDK login transport."""
 
@@ -45,15 +48,17 @@ class ConnectType(IntEnum):
 
 # ── Camera / PTZ support ───────────────────────────────────────────
 
+
 class CameraType(IntEnum):
     """NET_SDK_CAMERA_TYPE — PTZ capability of an IPC."""
 
     NOT_SUPPORT_PTZ = 0
     DOME_SUPPORT_PTZ = 1  # dome camera
-    SUPPORT_PTZ = 2       # speed dome
+    SUPPORT_PTZ = 2  # speed dome
 
 
 # ── PTZ commands ────────────────────────────────────────────────────
+
 
 class PtzCommand(IntEnum):
     """PTZ_CMD_TYPE — pan/tilt/zoom/preset/cruise/track commands."""
@@ -107,6 +112,7 @@ class PtzSpeed(IntEnum):
 
 # ── Alarm types ─────────────────────────────────────────────────────
 
+
 class AlarmType(IntEnum):
     """NET_SDK_N9000_ALARM_TYPE — alarm event codes."""
 
@@ -114,30 +120,30 @@ class AlarmType(IntEnum):
     SENSOR = 0x02
     VIDEO_LOSS = 0x03
     FRONT_OFFLINE = 0x04
-    OSC = 0x05                       # object removed/left
-    AVD = 0x06                       # video abnormal
-    AVD_SCENE = 0x07                 # scene change
-    AVD_CLARITY = 0x08               # blurry video
-    AVD_COLOR = 0x09                 # color shift
-    PEA_TRIPWIRE = 0x0A              # tripwire
-    PEA_PERIMETER = 0x0B             # perimeter intrusion
-    VFD = 0x0C                       # face detection
-    CDD = 0x0D                       # crowd density
-    IPD = 0x0E                       # people intrusion
-    CPC = 0x0F                       # people counting
-    FACE_MATCH = 0x10                # face match (NVR)
-    FACE_MATCH_FOR_IPC = 0x11        # face match (IPC)
-    PEA_FOR_IPC = 0x12               # tripwire/perimeter (IPC)
-    TRAJECT = 0x13                   # target tracking
-    VEHICLE = 0x14                   # vehicle/plate recognition
-    AOI_ENTRY = 0x15                 # area of interest entry
-    AOI_LEAVE = 0x16                 # area of interest leave
-    PASSLINE = 0x17                  # line crossing count
-    TRAFFIC = 0x18                   # traffic statistics
-    DOOR_BELL = 0x19                 # doorbell (IPC only)
-    PVD = 0x1A                       # illegal parking
-    LOITER = 0x1B                    # loitering
-    ASD = 0x1C                       # audio abnormal
+    OSC = 0x05  # object removed/left
+    AVD = 0x06  # video abnormal
+    AVD_SCENE = 0x07  # scene change
+    AVD_CLARITY = 0x08  # blurry video
+    AVD_COLOR = 0x09  # color shift
+    PEA_TRIPWIRE = 0x0A  # tripwire
+    PEA_PERIMETER = 0x0B  # perimeter intrusion
+    VFD = 0x0C  # face detection
+    CDD = 0x0D  # crowd density
+    IPD = 0x0E  # people intrusion
+    CPC = 0x0F  # people counting
+    FACE_MATCH = 0x10  # face match (NVR)
+    FACE_MATCH_FOR_IPC = 0x11  # face match (IPC)
+    PEA_FOR_IPC = 0x12  # tripwire/perimeter (IPC)
+    TRAJECT = 0x13  # target tracking
+    VEHICLE = 0x14  # vehicle/plate recognition
+    AOI_ENTRY = 0x15  # area of interest entry
+    AOI_LEAVE = 0x16  # area of interest leave
+    PASSLINE = 0x17  # line crossing count
+    TRAFFIC = 0x18  # traffic statistics
+    DOOR_BELL = 0x19  # doorbell (IPC only)
+    PVD = 0x1A  # illegal parking
+    LOITER = 0x1B  # loitering
+    ASD = 0x1C  # audio abnormal
     EXCEPTION = 0x41
     IP_CONFLICT = 0x42
     DISK_IO_ERROR = 0x43
@@ -152,10 +158,10 @@ class AlarmType(IntEnum):
     ALARM_OUT = 0x51
     DISARM = 0x52
     ARM = 0x53
-    TEMPERATURE_ALARM = 0x61         # AI thermal
-    FIREPOINT = 0x62                 # AI fire detection
-    BINOCULAR_OVERMAN = 0x63         # binocular overcrowding
-    BINOCULAR_REVERSE = 0x64         # binocular wrong-way
+    TEMPERATURE_ALARM = 0x61  # AI thermal
+    FIREPOINT = 0x62  # AI fire detection
+    BINOCULAR_OVERMAN = 0x63  # binocular overcrowding
+    BINOCULAR_REVERSE = 0x64  # binocular wrong-way
     FRONT_ONLINE = 0x65
     VIDEO_LOSS_OFF = 0x66
     AVD_OFF = 0x67
@@ -166,45 +172,47 @@ class AlarmType(IntEnum):
 
 # ── Smart event types ──────────────────────────────────────────────
 
+
 class SmartEventType(IntEnum):
     """NET_SDK_SMART_EVENT_TYPE — intelligent analytics event codes."""
 
-    OSC = 0x05                       # object removed/left (IPC)
-    AVD = 0x06                       # video abnormal (IPC)
-    VFD = 0x0C                       # face detection (IPC)
-    CDD = 0x0D                       # crowd density
-    IPD = 0x0E                       # people intrusion
-    CPC = 0x0F                       # people counting
-    FACE_MATCH = 0x10                # face match (NVR)
+    OSC = 0x05  # object removed/left (IPC)
+    AVD = 0x06  # video abnormal (IPC)
+    VFD = 0x0C  # face detection (IPC)
+    CDD = 0x0D  # crowd density
+    IPD = 0x0E  # people intrusion
+    CPC = 0x0F  # people counting
+    FACE_MATCH = 0x10  # face match (NVR)
     FACE_MATCH_FOR_IPC = 0x11
-    PEA_FOR_IPC = 0x12               # tripwire/perimeter (IPC)
-    TRAJECT = 0x13                   # target tracking
-    VEHICLE = 0x14                   # vehicle/plate (IPC)
+    PEA_FOR_IPC = 0x12  # tripwire/perimeter (IPC)
+    TRAJECT = 0x13  # target tracking
+    VEHICLE = 0x14  # vehicle/plate (IPC)
     AOI_ENTRY = 0x15
     AOI_LEAVE = 0x16
-    PASSLINE = 0x17                  # line crossing (target snap)
-    TRAFFIC = 0x18                   # traffic statistics
-    PEA_TARGET = 0x19                # tripwire/perimeter with snap
-    VSD = 0x1A                       # video structured data
+    PASSLINE = 0x17  # line crossing (target snap)
+    TRAFFIC = 0x18  # traffic statistics
+    PEA_TARGET = 0x19  # tripwire/perimeter with snap
+    VSD = 0x1A  # video structured data
     TEMPERATURE_ALARM = 0x1B
     FIREPOINT = 0x1C
     NVR_VEHICLE = 0x1D
     NVR_AOI_ENTRY = 0x1E
     NVR_AOI_LEAVE = 0x1F
-    PVD = 0x20                       # illegal parking
+    PVD = 0x20  # illegal parking
     LOITER = 0x21
-    ASD = 0x22                       # audio abnormal
+    ASD = 0x22  # audio abnormal
     VFD_MATCH_FAILED = 0x23
     BINOCULAR_COUNT = 0x24
-    FALLING = 0x25                   # fall detection
-    TRIPWIRE = 0x26                  # tripwire with snap
+    FALLING = 0x25  # fall detection
+    TRIPWIRE = 0x26  # tripwire with snap
     HEATMAP = 0x27
-    THERMAL_PEA = 0x28               # thermal intrusion
+    THERMAL_PEA = 0x28  # thermal intrusion
     THERMAL_AOI_ENTRY = 0x29
     THERMAL_AOI_LEAVE = 0x2A
 
 
 # ── Disk status / property ─────────────────────────────────────────
+
 
 class DiskStatus(IntEnum):
     """NET_SDK_DISK_STATUS — HDD status."""
@@ -225,6 +233,7 @@ class DiskProperty(IntEnum):
 
 # ── Image format ───────────────────────────────────────────────────
 
+
 class ImageMode(IntEnum):
     """IMAGE_MODE — snapshot image format."""
 
@@ -234,6 +243,7 @@ class ImageMode(IntEnum):
 
 
 # ── Recording types ────────────────────────────────────────────────
+
 
 class RecordType(IntFlag):
     """DD_RECORD_TYPE — recording event types (bitmask)."""
@@ -260,6 +270,7 @@ class RecordType(IntFlag):
 
 # ── Search device types ────────────────────────────────────────────
 
+
 class SearchDeviceType(IntFlag):
     """SEARCH_DEVICE_TYPE — device families for discovery filtering."""
 
@@ -276,6 +287,7 @@ class SearchDeviceType(IntFlag):
 
 
 # ── SDK error codes ─────────────────────────────────────────────────
+
 
 class SdkError(IntEnum):
     """NET_SDK_ERROR — SDK function return / GetLastError codes."""

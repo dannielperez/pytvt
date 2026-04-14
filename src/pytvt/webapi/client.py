@@ -120,11 +120,16 @@ class WebApiClient:
             ctx.check_hostname = False
             ctx.verify_mode = ssl.CERT_NONE
             conn = http.client.HTTPSConnection(
-                self.host, self.port, timeout=self.timeout, context=ctx,
+                self.host,
+                self.port,
+                timeout=self.timeout,
+                context=ctx,
             )
         else:
             conn = http.client.HTTPConnection(
-                self.host, self.port, timeout=self.timeout,
+                self.host,
+                self.port,
+                timeout=self.timeout,
             )
 
         headers: dict[str, str] = {
@@ -165,6 +170,7 @@ class WebApiClient:
             )
         if http_status == 403:
             from .errors import PermissionDeniedError
+
             raise PermissionDeniedError(
                 f"Permission denied for {full_path}",
                 status_code=403,
@@ -212,7 +218,9 @@ class WebApiClient:
         """GET that returns raw bytes + content type (for binary responses like snapshots)."""
         full_path = f"{LAPI_BASE}{path}"
         http_status, data, content_type = self._request(
-            "GET", full_path, accept=accept,
+            "GET",
+            full_path,
+            accept=accept,
         )
 
         if http_status == 401:
@@ -309,13 +317,15 @@ class WebApiClient:
 
         channels: list[ChannelInfo] = []
         for ch_elem in root.iter("ChannelInfo"):
-            channels.append(ChannelInfo(
-                channel_id=xml.find_int(ch_elem, "channelID"),
-                channel_name=xml.find_text(ch_elem, "channelName"),
-                ip_address=xml.find_text(ch_elem, "ipAddress"),
-                channel_type=xml.find_text(ch_elem, "channelType"),
-                online=xml.find_bool(ch_elem, "online"),
-            ))
+            channels.append(
+                ChannelInfo(
+                    channel_id=xml.find_int(ch_elem, "channelID"),
+                    channel_name=xml.find_text(ch_elem, "channelName"),
+                    ip_address=xml.find_text(ch_elem, "ipAddress"),
+                    channel_type=xml.find_text(ch_elem, "channelType"),
+                    online=xml.find_bool(ch_elem, "online"),
+                )
+            )
         return channels
 
     def get_disk_info(self) -> list[DiskInfo]:
@@ -329,15 +339,17 @@ class WebApiClient:
 
         disks: list[DiskInfo] = []
         for disk_elem in root.iter("DiskInfo"):
-            disks.append(DiskInfo(
-                disk_id=xml.find_int(disk_elem, "diskID"),
-                disk_name=xml.find_text(disk_elem, "diskName"),
-                disk_type=xml.find_text(disk_elem, "diskType"),
-                status=xml.find_text(disk_elem, "status"),
-                capacity_mb=xml.find_int(disk_elem, "capacity"),
-                free_mb=xml.find_int(disk_elem, "freeSpace"),
-                property=xml.find_text(disk_elem, "property"),
-            ))
+            disks.append(
+                DiskInfo(
+                    disk_id=xml.find_int(disk_elem, "diskID"),
+                    disk_name=xml.find_text(disk_elem, "diskName"),
+                    disk_type=xml.find_text(disk_elem, "diskType"),
+                    status=xml.find_text(disk_elem, "status"),
+                    capacity_mb=xml.find_int(disk_elem, "capacity"),
+                    free_mb=xml.find_int(disk_elem, "freeSpace"),
+                    property=xml.find_text(disk_elem, "property"),
+                )
+            )
         return disks
 
     def get_date_and_time(self) -> DateTimeInfo:
@@ -406,11 +418,14 @@ class WebApiClient:
             new_password: New password.
             user_id: User ID to modify (default ``"1"`` = admin).
         """
-        body = xml.build_set_request("ModifyPassword", {
-            "userName": self.username,
-            "oldPassword": old_password,
-            "newPassword": new_password,
-        })
+        body = xml.build_set_request(
+            "ModifyPassword",
+            {
+                "userName": self.username,
+                "oldPassword": old_password,
+                "newPassword": new_password,
+            },
+        )
         self._post(f"/Security/UserManagement/{user_id}/ModifyPassword", body)
         # Update stored password so subsequent requests work
         self.password = new_password
@@ -454,19 +469,21 @@ class WebApiClient:
 
         streams: list[VideoStreamConfig] = []
         for vs_elem in root.iter("VideoStreamConfig"):
-            streams.append(VideoStreamConfig(
-                channel_id=channel_id,
-                stream_type=xml.find_text(vs_elem, "streamType"),
-                codec=xml.find_text(vs_elem, "codec"),
-                resolution_width=xml.find_int(vs_elem, "resolutionWidth"),
-                resolution_height=xml.find_int(vs_elem, "resolutionHeight"),
-                bitrate_type=xml.find_text(vs_elem, "bitrateType"),
-                bitrate=xml.find_int(vs_elem, "bitrate"),
-                max_bitrate=xml.find_int(vs_elem, "maxBitrate"),
-                frame_rate=xml.find_int(vs_elem, "frameRate"),
-                gop=xml.find_int(vs_elem, "GOP"),
-                quality=xml.find_int(vs_elem, "quality"),
-            ))
+            streams.append(
+                VideoStreamConfig(
+                    channel_id=channel_id,
+                    stream_type=xml.find_text(vs_elem, "streamType"),
+                    codec=xml.find_text(vs_elem, "codec"),
+                    resolution_width=xml.find_int(vs_elem, "resolutionWidth"),
+                    resolution_height=xml.find_int(vs_elem, "resolutionHeight"),
+                    bitrate_type=xml.find_text(vs_elem, "bitrateType"),
+                    bitrate=xml.find_int(vs_elem, "bitrate"),
+                    max_bitrate=xml.find_int(vs_elem, "maxBitrate"),
+                    frame_rate=xml.find_int(vs_elem, "frameRate"),
+                    gop=xml.find_int(vs_elem, "GOP"),
+                    quality=xml.find_int(vs_elem, "quality"),
+                )
+            )
         return streams
 
     def get_audio_stream_config(self, channel_id: int = 1) -> AudioStreamConfig:
@@ -523,12 +540,15 @@ class WebApiClient:
             )
         except (UnsupportedFunctionError, WebApiError) as exc:
             return SnapshotResult(
-                success=False, method="webapi", error=str(exc),
+                success=False,
+                method="webapi",
+                error=str(exc),
             )
 
         if not data or len(data) < 100:
             return SnapshotResult(
-                success=False, method="webapi",
+                success=False,
+                method="webapi",
                 error="Empty or invalid snapshot response",
             )
 
@@ -556,23 +576,31 @@ class WebApiClient:
         """
         body = ""
         if date_time:
-            body = xml.build_set_request("SnapshotByTime", {
-                "channelID": channel_id,
-                "dateTime": date_time,
-            })
+            body = xml.build_set_request(
+                "SnapshotByTime",
+                {
+                    "channelID": channel_id,
+                    "dateTime": date_time,
+                },
+            )
 
         path = f"/Image/Channels/{channel_id}/SnapshotByTime"
         full_path = f"{LAPI_BASE}{path}"
 
         try:
             http_status, data, content_type = self._request(
-                "POST", full_path, body, accept="image/jpeg",
+                "POST",
+                full_path,
+                body,
+                accept="image/jpeg",
             )
         except DeviceOfflineError:
             raise
         except (WebApiError, OSError) as exc:
             return SnapshotResult(
-                success=False, method="webapi_by_time", error=str(exc),
+                success=False,
+                method="webapi_by_time",
+                error=str(exc),
             )
 
         if http_status == 401:
@@ -583,7 +611,8 @@ class WebApiClient:
 
         if http_status >= 400 or not data or len(data) < 100:
             return SnapshotResult(
-                success=False, method="webapi_by_time",
+                success=False,
+                method="webapi_by_time",
                 error=f"HTTP {http_status}" if http_status >= 400 else "Empty response",
             )
 
@@ -615,7 +644,9 @@ class WebApiClient:
                 return result
             logger.debug(
                 "GetSnapshot failed on %s CH%d: %s — trying alternatives",
-                self.host, channel_id, result.error,
+                self.host,
+                channel_id,
+                result.error,
             )
 
         # Try GetSnapshotByTime
@@ -625,7 +656,9 @@ class WebApiClient:
                 return result
             logger.debug(
                 "GetSnapshotByTime failed on %s CH%d: %s",
-                self.host, channel_id, result.error,
+                self.host,
+                channel_id,
+                result.error,
             )
 
         return SnapshotResult(
@@ -669,7 +702,8 @@ class WebApiClient:
         if rtsp_url and output_path:
             logger.debug(
                 "Falling back to RTSP for %s CH%d",
-                self.host, channel_id,
+                self.host,
+                channel_id,
             )
             try:
                 from pytvt.nvr_api import rtsp_snapshot
@@ -718,11 +752,13 @@ class WebApiClient:
 
         statuses: list[RecordStatus] = []
         for rs_elem in root.iter("RecordStatusInfo"):
-            statuses.append(RecordStatus(
-                channel_id=xml.find_int(rs_elem, "channelID"),
-                is_recording=xml.find_bool(rs_elem, "isRecording"),
-                record_type=xml.find_text(rs_elem, "recordType"),
-            ))
+            statuses.append(
+                RecordStatus(
+                    channel_id=xml.find_int(rs_elem, "channelID"),
+                    is_recording=xml.find_bool(rs_elem, "isRecording"),
+                    record_type=xml.find_text(rs_elem, "recordType"),
+                )
+            )
         return statuses
 
     def search_record_date(
@@ -786,12 +822,14 @@ class WebApiClient:
 
         segments: list[RecordSegment] = []
         for seg_elem in root.iter("RecordSegment"):
-            segments.append(RecordSegment(
-                channel_id=xml.find_int(seg_elem, "channelID", channel_id),
-                start_time=xml.find_text(seg_elem, "startTime"),
-                end_time=xml.find_text(seg_elem, "endTime"),
-                record_type=xml.find_text(seg_elem, "recordType"),
-            ))
+            segments.append(
+                RecordSegment(
+                    channel_id=xml.find_int(seg_elem, "channelID", channel_id),
+                    start_time=xml.find_text(seg_elem, "startTime"),
+                    end_time=xml.find_text(seg_elem, "endTime"),
+                    record_type=xml.find_text(seg_elem, "recordType"),
+                )
+            )
         return segments
 
     # ── Service enablement (hybrid flow) ─────────────────────────
@@ -833,8 +871,11 @@ class WebApiClient:
             from pytvt.nvr_api import NvrClient
 
             with NvrClient(
-                self.host, self.username, self.password,
-                port=nvr_web_port, timeout=self.timeout,
+                self.host,
+                self.username,
+                self.password,
+                port=nvr_web_port,
+                timeout=self.timeout,
             ) as nvr:
                 nvr.login()
                 nvr.ensure_services_enabled()

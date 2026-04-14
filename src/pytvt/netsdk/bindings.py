@@ -43,11 +43,11 @@ def bind(lib: ct.CDLL) -> None:
     # ── Login / logout ──────────────────────────────────────────
     lib.NET_SDK_Login.restype = ct.c_long
     lib.NET_SDK_Login.argtypes = [
-        ct.c_char_p,                              # sDVRIP
-        ct.c_ushort,                               # wDVRPort
-        ct.c_char_p,                              # sUserName
-        ct.c_char_p,                              # sPassword
-        ct.POINTER(t.NET_SDK_DEVICEINFO),         # lpDeviceInfo
+        ct.c_char_p,  # sDVRIP
+        ct.c_ushort,  # wDVRPort
+        ct.c_char_p,  # sUserName
+        ct.c_char_p,  # sPassword
+        ct.POINTER(t.NET_SDK_DEVICEINFO),  # lpDeviceInfo
     ]
 
     lib.NET_SDK_Logout.restype = ct.c_bool
@@ -110,38 +110,38 @@ def bind(lib: ct.CDLL) -> None:
     # ── RTSP URL ────────────────────────────────────────────────
     lib.NET_SDK_GetRtspUrl.restype = ct.c_bool
     lib.NET_SDK_GetRtspUrl.argtypes = [
-        ct.c_long,      # lUserID
-        ct.c_long,      # lChannel
-        ct.c_long,      # lStreamType
-        ct.c_char_p,    # sRtspUrl (out buffer)
+        ct.c_long,  # lUserID
+        ct.c_long,  # lChannel
+        ct.c_long,  # lStreamType
+        ct.c_char_p,  # sRtspUrl (out buffer)
     ]
 
     # ── JPEG capture ────────────────────────────────────────────
     lib.NET_SDK_CaptureJPEGData_V2.restype = ct.c_bool
     lib.NET_SDK_CaptureJPEGData_V2.argtypes = [
-        ct.c_long,                           # lUserID
-        ct.c_long,                           # lChannel
-        ct.POINTER(t.NET_SDK_JPEGPARA),      # lpJpegPara
-        ct.c_char_p,                         # sJpegPicBuffer
-        ct.c_uint,                           # dwPicSize (buf len)
-        ct.POINTER(ct.c_uint),               # lpSizeReturned
+        ct.c_long,  # lUserID
+        ct.c_long,  # lChannel
+        ct.POINTER(t.NET_SDK_JPEGPARA),  # lpJpegPara
+        ct.c_char_p,  # sJpegPicBuffer
+        ct.c_uint,  # dwPicSize (buf len)
+        ct.POINTER(ct.c_uint),  # lpSizeReturned
     ]
 
     # ── PTZ ─────────────────────────────────────────────────────
     lib.NET_SDK_PTZControl_Other.restype = ct.c_bool
     lib.NET_SDK_PTZControl_Other.argtypes = [
-        ct.c_long,   # lUserID
-        ct.c_long,   # lChannel
-        ct.c_uint,   # dwPTZCommand
-        ct.c_uint,   # dwSpeed
+        ct.c_long,  # lUserID
+        ct.c_long,  # lChannel
+        ct.c_uint,  # dwPTZCommand
+        ct.c_uint,  # dwSpeed
     ]
 
     lib.NET_SDK_PTZPreset_Other.restype = ct.c_bool
     lib.NET_SDK_PTZPreset_Other.argtypes = [
-        ct.c_long,   # lUserID
-        ct.c_long,   # lChannel
-        ct.c_uint,   # dwPTZPresetCmd
-        ct.c_uint,   # dwPresetIndex
+        ct.c_long,  # lUserID
+        ct.c_long,  # lChannel
+        ct.c_uint,  # dwPTZPresetCmd
+        ct.c_uint,  # dwPresetIndex
     ]
 
     lib.NET_SDK_PTZCruise_Other.restype = ct.c_bool
@@ -280,10 +280,10 @@ def bind(lib: ct.CDLL) -> None:
     # ── Logging ─────────────────────────────────────────────────
     lib.NET_SDK_SetLogToFile.restype = ct.c_bool
     lib.NET_SDK_SetLogToFile.argtypes = [
-        ct.c_bool,    # bLogEnable
+        ct.c_bool,  # bLogEnable
         ct.c_char_p,  # strLogDir
-        ct.c_bool,    # bAutoDel
-        ct.c_int,     # logLevel
+        ct.c_bool,  # bAutoDel
+        ct.c_int,  # logLevel
     ]
 
     # ── Access control ──────────────────────────────────────────
