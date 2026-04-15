@@ -110,6 +110,7 @@ The scanner supports three backends (integration modes), each suited to differen
 - **TVT HTTP Web API client (LAPI)** — per-device management via HTTP Basic auth:
   - Capability detection (GetSupportedAPIs)
   - Device info, channels, disks, date/time
+  - NAT/P2P cloud relay configuration (`get_nat_config()`)
   - Password management
   - Image, video stream, audio stream, and OSD configuration
   - Snapshots with automatic fallback (Web API → RTSP)

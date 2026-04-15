@@ -158,3 +158,19 @@ class SnapshotResult:
     content_type: str = ""
     method: str = ""  # "webapi", "webapi_by_time", "rtsp"
     error: str = ""
+
+
+@dataclass
+class NatConfig:
+    """From ``GetNATConfig`` — NAT/P2P cloud relay settings.
+
+    Corresponds to Function Panel ▸ NAT on the device web UI.
+    The ``nat_serial`` is the vendor-assigned cloud device identifier
+    (e.g. "NAAC909BNQGD") used for P2P relay connections.
+    """
+
+    enabled: bool = False
+    nat_serial: str = ""
+    nat_status: str = ""  # "Success", "Offline", etc.
+    visit_address: str = ""  # e.g. "www.autonat.us"
+    security_access: bool = False

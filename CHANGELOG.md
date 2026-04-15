@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] — 2026-04-15
+
+### Added
+
+- **`NatConfig` dataclass** — response model for NAT/P2P cloud relay settings
+  (`enabled`, `nat_serial`, `nat_status`, `visit_address`, `security_access`).
+- **`WebApiClient.get_nat_config()`** — queries `/Network/NAT` (with
+  `/Network/NATConfig` fallback) to retrieve the device's cloud P2P identifier
+  (e.g. "NAAC909BNQGD") and NAT registration status. Parses multiple XML field
+  name variants across firmware versions.
+- **`diagnostics()` top-level accessor** — lazy import to avoid heavy ctypes
+  probes at package import time.
+
+### Changed
+
+- Version bumped to 0.6.1.
+
 ## [0.6.0] — 2026-04-14
 
 ### Added

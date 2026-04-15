@@ -29,7 +29,7 @@ in the pip package.  Set ``$TVT_SCAN_SCRIPT`` to the path of your local
 ``scan_nvr.mjs`` bridge script to enable it.
 """
 
-__version__ = "0.6.0"
+__version__ = "0.6.1"
 
 from .config import load_config
 from .connection_pool import ConnectionPool, PoolStats, SessionMetrics, SessionResult, connect_many
@@ -55,9 +55,17 @@ from .scanner import filter_tvt_devices, load_devices, scan_single_nvr
 from .sdk_http_client import CommandResult, DeviceInfoResult, DeviceTimeResult, RtspUrlResult, SdkHttpClient
 from .webapi import WebApiClient
 
+# Lazy diagnostics accessor — avoids heavy ctypes probes at import time.
+def diagnostics(sdk_path=None):
+    """Run runtime diagnostics and return a :class:`~pytvt.diagnostics.DiagnosticsReport`."""
+    from .diagnostics import diagnostics as _diag
+    return _diag(sdk_path=sdk_path)
+
 __all__ = [
     # Version
     "__version__",
+    # Diagnostics
+    "diagnostics",
     # Constants / enums
     "BackendFamily",
     "CompositeStrategy",

@@ -42,6 +42,7 @@ from .models import (
     DiskInfo,
     ImageConfig,
     ImageOsdConfig,
+    NatConfig,
     RecordDateResult,
     RecordSegment,
     RecordStatus,
@@ -304,6 +305,65 @@ class WebApiClient:
             audio_output_num=xml.find_int(di, "audioOutputNum"),
             alarm_input_num=xml.find_int(di, "alarmInputNum"),
             alarm_output_num=xml.find_int(di, "alarmOutputNum"),
+        )
+
+    def get_nat_config(self) -> NatConfig:
+        """Get NAT / P2P cloud relay configuration.
+
+        Retrieves the device's cloud NAT identifier (the address shown
+        on the "Function Panel > NAT" page of the web UI, e.g.
+        "NAAC909BNQGD") along with its registration status.
+
+        Returns:
+            :class:`~.models.NatConfig` with NAT serial, status, and visit address.
+
+        Raises:
+            WebApiError: If the endpoint is unavailable or the device
+                does not support NAT configuration.
+        """
+        try:
+            data = self._post("/Network/NAT")
+        except Exception:
+            # Fallback: some firmware versions use /Network/NATConfig
+            data = self._post("/Network/NATConfig")
+
+        root = xml.parse_response(data)
+        nat = root.find("NAT") or root.find("NATConfig") or root
+
+        enabled_text = (
+            xml.find_text(nat, "enabled")
+            or xml.find_text(nat, "natEnabled")
+            or xml.find_text(nat, "enable")
+        )
+        enabled = enabled_text.lower() in ("true", "1", "yes") if enabled_text else False
+
+        nat_serial = (
+            xml.find_text(nat, "natSerial")
+            or xml.find_text(nat, "serialNumber")
+            or xml.find_text(nat, "cloudSN")
+            or xml.find_text(nat, "p2pSerial")
+            or xml.find_text(nat, "deviceSerial")
+        )
+        nat_status = (
+            xml.find_text(nat, "natStatus")
+            or xml.find_text(nat, "status")
+        )
+        visit_address = (
+            xml.find_text(nat, "visitAddress")
+            or xml.find_text(nat, "serverAddress")
+        )
+        security_access_text = (
+            xml.find_text(nat, "securityAccess")
+            or xml.find_text(nat, "securityMode")
+        )
+        security_access = security_access_text.lower() in ("true", "1", "yes") if security_access_text else False
+
+        return NatConfig(
+            enabled=enabled,
+            nat_serial=nat_serial,
+            nat_status=nat_status,
+            visit_address=visit_address,
+            security_access=security_access,
         )
 
     def get_channel_info(self) -> list[ChannelInfo]:
