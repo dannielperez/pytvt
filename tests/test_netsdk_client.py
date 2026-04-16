@@ -168,6 +168,52 @@ class TestActivate:
         client.activate_by_mac("AA:BB:CC:DD:EE:FF", "NewPass123!")
         mock_lib.NET_SDK_ActiveDeviceByMac.assert_called_once()
 
+    def test_set_device_ip_by_mac_prefers_new_api(self, client, mock_lib):
+        mock_lib.NET_SDK_SetDeviceIP.return_value = True
+
+        client.set_device_ip_by_mac(
+            "aa:bb:cc:dd:ee:ff",
+            "Secret123!",
+            ip="192.168.1.50",
+            netmask="255.255.255.0",
+            gateway="192.168.1.1",
+            dns1="8.8.8.8",
+            dns2="1.1.1.1",
+        )
+
+        mock_lib.NET_SDK_SetDeviceIP.assert_called_once_with(
+            b"AA:BB:CC:DD:EE:FF",
+            b"Secret123!",
+            b"192.168.1.50",
+            b"255.255.255.0",
+            b"192.168.1.1",
+            b"8.8.8.8",
+            b"1.1.1.1",
+        )
+
+    def test_set_device_ip_by_mac_falls_back_to_legacy_api(self, client, mock_lib):
+        del mock_lib.NET_SDK_SetDeviceIP
+        mock_lib.NET_SDK_ModifyDeviceNetInfo.return_value = True
+
+        client.set_device_ip_by_mac(
+            "AA:BB:CC:DD:EE:FF",
+            "Secret123!",
+            ip="192.168.1.51",
+            netmask="255.255.255.0",
+            gateway="192.168.1.1",
+            dns1="8.8.4.4",
+            dhcp=True,
+        )
+
+        mock_lib.NET_SDK_ModifyDeviceNetInfo.assert_called_once()
+
+    def test_set_device_ip_by_mac_raises_when_unavailable(self, client, mock_lib):
+        del mock_lib.NET_SDK_SetDeviceIP
+        del mock_lib.NET_SDK_ModifyDeviceNetInfo
+
+        with pytest.raises(NetSdkUnavailable, match="does not export"):
+            client.set_device_ip_by_mac("AA:BB:CC:DD:EE:FF", "Secret123!", ip="192.168.1.52")
+
 
 # ── Login ───────────────────────────────────────────────────────────
 

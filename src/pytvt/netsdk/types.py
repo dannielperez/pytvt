@@ -261,6 +261,22 @@ class NET_SDK_DEVICE_DISCOVERY_INFO(ct.Structure):
         return ord(self.deviceActivated) == 2
 
 
+class NET_SDK_DEVICE_IP_INFO(ct.Structure):
+    """MAC-addressed network provisioning payload for LAN readdressing."""
+
+    _pack_ = 4
+    _fields_ = [
+        ("szMac", ct.c_char * 36),
+        ("szIpAddr", ct.c_char * 64),
+        ("szMark", ct.c_char * 36),
+        ("szGateway", ct.c_char * 36),
+        ("szPassword", ct.c_char * 64),
+        ("szDdns1", ct.c_char * 36),
+        ("szDdns2", ct.c_char * 36),
+        ("ucIPMode", ct.c_ubyte),
+    ]
+
+
 # ── IPC device info (from NVR) ─────────────────────────────────────
 
 

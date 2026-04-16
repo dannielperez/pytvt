@@ -85,6 +85,22 @@ def bind(lib: ct.CDLL) -> None:
     lib.NET_SDK_ActiveDeviceByMac.restype = ct.c_bool
     lib.NET_SDK_ActiveDeviceByMac.argtypes = [ct.c_char_p, ct.c_char_p]
 
+    if hasattr(lib, "NET_SDK_SetDeviceIP"):
+        lib.NET_SDK_SetDeviceIP.restype = ct.c_bool
+        lib.NET_SDK_SetDeviceIP.argtypes = [
+            ct.c_char_p,
+            ct.c_char_p,
+            ct.c_char_p,
+            ct.c_char_p,
+            ct.c_char_p,
+            ct.c_char_p,
+            ct.c_char_p,
+        ]
+
+    if hasattr(lib, "NET_SDK_ModifyDeviceNetInfo"):
+        lib.NET_SDK_ModifyDeviceNetInfo.restype = ct.c_bool
+        lib.NET_SDK_ModifyDeviceNetInfo.argtypes = [ct.POINTER(t.NET_SDK_DEVICE_IP_INFO)]
+
     # ── Device info ─────────────────────────────────────────────
     lib.NET_SDK_GetDeviceInfo.restype = ct.c_bool
     lib.NET_SDK_GetDeviceInfo.argtypes = [

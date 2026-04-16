@@ -42,6 +42,7 @@ from .types import (
     NET_SDK_CH_DEVICE_STATUS,
     NET_SDK_DEV_SUPPORT,
     NET_SDK_DEVICE_DISCOVERY_INFO,
+    NET_SDK_DEVICE_IP_INFO,
     NET_SDK_DEVICEINFO,
     NET_SDK_DISK_INFO,
     NET_SDK_IPC_DEVICE_INFO,
@@ -968,6 +969,66 @@ class NetSdkClient:
         )
         if not ok:
             raise NetSdkError("ActiveDeviceByMac", self._last_error())
+
+    def set_device_ip_by_mac(
+        self,
+        mac: str,
+        password: str,
+        *,
+        ip: str = "",
+        netmask: str = "",
+        gateway: str = "",
+        dns1: str = "",
+        dns2: str = "",
+        dhcp: bool = False,
+    ) -> None:
+        """Readdress a LAN device by MAC using the vendor provisioning path.
+
+        Prefers the newer ``NET_SDK_SetDeviceIP`` helper when exported by the
+        loaded library and falls back to ``NET_SDK_ModifyDeviceNetInfo`` on
+        SDK builds that only expose the legacy struct-based API.
+        """
+        mac = mac.strip().upper()
+        if not mac:
+            raise ValueError("mac is required")
+        if not password:
+            raise ValueError("password is required")
+
+        set_device_ip = getattr(self._lib, "NET_SDK_SetDeviceIP", None)
+        if set_device_ip is not None:
+            ok = set_device_ip(
+                mac.encode("utf-8"),
+                password.encode("utf-8"),
+                ip.encode("utf-8"),
+                netmask.encode("utf-8"),
+                gateway.encode("utf-8"),
+                dns1.encode("utf-8"),
+                dns2.encode("utf-8"),
+            )
+            if not ok:
+                raise NetSdkError("SetDeviceIP", self._last_error())
+            return
+
+        modify_net_info = getattr(self._lib, "NET_SDK_ModifyDeviceNetInfo", None)
+        if modify_net_info is None:
+            raise NetSdkUnavailable(
+                "Loaded TVT NetSDK does not export NET_SDK_SetDeviceIP or "
+                "NET_SDK_ModifyDeviceNetInfo.",
+            )
+
+        payload = NET_SDK_DEVICE_IP_INFO()
+        payload.szMac = mac.encode("utf-8")
+        payload.szIpAddr = ip.encode("utf-8")
+        payload.szMark = netmask.encode("utf-8")
+        payload.szGateway = gateway.encode("utf-8")
+        payload.szPassword = password.encode("utf-8")
+        payload.szDdns1 = dns1.encode("utf-8")
+        payload.szDdns2 = dns2.encode("utf-8")
+        payload.ucIPMode = 1 if dhcp else 0
+
+        ok = modify_net_info(ct.byref(payload))
+        if not ok:
+            raise NetSdkError("ModifyDeviceNetInfo", self._last_error())
 
     # ── Login ───────────────────────────────────────────────────
 

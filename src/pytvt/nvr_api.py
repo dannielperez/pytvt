@@ -112,13 +112,14 @@ import base64
 import hashlib
 import http.client
 import re
-import subprocess
 import sys
 from dataclasses import dataclass, field
 
+from ._crypto import aes_ecb_zeropad
 from .models import (
     ApiServerConfig,
     Channel,
+    NvrLanFreeDevice,
     NvrApiError,
     PasswordSecurity,
     PortConfig,
@@ -153,6 +154,8 @@ class NvrClient:
         self._cookie: str | None = None
         self._token: str | None = None
         self._logged_in = False
+        self._session_key: str | None = None
+        self._security_ver: str | None = None
 
     def __enter__(self):
         return self
@@ -216,6 +219,23 @@ class NvrClient:
                 msg += f": errorCode={code}"
             raise NvrApiError(msg, code)
 
+    @classmethod
+    def _decrypt_session_key(cls, encrypted_key_b64: str, md5_password: str) -> str:
+        raw = base64.b64decode(encrypted_key_b64)
+        try:
+            decrypted = aes_ecb_zeropad(raw, md5_password, decrypt=True)
+        except RuntimeError as exc:
+            raise NvrApiError(f"NVR session-key decrypt failed: {exc}") from exc
+        return decrypted.rstrip(b"\x00").decode("utf-8")
+
+    @classmethod
+    def _encrypt_for_session(cls, plaintext: str, session_key: str) -> str:
+        try:
+            encrypted = aes_ecb_zeropad(plaintext.encode("utf-8"), session_key, decrypt=False)
+        except RuntimeError as exc:
+            raise NvrApiError(f"NVR request encryption failed: {exc}") from exc
+        return base64.b64encode(encrypted).decode("ascii")
+
     def login(self) -> None:
         """Authenticate to the NVR web interface.
 
@@ -260,6 +280,12 @@ class NvrClient:
         # Pick up token from doLogin if reqLogin didn't provide one
         if not self._token:
             self._token = self._parse_xml_field(data, "token")
+
+        encrypted_session_key = self._parse_xml_field(data, "sessionKey") or ""
+        security_ver = self._parse_xml_field(data, "securityVer") or ""
+        if encrypted_session_key:
+            self._session_key = self._decrypt_session_key(encrypted_session_key, md5_hex)
+        self._security_ver = security_ver or None
 
         self._logged_in = True
 
@@ -334,9 +360,161 @@ class NvrClient:
                     manufacturer=self._parse_xml_field(block, "manufacturer") or "",
                     protocol=self._parse_xml_field(block, "protocolType") or "",
                     online=dev_id in online_ids,
+                    add_type=self._parse_xml_field(block, "addType") or "",
+                    poe_index=int(self._parse_xml_field(block, "poeIndex") or 0),
+                    chl_type=self._parse_xml_field(block, "chlType") or "",
+                    access_type=self._parse_xml_field(block, "AccessType") or "",
+                    auto_report_id=self._parse_xml_field(block, "autoReportID") or "",
                 )
             )
         return channels
+
+    def query_nvr_lan_free_devices(self) -> list[NvrLanFreeDevice]:
+        """Query devices this NVR can see on its local LAN but has not added.
+
+        This is useful when the platform can reach an NVR over routed VPN/NAT,
+        but the cameras themselves are only visible from the recorder's local
+        subnet.
+        """
+        self._require_login()
+        data = self._post("queryLanFreeDeviceList", self._build_request())
+        self._check_response(data, "queryLanFreeDeviceList")
+
+        devices: list[NvrLanFreeDevice] = []
+        for block in re.findall(r"<item>(.*?)</item>", data, re.DOTALL):
+            activate_status = self._parse_xml_field(block, "activateStatus") or ""
+            devices.append(
+                NvrLanFreeDevice(
+                    ip=self._parse_xml_field(block, "ip") or "",
+                    mask=self._parse_xml_field(block, "mask") or "",
+                    gateway=self._parse_xml_field(block, "gateway") or "",
+                    mac=(self._parse_xml_field(block, "mac") or "").upper(),
+                    port=int(self._parse_xml_field(block, "port") or 9008),
+                    http_port=int(self._parse_xml_field(block, "httpPort") or 80),
+                    protocol=self._parse_xml_field(block, "protocolType") or "",
+                    manufacturer=self._parse_xml_field(block, "manufacturer") or "",
+                    model=self._parse_xml_field(block, "productModel") or "",
+                    name=self._parse_xml_field(block, "name") or "",
+                    serial_number=self._parse_xml_field(block, "serialNum") or "",
+                    local_eth_name=self._parse_xml_field(block, "localEthName") or "",
+                    sub_ip=self._parse_xml_field(block, "subIp") or "",
+                    sub_ip_netmask=self._parse_xml_field(block, "subIpNetMask") or "",
+                    activated=(
+                        True
+                        if activate_status == "ACTIVATED"
+                        else False
+                        if activate_status == "UNACTIVATED"
+                        else None
+                    ),
+                    activate_status=activate_status,
+                    industry_product_type=self._parse_xml_field(block, "industryProductType") or "",
+                    device_type=self._parse_xml_field(block, "devType") or "",
+                )
+            )
+        return devices
+
+    def query_lan_free_devices(self) -> list[NvrLanFreeDevice]:
+        """Backward-compatible alias for :meth:`query_nvr_lan_free_devices`."""
+        return self.query_nvr_lan_free_devices()
+
+    def edit_nvr_lan_device_network(
+        self,
+        *,
+        old_ip: str,
+        new_ip: str,
+        netmask: str,
+        gateway: str,
+        username: str,
+        password: str,
+    ) -> None:
+        """Edit a free LAN device's network settings through the NVR UI API."""
+        self._require_login()
+        if not self._session_key:
+            raise NvrApiError("Missing NVR session key; call login() first.")
+
+        attrs = f' securityVer="{self._security_ver}"' if self._security_ver else ""
+        encrypted_password = self._encrypt_for_session(password, self._session_key)
+        body = (
+            self._build_request_with_content(
+                "<content><device><item id='1'>"
+                f"<oldIP>{old_ip}</oldIP>"
+                f"<newIP>{new_ip}</newIP>"
+                f"<netmask>{netmask}</netmask>"
+                f"<gateway>{gateway}</gateway>"
+                f"<username>{username}</username>"
+                f"<password{attrs}><![CDATA[{encrypted_password}]]></password>"
+                "</item></device></content>"
+            )
+        )
+        data = self._post("editDevNetworkList", body)
+        self._check_response(data, "editDevNetworkList")
+
+        item_error = self._parse_xml_field(data, "errorCode")
+        if item_error and item_error != "0":
+            raise NvrApiError("NVR LAN device network edit failed", item_error)
+
+    def delete_nvr_devices(
+        self,
+        dev_ids: list[str],
+        *,
+        poe_indexes_by_id: dict[str, int | str] | None = None,
+    ) -> int:
+        """Delete configured devices/channels from the NVR via ``delDevList``."""
+        self._require_login()
+        if not dev_ids:
+            return 0
+
+        items = []
+        for dev_id in dev_ids:
+            item = f'<item id="{dev_id}">'
+            if poe_indexes_by_id and dev_id in poe_indexes_by_id:
+                poe_index = str(poe_indexes_by_id[dev_id]).strip()
+                if poe_index and poe_index != "0":
+                    item += f"<poeIndex>{poe_index}</poeIndex>"
+            item += "</item>"
+            items.append(item)
+
+        body = self._build_request_with_content(
+            f'<condition><devIds type="list">{"".join(items)}</devIds></condition>'
+        )
+        data = self._post("delDevList", body)
+        self._check_response(data, "delDevList")
+        return len(dev_ids)
+
+    def edit_nvr_ipc_passwords(
+        self,
+        channel_ids: list[str],
+        *,
+        new_password: str,
+    ) -> int:
+        """Change actual IPC passwords for configured TVT channels via the NVR."""
+        self._require_login()
+        if not channel_ids:
+            return 0
+        if not self._session_key:
+            raise NvrApiError("Missing NVR session key; call login() first.")
+
+        encrypted_password = self._encrypt_for_session(new_password, self._session_key)
+        attrs = f' securityVer="{self._security_ver}"' if self._security_ver else ""
+
+        updated = 0
+        failures: list[str] = []
+        for channel_id in channel_ids:
+            body = self._build_request_with_content(
+                f"<content><chl id='{channel_id}'><password{attrs}><![CDATA[{encrypted_password}]]>"
+                f"</password></chl></content>"
+            )
+            data = self._post("editIPChlPassword", body)
+            if "<status>success</status>" in data:
+                updated += 1
+            else:
+                failures.append(channel_id)
+
+        if failures:
+            raise NvrApiError(
+                f"Failed to change IPC password for {len(failures)} channel(s): {', '.join(failures)}"
+            )
+        return updated
 
     def get_rtsp_url(self, channel: int, stream_type: str = "main") -> str:
         """Build RTSP URL for an NVR channel (1-indexed).
@@ -573,6 +751,20 @@ class NvrClient:
         data = self._post("editDevList", self._build_request_with_content(content))
         self._check_response(data, "editDevList")
         return len(items)
+
+    def edit_nvr_channel_credentials(
+        self,
+        dev_ids: list[str] | None = None,
+        *,
+        username: str = "admin",
+        password: str | None = None,
+    ) -> int:
+        """Alias for ``editDevList`` with NVR-specific naming.
+
+        This updates the credentials the NVR stores for already-added
+        channels. It does not rotate the actual camera password.
+        """
+        return self.update_device_credentials(dev_ids=dev_ids, username=username, password=password)
 
     def change_admin_password_and_sync(self, old_password: str, new_password: str) -> dict:
         """Change NVR admin password and update all stored IPC credentials to match.

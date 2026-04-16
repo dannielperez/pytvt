@@ -4,7 +4,7 @@ Public API:
     Constants: BackendFamily, IntegrationMode, CompositeStrategy, ExecutionPlan,
                resolve_backend, resolve_execution_plan
     Models:    ScannerConfig, DeviceEntry, CameraInfo, ScanResult, NvrApiError
-    NVR API:   NvrClient, Channel, RtspServerConfig, ApiServerConfig, PortConfig
+    NVR API:   NvrClient, Channel, NvrLanFreeDevice, LanFreeDevice, RtspServerConfig, ApiServerConfig, PortConfig
     Web API:   WebApiClient (TVT HTTP API / LAPI)
     Net SDK:   pytvt.netsdk — ctypes bindings for libdvrnetsdk.so (Linux only;
                requires a vendor-supplied shared library — NOT included in this package)
@@ -42,6 +42,8 @@ from .models import (
     CameraInfo,
     Channel,
     DeviceEntry,
+    LanFreeDevice,
+    NvrLanFreeDevice,
     NvrApiError,
     PortConfig,
     RtspServerConfig,
@@ -82,6 +84,8 @@ __all__ = [
     "CameraInfo",
     "Channel",
     "DeviceEntry",
+    "NvrLanFreeDevice",
+    "LanFreeDevice",
     "NvrApiError",
     "PortConfig",
     "RtspServerConfig",

@@ -251,6 +251,38 @@ class Channel:
     manufacturer: str  # e.g. 'TVT'
     protocol: str  # e.g. 'TVT'
     online: bool = True
+    add_type: str = ""
+    poe_index: int = 0
+    chl_type: str = ""
+    access_type: str = ""
+    auto_report_id: str = ""
+
+
+@dataclass
+class NvrLanFreeDevice:
+    """A device discovered by the NVR on its local LAN."""
+
+    ip: str
+    mask: str
+    gateway: str
+    mac: str
+    port: int
+    http_port: int
+    protocol: str
+    manufacturer: str
+    model: str
+    name: str = ""
+    serial_number: str = ""
+    local_eth_name: str = ""
+    sub_ip: str = ""
+    sub_ip_netmask: str = ""
+    activated: bool | None = None
+    activate_status: str = ""
+    industry_product_type: str = ""
+    device_type: str = ""
+
+
+LanFreeDevice = NvrLanFreeDevice
 
 
 @dataclass
