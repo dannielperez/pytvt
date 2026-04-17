@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.2] — 2026-04-17
+
+### Added
+
+- **Platform Access (Auto Report) CGI methods** on `NvrClient`
+  - `query_platform_access()` → `PlatformAccessConfig` — read the NVR's CMS/NVMS5000 registration settings
+  - `set_platform_access(enabled, server_address, port, report_id)` — configure or disable platform registration
+  - `PlatformAccessConfig` dataclass — `enabled`, `server_address`, `port`, `report_id`
+  - CGI endpoints: `queryAutoReportCfg` / `editAutoReportCfg`
+  - 6 new tests covering query, set, round-trip, defaults, disabled state, and empty fields
+
 ## [0.6.1] — 2026-04-15
 
 ### Added

@@ -45,6 +45,7 @@ from .models import (
     LanFreeDevice,
     NvrLanFreeDevice,
     NvrApiError,
+    PlatformAccessConfig,
     PortConfig,
     RtspServerConfig,
     ScannerConfig,
