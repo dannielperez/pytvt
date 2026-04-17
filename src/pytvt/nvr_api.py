@@ -122,6 +122,7 @@ from .models import (
     NvrLanFreeDevice,
     NvrApiError,
     PasswordSecurity,
+    PlatformAccessConfig,
     PortConfig,
     RtspServerConfig,
     User,
@@ -332,6 +333,56 @@ class NvrClient:
             pos_port=int(self._parse_xml_field(data, "posPort") or 9036),
             auto_report_port=int(self._parse_xml_field(data, "autoReportPort") or 2009),
         )
+
+    def query_platform_access(self) -> PlatformAccessConfig:
+        """Query Platform Access (Auto Report) configuration.
+
+        Corresponds to: Function Panel → Integration → Platform Access
+        in the NVR web UI.  This controls whether the NVR registers
+        itself with a central management server (NVMS5000 / CMS).
+
+        CGI endpoint: ``queryAutoReportCfg``
+        """
+        self._require_login()
+        data = self._post("queryAutoReportCfg", self._build_request())
+        self._check_response(data, "queryAutoReportCfg")
+        content = self._parse_xml_field(data, "content") or data
+        return PlatformAccessConfig(
+            enabled=self._parse_xml_field(content, "enable") == "true",
+            server_address=self._parse_xml_field(content, "serverAddr") or "",
+            port=int(self._parse_xml_field(content, "serverPort") or 2009),
+            report_id=self._parse_xml_field(content, "reportID") or "",
+        )
+
+    def set_platform_access(
+        self,
+        *,
+        enabled: bool,
+        server_address: str,
+        port: int = 2009,
+        report_id: str,
+    ) -> None:
+        """Configure Platform Access (Auto Report) on the NVR.
+
+        Args:
+            enabled: Enable or disable the platform registration.
+            server_address: CMS / NVMS5000 server hostname or IP.
+            port: Platform protocol port (default 2009).
+            report_id: Device report ID for the management server.
+
+        CGI endpoint: ``editAutoReportCfg``
+        """
+        self._require_login()
+        content = (
+            f"<content>"
+            f"<enable>{str(enabled).lower()}</enable>"
+            f"<serverAddr>{server_address}</serverAddr>"
+            f"<serverPort>{port}</serverPort>"
+            f"<reportID>{report_id}</reportID>"
+            f"</content>"
+        )
+        data = self._post("editAutoReportCfg", self._build_request_with_content(content))
+        self._check_response(data, "editAutoReportCfg")
 
     def query_channels(self) -> list[Channel]:
         """Query the list of cameras/channels connected to the NVR."""

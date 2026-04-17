@@ -239,6 +239,23 @@ class PortConfig:
 
 
 @dataclass
+class PlatformAccessConfig:
+    """Platform Access (Auto Report) settings from ``queryAutoReportCfg``.
+
+    This controls whether the NVR registers itself with a central
+    management server (NVMS5000 / CMS) via the TVT platform protocol.
+
+    Corresponds to: Function Panel → Integration → Platform Access
+    in the NVR web UI.
+    """
+
+    enabled: bool
+    server_address: str
+    port: int  # default 2009
+    report_id: str
+
+
+@dataclass
 class Channel:
     """A camera channel registered on the NVR (from ``queryDevList``)."""
 

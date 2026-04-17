@@ -106,7 +106,10 @@ The scanner supports three backends (integration modes), each suited to differen
 - Output to console, CSV, JSON, or per-site XLSX
 - Failed device tracking with automatic retry support
 - Camera snapshot capture (SDK-based)
-- NVR web CGI client for configuration management
+- NVR web CGI client for configuration management:
+  - Channel listing (`query_channels()`), port config, password security
+  - LAN device discovery/management, channel add/delete, IPC password change
+  - Platform Access (Auto Report) query and configuration
 - **TVT HTTP Web API client (LAPI)** — per-device management via HTTP Basic auth:
   - Capability detection (GetSupportedAPIs)
   - Device info, channels, disks, date/time

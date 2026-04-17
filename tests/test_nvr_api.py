@@ -269,3 +269,116 @@ class TestEditNvrChannelCredentials:
 
         assert updated == 3
         assert calls == [(["dev-1", "dev-2"], "admin", "TestPass123!")]
+
+class TestPlatformAccess:
+    def test_query_platform_access_parses_response(self):
+        client = NvrClient("10.0.0.1", "admin", "pass")
+        client._logged_in = True
+        client._post = lambda path, body: (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<response version="1.0" cmdUrl="queryAutoReportCfg">'
+            "<status>success</status>"
+            "<content>"
+            "<enable>true</enable>"
+            "<serverAddr>centrouniquec.ruijieddnsd.com</serverAddr>"
+            "<serverPort>2009</serverPort>"
+            "<reportID>20251101</reportID>"
+            "</content>"
+            "</response>"
+        )
+
+        config = client.query_platform_access()
+
+        assert config.enabled is True
+        assert config.server_address == "centrouniquec.ruijieddnsd.com"
+        assert config.port == 2009
+        assert config.report_id == "20251101"
+
+    def test_query_platform_access_disabled(self):
+        client = NvrClient("10.0.0.1", "admin", "pass")
+        client._logged_in = True
+        client._post = lambda path, body: (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<response version="1.0">'
+            "<status>success</status>"
+            "<content>"
+            "<enable>false</enable>"
+            "<serverAddr></serverAddr>"
+            "<serverPort>2009</serverPort>"
+            "<reportID></reportID>"
+            "</content>"
+            "</response>"
+        )
+
+        config = client.query_platform_access()
+
+        assert config.enabled is False
+        assert config.server_address == ""
+        assert config.report_id == ""
+
+    def test_set_platform_access_builds_expected_request(self):
+        client = NvrClient("10.0.0.1", "admin", "pass")
+        client._logged_in = True
+        posted: list[tuple[str, str]] = []
+        client._post = lambda path, body: posted.append((path, body)) or (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<response version="1.0">'
+            "<status>success</status>"
+            "</response>"
+        )
+
+        client.set_platform_access(
+            enabled=True,
+            server_address="centrouniquec.ruijieddnsd.com",
+            port=2009,
+            report_id="20251101",
+        )
+
+        assert posted[0][0] == "editAutoReportCfg"
+        body = posted[0][1]
+        assert "<enable>true</enable>" in body
+        assert "<serverAddr>centrouniquec.ruijieddnsd.com</serverAddr>" in body
+        assert "<serverPort>2009</serverPort>" in body
+        assert "<reportID>20251101</reportID>" in body
+
+    def test_set_platform_access_disable(self):
+        client = NvrClient("10.0.0.1", "admin", "pass")
+        client._logged_in = True
+        posted: list[tuple[str, str]] = []
+        client._post = lambda path, body: posted.append((path, body)) or (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<response version="1.0">'
+            "<status>success</status>"
+            "</response>"
+        )
+
+        client.set_platform_access(
+            enabled=False,
+            server_address="",
+            report_id="",
+        )
+
+        body = posted[0][1]
+        assert "<enable>false</enable>" in body
+
+    def test_query_platform_access_requires_login(self):
+        client = NvrClient("10.0.0.1", "admin", "pass")
+        try:
+            client.query_platform_access()
+        except NvrApiError as exc:
+            assert "Not logged in" in str(exc)
+        else:
+            raise AssertionError("Expected NvrApiError")
+
+    def test_set_platform_access_requires_login(self):
+        client = NvrClient("10.0.0.1", "admin", "pass")
+        try:
+            client.set_platform_access(
+                enabled=True,
+                server_address="test.example.com",
+                report_id="12345",
+            )
+        except NvrApiError as exc:
+            assert "Not logged in" in str(exc)
+        else:
+            raise AssertionError("Expected NvrApiError")
