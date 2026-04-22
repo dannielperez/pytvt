@@ -123,6 +123,7 @@ from .models import (
     NvrApiError,
     PasswordSecurity,
     PlatformAccessConfig,
+    PlatformAccessDisabledError,
     PortConfig,
     RtspServerConfig,
     User,
@@ -157,6 +158,7 @@ class NvrClient:
         self._logged_in = False
         self._session_key: str | None = None
         self._security_ver: str | None = None
+        self._legacy_auth: str | None = None  # Basic auth header for legacy firmware
 
     def __enter__(self):
         return self
@@ -171,6 +173,8 @@ class NvrClient:
             headers = {"Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"}
             if self._cookie:
                 headers["Cookie"] = self._cookie
+            if self._legacy_auth:
+                headers["Authorization"] = self._legacy_auth
             conn.request("POST", f"/{path}", body=body.encode("utf-8"), headers=headers)
             resp = conn.getresponse()
             data = resp.read().decode("utf-8")
@@ -240,12 +244,19 @@ class NvrClient:
     def login(self) -> None:
         """Authenticate to the NVR web interface.
 
-        Uses challenge-response: reqLogin → hash → doLogin.
+        Supports three firmware authentication variants:
 
-        Supports two firmware variants:
-        - Older firmware returns both ``nonce`` and ``token`` in reqLogin.
-        - Newer firmware (1.4.12+) returns only ``nonce`` and ``sessionId``;
-          the token is returned by doLogin instead.
+        1. **Modern** (1.4.12+): ``reqLogin`` returns ``nonce`` + ``sessionId``;
+           ``doLogin`` returns the ``token`` and optionally an encrypted
+           ``sessionKey``.  Password is ``SHA512(MD5(pw).upper() + '#' + nonce)``.
+
+        2. **Classic**: ``reqLogin`` returns ``nonce`` + ``token``.
+           Same SHA512 hash, but the token comes from ``reqLogin``.
+
+        3. **Legacy** (older firmware without nonce support): ``reqLogin``
+           returns ``errorCode=536870934``.  Falls back to a direct
+           ``doLogin`` with ``base64(password)`` and subsequent requests
+           use ``Authorization: Basic base64(user:password)``.
         """
         # Step 1: Request login challenge
         req_body = self._build_request()
@@ -257,6 +268,10 @@ class NvrClient:
         if not nonce:
             # Check for specific error codes
             error_code = self._parse_xml_field(data, "errorCode")
+            # 536870934 = legacy firmware that doesn't support nonce auth
+            if error_code == "536870934":
+                self._login_legacy()
+                return
             raise NvrApiError(
                 f"reqLogin failed: no nonce in response (errorCode={error_code})",
                 error_code,
@@ -287,6 +302,30 @@ class NvrClient:
         if encrypted_session_key:
             self._session_key = self._decrypt_session_key(encrypted_session_key, md5_hex)
         self._security_ver = security_ver or None
+
+        self._logged_in = True
+
+    def _login_legacy(self) -> None:
+        """Legacy login for older firmware without nonce/challenge support.
+
+        These devices ignore ``reqLogin`` (returning errorCode=536870934)
+        and accept a direct ``doLogin`` with a base64-encoded password.
+        Subsequent requests must include an ``Authorization: Basic`` header
+        with ``base64(username:password)``.
+        """
+        b64_password = base64.b64encode(self.password.encode("utf-8")).decode("ascii")
+        login_body = self._build_request_with_content(
+            f"<content><userName><![CDATA[{self.username}]]></userName>"
+            f"<password><![CDATA[{b64_password}]]></password></content>"
+        )
+        data = self._post("doLogin", login_body)
+        self._check_response(data, "doLogin")
+
+        # Legacy firmware uses HTTP Basic auth for subsequent requests
+        creds = base64.b64encode(
+            f"{self.username}:{self.password}".encode("utf-8")
+        ).decode("ascii")
+        self._legacy_auth = f"Basic {creds}"
 
         self._logged_in = True
 
@@ -341,17 +380,19 @@ class NvrClient:
         in the NVR web UI.  This controls whether the NVR registers
         itself with a central management server (NVMS5000 / CMS).
 
-        CGI endpoint: ``queryAutoReportCfg``
+        CGI endpoint: ``queryPlatformCfg``
         """
         self._require_login()
-        data = self._post("queryAutoReportCfg", self._build_request())
-        self._check_response(data, "queryAutoReportCfg")
-        content = self._parse_xml_field(data, "content") or data
+        data = self._post("queryPlatformCfg", self._build_request())
+        self._check_response(data, "queryPlatformCfg")
+        # Extract the NVMS5000 item from the list content
+        item = re.search(r'<item\s+id="NVMS5000">(.*?)</item>', data, re.DOTALL)
+        block = item.group(1) if item else data
         return PlatformAccessConfig(
-            enabled=self._parse_xml_field(content, "enable") == "true",
-            server_address=self._parse_xml_field(content, "serverAddr") or "",
-            port=int(self._parse_xml_field(content, "serverPort") or 2009),
-            report_id=self._parse_xml_field(content, "reportID") or "",
+            enabled=self._parse_xml_field(block, "switch") == "true",
+            server_address=self._parse_xml_field(block, "serverAddr") or "",
+            port=int(self._parse_xml_field(block, "port") or 2009),
+            report_id=self._parse_xml_field(block, "reportId") or "",
         )
 
     def set_platform_access(
@@ -370,19 +411,29 @@ class NvrClient:
             port: Platform protocol port (default 2009).
             report_id: Device report ID for the management server.
 
-        CGI endpoint: ``editAutoReportCfg``
+        CGI endpoint: ``editPlatformCfg``
         """
         self._require_login()
         content = (
-            f"<content>"
-            f"<enable>{str(enabled).lower()}</enable>"
+            '<content type="list" current="NVMS5000">'
+            '<item id="NVMS5000">'
+            f"<switch>{str(enabled).lower()}</switch>"
             f"<serverAddr>{server_address}</serverAddr>"
-            f"<serverPort>{port}</serverPort>"
-            f"<reportID>{report_id}</reportID>"
-            f"</content>"
+            f"<port>{port}</port>"
+            f"<reportId>{report_id}</reportId>"
+            "</item>"
+            "</content>"
         )
-        data = self._post("editAutoReportCfg", self._build_request_with_content(content))
-        self._check_response(data, "editAutoReportCfg")
+        data = self._post("editPlatformCfg", self._build_request_with_content(content))
+        # errorCode 536870943 means Platform Access was never enabled on this NVR
+        error_code = re.search(r"<errorCode>(.*?)</errorCode>", data)
+        if error_code and error_code.group(1) == "536870943":
+            raise PlatformAccessDisabledError(
+                f"Platform Access is disabled on {self.host} — enable it in the "
+                "NVR web UI (Integration → Platform Access) before editing config",
+                error_code=error_code.group(1),
+            )
+        self._check_response(data, "editPlatformCfg")
 
     def query_channels(self) -> list[Channel]:
         """Query the list of cameras/channels connected to the NVR."""

@@ -5,7 +5,7 @@ from __future__ import annotations
 import base64
 
 import pytvt.nvr_api as nvr_api
-from pytvt.models import NvrApiError
+from pytvt.models import NvrApiError, PlatformAccessDisabledError
 from pytvt.nvr_api import NvrClient
 
 
@@ -276,13 +276,15 @@ class TestPlatformAccess:
         client._logged_in = True
         client._post = lambda path, body: (
             '<?xml version="1.0" encoding="UTF-8"?>'
-            '<response version="1.0" cmdUrl="queryAutoReportCfg">'
+            '<response cmdUrl="queryPlatformCfg">'
             "<status>success</status>"
-            "<content>"
-            "<enable>true</enable>"
+            '<content type="list" current="NVMS5000">'
+            '<item id="NVMS5000">'
+            "<switch>true</switch>"
             "<serverAddr>centrouniquec.ruijieddnsd.com</serverAddr>"
-            "<serverPort>2009</serverPort>"
-            "<reportID>20251101</reportID>"
+            "<port>2009</port>"
+            "<reportId>20251101</reportId>"
+            "</item>"
             "</content>"
             "</response>"
         )
@@ -299,13 +301,15 @@ class TestPlatformAccess:
         client._logged_in = True
         client._post = lambda path, body: (
             '<?xml version="1.0" encoding="UTF-8"?>'
-            '<response version="1.0">'
+            '<response cmdUrl="queryPlatformCfg">'
             "<status>success</status>"
-            "<content>"
-            "<enable>false</enable>"
+            '<content type="list" current="NVMS5000">'
+            '<item id="NVMS5000">'
+            "<switch>false</switch>"
             "<serverAddr></serverAddr>"
-            "<serverPort>2009</serverPort>"
-            "<reportID></reportID>"
+            "<port>2009</port>"
+            "<reportId></reportId>"
+            "</item>"
             "</content>"
             "</response>"
         )
@@ -334,12 +338,12 @@ class TestPlatformAccess:
             report_id="20251101",
         )
 
-        assert posted[0][0] == "editAutoReportCfg"
+        assert posted[0][0] == "editPlatformCfg"
         body = posted[0][1]
-        assert "<enable>true</enable>" in body
+        assert "<switch>true</switch>" in body
         assert "<serverAddr>centrouniquec.ruijieddnsd.com</serverAddr>" in body
-        assert "<serverPort>2009</serverPort>" in body
-        assert "<reportID>20251101</reportID>" in body
+        assert "<port>2009</port>" in body
+        assert "<reportId>20251101</reportId>" in body
 
     def test_set_platform_access_disable(self):
         client = NvrClient("10.0.0.1", "admin", "pass")
@@ -359,7 +363,7 @@ class TestPlatformAccess:
         )
 
         body = posted[0][1]
-        assert "<enable>false</enable>" in body
+        assert "<switch>false</switch>" in body
 
     def test_query_platform_access_requires_login(self):
         client = NvrClient("10.0.0.1", "admin", "pass")
@@ -382,3 +386,27 @@ class TestPlatformAccess:
             assert "Not logged in" in str(exc)
         else:
             raise AssertionError("Expected NvrApiError")
+
+    def test_set_platform_access_raises_disabled_error(self):
+        """editPlatformCfg with errorCode=536870943 → PlatformAccessDisabledError."""
+        client = NvrClient("10.0.0.1", "admin", "pass")
+        client._logged_in = True
+        client._post = lambda path, body: (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<response version="1.0">'
+            "<status>failed</status>"
+            "<errorCode>536870943</errorCode>"
+            "</response>"
+        )
+
+        try:
+            client.set_platform_access(
+                enabled=True,
+                server_address="centrouniquec.ruijieddnsd.com",
+                report_id="20251101",
+            )
+        except PlatformAccessDisabledError as exc:
+            assert exc.error_code == "536870943"
+            assert "Platform Access is disabled" in str(exc)
+        else:
+            raise AssertionError("Expected PlatformAccessDisabledError")
