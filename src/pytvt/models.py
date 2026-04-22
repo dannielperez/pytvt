@@ -23,6 +23,16 @@ class NvrApiError(Exception):
         self.error_code = error_code
 
 
+class PlatformAccessDisabledError(NvrApiError):
+    """Raised when editing Platform Access config while the feature is disabled.
+
+    The NVR rejects ``editPlatformCfg`` with errorCode=536870943 when
+    Platform Access (Integration → Platform Access) has never been enabled.
+    Enable it in the NVR web UI or via ``set_platform_access(enabled=True, ...)``
+    with a valid ``report_id`` first.
+    """
+
+
 # ── Scanner models ───────────────────────────────────────────────────
 
 
