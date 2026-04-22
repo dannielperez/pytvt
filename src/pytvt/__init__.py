@@ -51,6 +51,8 @@ from .models import (
     ScannerConfig,
     ScanResult,
 )
+from .management import ManagementClient
+from .management import ManagementError
 from .nvr_api import NvrClient
 from .output import save_csv, save_failed_devices, save_json, save_xlsx_per_site
 from .registry import resolve_execution_plan
@@ -96,6 +98,9 @@ __all__ = [
     "NvrClient",
     # Web API client (TVT HTTP API / LAPI / Basic auth)
     "WebApiClient",
+    # Management server facade
+    "ManagementClient",
+    "ManagementError",
     # SDK HTTP client
     "SdkHttpClient",
     "CommandResult",

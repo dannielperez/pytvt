@@ -12,7 +12,11 @@ Requires Python 3.10+. The published wheel contains only pure Python code.
 
 ## SDK Installation Required
 
-Native SDK features are optional. `pytvt` does not bundle, download, or reference proprietary SDK binaries, header files, or private repositories.
+Native SDK features are optional. `pytvt` does not bundle, download, or vendor
+proprietary SDK binaries or headers in this public repository.
+
+SDK artifacts can be stored in a separate private/internal repository and loaded
+at runtime via explicit paths or manifest-driven resolution.
 
 To enable SDK-backed features, obtain the TVT SDK directly from the vendor and configure one of these inputs:
 
@@ -62,6 +66,32 @@ It also supports LAN auto-discovery via SSDP multicast and remote subnet sweeps,
 Since v0.3.0, pytvt includes a **Web API client** for the TVT HTTP API (LAPI protocol), providing direct per-device management via HTTP Basic auth — device info, snapshots, password changes, image/stream configuration, and recording queries — all in pure Python with no binary dependencies.
 
 Since v0.5.0, the **`DeviceManager`** provides a unified facade for device operations that auto-selects the best available backend — native SDK (`netsdk` ctypes) on Linux, or a compatible SDK bridge over HTTP — so the same code works on any platform.
+
+## Stability and Scope
+
+`pytvt` ships stable production device/NVR flows alongside an explicitly
+provisional management-server package.
+
+**Stable:**
+- Scanner, discovery, `NvrClient`, `WebApiClient`, `DeviceManager`, and
+  netsdk-backed device operations
+
+**Provisional (`pytvt.management`):**
+- Management-server backend family and related validation tooling in `tools/`
+- Three runtime modes are supported: `native_linux_sdk` (Linux SDK), `sidecar`
+  (bridge process, SDK-agnostic), and `native_protocol` (stub)
+- `sidecar` is a first-class runtime mode for environments where the native
+  Linux SDK is not available; some management operations are not yet implemented
+- Management diagnostics and capability evidence are the primary outputs at
+  this stage
+
+Management-server support is strictly additive. It does not replace or regress
+legacy device/NVR behavior.
+
+`pytvt` does not vendor SDK binaries. SDKs are loaded via explicit path
+(`sdk_path=`) or manifest-aware tooling in `tools/`.
+
+For maintainer guidance, see `docs/PACKAGE_OVERVIEW.md` and `docs/PUBLIC_SURFACE.md`.
 
 ## Architecture
 
