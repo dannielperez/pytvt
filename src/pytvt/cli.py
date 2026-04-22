@@ -21,8 +21,6 @@ from pathlib import Path
 
 import dotenv
 
-dotenv.load_dotenv()
-
 from .config import DEFAULT_API_URL, load_config
 from .constants import CLI_BACKEND_CHOICES
 from .discovery import (
@@ -44,11 +42,21 @@ from .output import (
 from .scanner import filter_tvt_devices, load_devices, scan_single_nvr
 
 
+def _load_dotenv() -> None:
+    """Load local .env for CLI execution paths only.
+
+    Keeping this out of module import avoids global env contamination in tests
+    that import parser helpers from this module.
+    """
+    dotenv.load_dotenv()
+
+
 # ── Public entry points ──────────────────────────────────────────────
 
 
 def main() -> None:
     """Main scanner CLI — the ``pytvt`` command."""
+    _load_dotenv()
     if len(sys.argv) > 1 and sys.argv[1] == "connect" and (len(sys.argv) == 2 or sys.argv[2].startswith("-")):
         _connect_main(sys.argv[2:])
         return
@@ -90,6 +98,7 @@ def main() -> None:
 
 def discover() -> None:
     """Discovery CLI — the ``pytvt-discover`` command."""
+    _load_dotenv()
     from .discovery import main as _main
 
     _main()
@@ -97,6 +106,7 @@ def discover() -> None:
 
 def api() -> None:
     """NVR API CLI — the ``pytvt-api`` command."""
+    _load_dotenv()
     from .nvr_api import main as _main
 
     _main()
@@ -104,6 +114,7 @@ def api() -> None:
 
 def snapshot() -> None:
     """Snapshot CLI — the ``pytvt-snapshot`` command."""
+    _load_dotenv()
     from .snapshot import main as _main
 
     _main()
@@ -226,6 +237,7 @@ def _build_connect_parser() -> argparse.ArgumentParser:
 
 def _connect_main(argv: list[str] | None = None) -> None:
     """Handle ``pytvt connect``."""
+    _load_dotenv()
     from .device_manager import DeviceManager
 
     parser = _build_connect_parser()

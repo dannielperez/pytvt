@@ -50,6 +50,7 @@ parse_init.py
 
 # Scan output artifacts
 output/
+tools/out/
 *.csv
 *.json.bak
 *.xlsx

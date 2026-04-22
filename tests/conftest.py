@@ -7,6 +7,28 @@ import pytest
 from pytvt.models import CameraInfo, DeviceEntry, ScannerConfig, ScanResult
 
 
+_ISOLATED_ENV_KEYS = (
+    "TVT_USERNAME",
+    "TVT_PASSWORD",
+    "TVT_PORT",
+    "TVT_TIMEOUT",
+    "TVT_MAX_CHANNELS",
+    "TVT_CONCURRENCY",
+    "TVT_API_URL",
+    "TVT_SDK_PATH",
+    "TVT_SCAN_SCRIPT",
+    "PYTVT_NETSDK_LIB",
+    "PYTVT_SCAN_SCRIPT",
+)
+
+
+@pytest.fixture(autouse=True)
+def isolate_pytvt_env(monkeypatch):
+    """Clear pytvt config env vars so tests do not inherit ambient runtime state."""
+    for key in _ISOLATED_ENV_KEYS:
+        monkeypatch.delenv(key, raising=False)
+
+
 @pytest.fixture()
 def default_config() -> ScannerConfig:
     return ScannerConfig(
