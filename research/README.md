@@ -29,8 +29,8 @@ The findings from this research are implemented as production code in
 | `sdk_login.py` | Python | Trigger a native SDK login to generate capturable traffic |
 | `test_sha1.py` | Python | Call `PUB_SHA1Encrypt` from the SDK to compare with Python output |
 | `parse_pcap.py` | Python | Extract init/login packets from a pcap for manual inspection |
-| `verify_pw.py` | Python | Connect to live NVR, capture nonce, verify encryption scheme |
-| `verify_capture.py` | Python | Extract password from captured pcap and brute-force the hash scheme |
+| `verify_pw.py` | Python | Connect to a lab NVR, capture nonce, verify encryption scheme |
+| `verify_capture.py` | Python | Inspect captured pcap data to validate the observed hash/encryption scheme |
 
 ## Typical workflow (for reference)
 
@@ -48,8 +48,7 @@ These scripts sit entirely outside the package architecture:
 
 ```
 src/pytvt/          ← supported runtime (installed package)
-bridges/            ← historical local-only runtime area (now removed)
-tvt-api/            ← compatibility runtime (Docker compat_bridge)
+tvt-api/            ← compatibility runtime workspace
 tools/              ← operational utilities (import from pytvt)
 research/           ← this directory (standalone, no imports into pytvt)
 ```

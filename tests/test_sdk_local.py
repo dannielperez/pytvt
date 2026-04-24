@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
+
+from pathlib import Path
 
 from pytvt.models import ScannerConfig
 from pytvt.netsdk.client import DeviceInfo, NetSdkError
 from pytvt.netsdk.loader import NetSdkUnavailable
 from pytvt.sdk_local import scan_nvr_payload, sdk_scan_local
+
+
+FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 
 
 class TestScanNvrPayload:
@@ -147,6 +153,59 @@ class TestScanNvrPayload:
 
         assert result["success"] is False
         assert result["error"] == "bad sdk path"
+
+    def test_payload_matches_legacy_bridge_contract(self):
+        fixture_payload = json.loads((FIXTURES_DIR / "legacy_scan_nvr_payload.json").read_text(encoding="utf-8"))
+
+        device_info = DeviceInfo(
+            serial_number="ABC123",
+            product="TD-3332B4",
+            device_name="NVR-01",
+            device_type=1,
+            mac="58:5B:69:AA:BB:CC",
+            ip="10.0.0.1",
+            port=6036,
+            firmware="5.2.3.190",
+            hardware_version="HW-1",
+            kernel_version="KR-1",
+            build_date="2026-04-24",
+            video_inputs=4,
+            audio_inputs=0,
+            sensor_inputs=0,
+            sensor_outputs=0,
+        )
+        cameras = [
+            SimpleNamespace(
+                channel=1,
+                name="Lobby",
+                ip="192.168.1.10",
+                port=9008,
+                online=True,
+                manufacturer="TVT",
+                model="TD-9544S4",
+            )
+        ]
+
+        session = MagicMock()
+        session.device_info.return_value = device_info
+        session.ipc_info.return_value = cameras
+
+        login_context = MagicMock()
+        login_context.__enter__.return_value = session
+        login_context.__exit__.return_value = None
+
+        client = MagicMock()
+        client.__enter__.return_value = client
+        client.__exit__.return_value = None
+        client.login.return_value = login_context
+
+        with patch("pytvt.sdk_local.NetSdkClient", return_value=client):
+            payload = scan_nvr_payload("10.0.0.1", password="secret")
+
+        assert list(payload.keys()) == list(fixture_payload.keys())
+        assert payload == fixture_payload
+        for key, value in fixture_payload.items():
+            assert isinstance(payload[key], type(value))
 
 
 class TestSdkScanLocal:

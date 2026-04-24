@@ -21,8 +21,10 @@ def scan_nvr_payload(
     *,
     sdk_path: str | None = None,
     max_channels: int = 64,
+    timeout: float = 10.0,
 ) -> dict:
     """Scan one NVR through the native SDK and return a JSON-safe payload."""
+    timeout_ms = max(1, int(timeout * 1000))
     result = {
         "nvr_ip": ip,
         "nvr_port": port,
@@ -39,8 +41,8 @@ def scan_nvr_payload(
     try:
         with NetSdkClient(
             sdk_path=sdk_path,
-            connect_timeout=10_000,
-            recv_timeout=10_000,
+            connect_timeout=timeout_ms,
+            recv_timeout=timeout_ms,
         ) as client:
             with client.login(ip, username, password, port=port) as session:
                 device_info = session.device_info()

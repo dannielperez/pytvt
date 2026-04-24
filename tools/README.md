@@ -26,7 +26,7 @@ operations against live infrastructure.
 pip install -e .
 
 # Run from repo root
-TVT_PASSWORD=... python tools/enable_nvr_services.py
+TVT_PASSWORD='example-password' python tools/enable_nvr_services.py
 ```
 
 ## Local Output Policy
@@ -50,7 +50,8 @@ runtime using explicit paths or manifest-driven resolution.
 |---|---|
 | `auto` | SDK-first with fallback to native protocol stub |
 | `native_linux_sdk` | Explicit Linux SDK backend (requires `libdvrnetsdk.so`) |
-| `sidecar` | Sidecar bridge backend — SDK-agnostic runtime mode; delegates to external bridge process |
+| `platform_sdk` | Explicit NVMS PlatformSDK backend (requires `libPlatClientSDK.so` / `PlatClientSDK.dll`) |
+| `sidecar` | Sidecar runtime backend — SDK-agnostic runtime mode; delegates to external bridge process |
 | `native_protocol` | Native protocol stub (not implemented) |
 
 The `sidecar` mode is configured via `--sidecar-command` or `PYTVT_MGMT_SIDECAR_CMD`.

@@ -1,0 +1,8 @@
+repos:
+  - repo: local
+    hooks:
+      - id: pytvt-python-only-policy
+        name: Enforce pytvt Python-only policy
+        entry: python tools/check_python_only.py --staged
+        language: system
+        pass_filenames: false
