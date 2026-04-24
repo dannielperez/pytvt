@@ -1,4 +1,4 @@
-"""High-level Pythonic wrapper around libdvrnetsdk.so.
+"""High-level Pythonic wrapper around libdvrnetsdk.so (Linux) and libNetClientSDK.dylib (macOS).
 
 Usage::
 
@@ -11,7 +11,9 @@ Usage::
             jpg  = session.capture_jpeg(channel=0)
             session.ptz(PtzCommand.LEFT, speed=PtzSpeed.SPEED_4, channel=0)
 
-Requires Linux x86_64 or aarch64 with a vendor-supplied libdvrnetsdk.so.
+Supports:
+- Linux x86_64 and aarch64 with vendor-supplied libdvrnetsdk.so
+- macOS x86_64 (or via Rosetta on arm64) with vendor-supplied libNetClientSDK.dylib
 """
 
 from __future__ import annotations
