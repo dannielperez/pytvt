@@ -43,6 +43,7 @@ dev = [
 
 [project.scripts]
 pytvt = "pytvt.cli:main"
+pytvt-scan = "pytvt.cli:scan_nvr_cli"
 pytvt-discover = "pytvt.cli:discover"
 pytvt-api = "pytvt.cli:api"
 pytvt-snapshot = "pytvt.cli:snapshot"

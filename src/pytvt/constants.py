@@ -10,7 +10,7 @@ Terminology
 **Integration mode** — *how* an SDK-family scan reaches the native library:
 
 - ``compat_bridge`` — HTTP POST to a compatible SDK bridge service.
-- ``direct_sdk`` — Node.js subprocess calling ``libdvrnetsdk.so`` via FFI.
+- ``direct_sdk`` — direct Python ``ctypes`` calls into ``libdvrnetsdk.so``.
 
 The protocol family has no integration modes; it connects directly to the NVR.
 

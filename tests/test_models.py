@@ -29,11 +29,11 @@ class TestScannerConfig:
         assert c.scan_script is None
 
     def test_override(self):
-        c = ScannerConfig(port=9000, concurrency=8, sdk_path="/opt/tvt-sdk", scan_script="/opt/scan_nvr.mjs")
+        c = ScannerConfig(port=9000, concurrency=8, sdk_path="/opt/tvt-sdk", scan_script="/opt/legacy-bridge")
         assert c.port == 9000
         assert c.concurrency == 8
         assert c.sdk_path == "/opt/tvt-sdk"
-        assert c.scan_script == "/opt/scan_nvr.mjs"
+        assert c.scan_script == "/opt/legacy-bridge"
 
 
 # ── DeviceEntry ──────────────────────────────────────────────────────

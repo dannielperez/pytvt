@@ -24,9 +24,9 @@ or pass ``sdk_path=...`` to point at your local copy of the library. All other b
 (``protocol``, ``sdk_http``, ``webapi``) are pure-Python and work on any platform
 without any native dependencies.
 
-The ``sdk-local`` backend (Node.js subprocess + native SDK) is also not included
-in the pip package.  Set ``$TVT_SCAN_SCRIPT`` to the path of your local
-``scan_nvr.mjs`` bridge script to enable it.
+The ``sdk-local`` backend is implemented directly in Python on top of the
+native SDK bindings. It still requires a local vendor SDK installation, but it
+no longer depends on Node.js or any bridge scripts.
 """
 
 __version__ = "0.7.0"

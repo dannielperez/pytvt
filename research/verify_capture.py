@@ -7,7 +7,7 @@ Extract password from captured login packet and verify encryption scheme.
 This script reads a pcap capture of SDK ↔ NVR traffic, locates the init and
 login packets, and brute-forces nonce/hash combinations to confirm the
 password encryption algorithm. Used together with capture_sdk.sh and
-sdk_login.cjs to validate protocol findings.
+sdk_login.py to validate protocol findings.
 
 See research/README.md for context.
 """

@@ -1,62 +1,192 @@
-"""Tests for pytvt.sdk_local — subprocess JSON extraction."""
+"""Tests for pytvt.sdk_local — direct Python SDK backend."""
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from pytvt.models import ScannerConfig
-from pytvt.sdk_local import _extract_json, sdk_scan_local
+from pytvt.netsdk.client import DeviceInfo, NetSdkError
+from pytvt.netsdk.loader import NetSdkUnavailable
+from pytvt.sdk_local import scan_nvr_payload, sdk_scan_local
 
 
-class TestExtractJson:
-    def test_valid_markers(self):
-        stdout = 'noise noise\n___JSON_START___\n{"key": "value"}\n___JSON_END___\nmore noise'
-        result = _extract_json(stdout)
-        assert result == '{"key": "value"}'
+class TestScanNvrPayload:
+    def test_success(self):
+        device_info = DeviceInfo(
+            serial_number="ABC123",
+            product="TD-3332B4",
+            device_name="NVR-01",
+            device_type=1,
+            mac="58:5B:69:AA:BB:CC",
+            ip="10.0.0.1",
+            port=6036,
+            firmware="5.2.3.190",
+            hardware_version="HW-1",
+            kernel_version="KR-1",
+            build_date="2026-04-24",
+            video_inputs=4,
+            audio_inputs=0,
+            sensor_inputs=0,
+            sensor_outputs=0,
+        )
+        cameras = [
+            SimpleNamespace(
+                channel=1,
+                name="Lobby",
+                ip="192.168.1.10",
+                port=9008,
+                online=True,
+                manufacturer="TVT",
+                model="TD-9544S4",
+            )
+        ]
 
-    def test_no_markers(self):
-        assert _extract_json("just some output") is None
+        session = MagicMock()
+        session.device_info.return_value = device_info
+        session.ipc_info.return_value = cameras
 
-    def test_only_start_marker(self):
-        assert _extract_json('___JSON_START___\n{"a": 1}') is None
+        login_context = MagicMock()
+        login_context.__enter__.return_value = session
+        login_context.__exit__.return_value = None
 
-    def test_only_end_marker(self):
-        assert _extract_json('{"a": 1}\n___JSON_END___') is None
+        client = MagicMock()
+        client.__enter__.return_value = client
+        client.__exit__.return_value = None
+        client.login.return_value = login_context
 
-    def test_empty_between_markers(self):
-        result = _extract_json("___JSON_START___ ___JSON_END___")
-        assert result == ""
+        with patch("pytvt.sdk_local.NetSdkClient", return_value=client) as mock_client:
+            result = scan_nvr_payload(
+                "10.0.0.1",
+                port=6036,
+                username="admin",
+                password="secret",
+                sdk_path="/opt/tvt-sdk",
+                max_channels=32,
+            )
 
-    def test_multiline_json(self):
-        stdout = '___JSON_START___\n{\n  "a": 1,\n  "b": 2\n}\n___JSON_END___'
-        result = _extract_json(stdout)
-        assert '"a": 1' in result
-        assert '"b": 2' in result
+        assert result["success"] is True
+        assert result["device_name"] == "NVR-01"
+        assert result["total_channels"] == 1
+        assert result["cameras"][0]["status"] == "Online"
+        assert set(result) == {
+            "nvr_ip",
+            "nvr_port",
+            "success",
+            "device_name",
+            "device_model",
+            "serial_number",
+            "firmware",
+            "total_channels",
+            "cameras",
+            "error",
+        }
+        mock_client.assert_called_once_with(sdk_path="/opt/tvt-sdk", connect_timeout=10_000, recv_timeout=10_000)
+        client.login.assert_called_once_with("10.0.0.1", "admin", "secret", port=6036)
+        session.ipc_info.assert_called_once_with(max_channels=32)
+
+    def test_ipc_failure_still_reports_reachable_device(self):
+        device_info = DeviceInfo(
+            serial_number="ABC123",
+            product="TD-3332B4",
+            device_name="NVR-01",
+            device_type=1,
+            mac="58:5B:69:AA:BB:CC",
+            ip="10.0.0.1",
+            port=6036,
+            firmware="5.2.3.190",
+            hardware_version="HW-1",
+            kernel_version="KR-1",
+            build_date="2026-04-24",
+            video_inputs=16,
+            audio_inputs=0,
+            sensor_inputs=0,
+            sensor_outputs=0,
+        )
+
+        session = MagicMock()
+        session.device_info.return_value = device_info
+        session.ipc_info.side_effect = NetSdkError("GetDeviceIPCInfo")
+
+        login_context = MagicMock()
+        login_context.__enter__.return_value = session
+
+        client = MagicMock()
+        client.__enter__.return_value = client
+        client.login.return_value = login_context
+
+        with patch("pytvt.sdk_local.NetSdkClient", return_value=client):
+            result = scan_nvr_payload("10.0.0.1", password="secret")
+
+        assert result["success"] is True
+        assert result["total_channels"] == 16
+        assert "Could not retrieve IPC info" in (result["error"] or "")
+
+    def test_sdk_unavailable_returns_error(self):
+        with patch("pytvt.sdk_local.NetSdkClient", side_effect=NetSdkUnavailable("missing SDK")):
+            result = scan_nvr_payload("10.0.0.1")
+
+        assert result["success"] is False
+        assert result["error"] == "missing SDK"
+
+    def test_login_failure_returns_error(self):
+        client = MagicMock()
+        client.__enter__.return_value = client
+        client.__exit__.return_value = None
+        client.login.side_effect = NetSdkError("Login failed")
+
+        with patch("pytvt.sdk_local.NetSdkClient", return_value=client):
+            result = scan_nvr_payload("10.0.0.1", username="admin", password="wrong")
+
+        assert result["success"] is False
+        assert result["error"] == "Login failed"
+
+    def test_invalid_argument_error_returns_failure(self):
+        with patch("pytvt.sdk_local.NetSdkClient", side_effect=ValueError("bad sdk path")):
+            result = scan_nvr_payload("10.0.0.1", sdk_path="/bad/path")
+
+        assert result["success"] is False
+        assert result["error"] == "bad sdk path"
 
 
 class TestSdkScanLocal:
-    def test_missing_scan_script_reports_configuration(self, sample_device):
-        cfg = ScannerConfig(username="admin", password="test123", scan_script="/missing/scan_nvr.mjs")
-        result = sdk_scan_local(sample_device, cfg)
-        assert result.success is False
-        assert "TVT_SCAN_SCRIPT" in (result.error or "")
+    def test_sdk_scan_local_maps_payload_to_scan_result(self, sample_device):
+        cfg = ScannerConfig(username="admin", password="test123", sdk_path="/opt/tvt-sdk")
 
-    def test_sdk_path_forwarded_to_subprocess(self, sample_device, tmp_path):
-        script = tmp_path / "scan_nvr.mjs"
-        script.write_text("// bridge", encoding="utf-8")
-        cfg = ScannerConfig(
-            username="admin",
-            password="test123",
-            sdk_path="/opt/tvt-sdk",
-            scan_script=str(script),
-        )
-
-        proc = MagicMock()
-        proc.stdout = '___JSON_START___{"success": true, "cameras": []}___JSON_END___'
-        proc.stderr = ""
-
-        with patch("pytvt.sdk_local.subprocess.run", return_value=proc) as mock_run:
+        with patch(
+            "pytvt.sdk_local.scan_nvr_payload",
+            return_value={
+                "success": True,
+                "device_name": "NVR-01",
+                "device_model": "TD-3332B4",
+                "serial_number": "ABC123",
+                "firmware": "5.2.3.190",
+                "total_channels": 1,
+                "cameras": [
+                    {
+                        "channel": 1,
+                        "name": "Lobby",
+                        "address": "192.168.1.10",
+                        "port": 9008,
+                        "status": "Online",
+                        "protocol": "TVT",
+                        "model": "TD-9544S4",
+                    }
+                ],
+                "error": None,
+            },
+        ) as mock_payload:
             result = sdk_scan_local(sample_device, cfg)
 
         assert result.success is True
-        assert mock_run.call_args.kwargs["env"]["TVT_SDK_PATH"] == "/opt/tvt-sdk"
+        assert result.backend == "sdk-local"
+        assert result.cameras[0].name == "Lobby"
+        assert result.device_info == {}
+        mock_payload.assert_called_once_with(
+            "10.0.0.1",
+            port=6036,
+            username="admin",
+            password="test123",
+            sdk_path="/opt/tvt-sdk",
+            max_channels=64,
+        )

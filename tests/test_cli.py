@@ -9,10 +9,12 @@ import pytest
 from pytvt.cli import (
     _build_connect_parser,
     _build_parser,
+    _build_scan_nvr_parser,
     _connect_main,
     _dedupe_by_mac,
     _dedupe_devices,
     main,
+    scan_nvr_cli,
 )
 from pytvt.device_manager import Backend
 from pytvt.models import DeviceEntry
@@ -83,7 +85,27 @@ class TestBuildConnectParser:
         assert args.nat is False
 
 
+class TestBuildScanNvrParser:
+    def test_scan_nvr_defaults(self):
+        args = _build_scan_nvr_parser().parse_args(["10.0.0.1"])
+        assert args.ip == "10.0.0.1"
+        assert args.port == 6036
+        assert args.username == "admin"
+        assert args.password == ""
+
+    def test_scan_nvr_parser_sdk_path(self):
+        args = _build_scan_nvr_parser().parse_args(["10.0.0.1", "--sdk-path", "/opt/tvt-sdk"])
+        assert args.sdk_path == "/opt/tvt-sdk"
+
+
 class TestConnectCommand:
+    def test_main_dispatches_scan_nvr(self):
+        argv = ["pytvt", "scan-nvr", "10.0.0.1"]
+        with patch("sys.argv", argv), patch("pytvt.cli.scan_nvr_cli") as mock_scan:
+            main()
+
+        mock_scan.assert_called_once_with(argv[2:])
+
     def test_main_dispatches_connect(self):
         argv = ["pytvt", "connect", "--nat", "--id", "ABC123456", "-u", "admin", "-p", "pass"]
         with patch("sys.argv", argv), patch("pytvt.cli._connect_main") as mock_connect:
@@ -110,6 +132,52 @@ class TestConnectCommand:
 
         out = capsys.readouterr().out
         assert "Connected via nat/netsdk to ABC123456" in out
+
+    def test_scan_nvr_cli_prints_json_without_sentinels(self, capsys):
+        with patch(
+            "pytvt.sdk_local.scan_nvr_payload",
+            return_value={"success": True, "cameras": [], "nvr_ip": "10.0.0.1", "nvr_port": 6036},
+        ):
+            scan_nvr_cli(["10.0.0.1", "--no-sentinels"])
+
+        out = capsys.readouterr().out
+        assert "___JSON_START___" not in out
+        assert '"success": true' in out
+
+    def test_scan_nvr_cli_prints_sentinels_by_default(self, capsys):
+        with patch(
+            "pytvt.sdk_local.scan_nvr_payload",
+            return_value={"success": True, "cameras": [], "nvr_ip": "10.0.0.1", "nvr_port": 6036},
+        ):
+            scan_nvr_cli(["10.0.0.1"])
+
+        out = capsys.readouterr().out
+        assert "___JSON_START___" in out
+        assert "___JSON_END___" in out
+
+    def test_scan_nvr_cli_exits_nonzero_on_failure(self):
+        with patch(
+            "pytvt.sdk_local.scan_nvr_payload",
+            return_value={"success": False, "error": "missing SDK", "cameras": [], "nvr_ip": "10.0.0.1", "nvr_port": 6036},
+        ):
+            with pytest.raises(SystemExit, match="1"):
+                scan_nvr_cli(["10.0.0.1"])
+
+    def test_scan_nvr_cli_passes_sdk_path(self):
+        with patch(
+            "pytvt.sdk_local.scan_nvr_payload",
+            return_value={"success": True, "cameras": [], "nvr_ip": "10.0.0.1", "nvr_port": 6036},
+        ) as mock_payload:
+            scan_nvr_cli(["10.0.0.1", "6036", "admin", "secret", "--sdk-path", "/opt/tvt-sdk"])
+
+        mock_payload.assert_called_once_with(
+            "10.0.0.1",
+            port=6036,
+            username="admin",
+            password="secret",
+            sdk_path="/opt/tvt-sdk",
+            max_channels=64,
+        )
 
 
 # ── _dedupe_by_mac ───────────────────────────────────────────────────

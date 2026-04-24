@@ -173,7 +173,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   at runtime from explicit user-provided paths or environment variables.
 - **SDK path configuration** — added `TVT_SDK_PATH` and `TVT_SCAN_SCRIPT`
   support across config loading, `DeviceManager`, `NetSdkClient`, and the
-  local Node.js bridge, while preserving legacy env vars for local workflows.
+  legacy local Node.js bridge that existed in v0.5.1, while preserving env var
+  compatibility for those historical workflows.
 - **Packaging safety** — expanded build exclusions, MANIFEST rules, and
   `.gitignore` patterns to prevent native SDK binaries, headers, and local SDK
   workspaces from being published or accidentally committed.
@@ -275,8 +276,9 @@ comprehensive test coverage.
 - **Backend normalization** — CLI backend strings (`protocol`, `sdk`, `sdk-local`,
   `both`) are normalized via `resolve_backend()` with backward-compatible aliases
   (`sdk_local` → `sdk-local`, `compat_bridge` → `sdk`, `direct_sdk` → `sdk-local`).
-- **Node.js bridge** — moved `scan_nvr.mjs` to `bridges/sdk_local/` with its own
-  `package.json`, isolated from the Python package.
+- **Node.js bridge (legacy)** — moved `scan_nvr.mjs` to `bridges/sdk_local/` with
+  its own `package.json`, isolated from the Python package. This layout was
+  later removed when `sdk-local` became Python-only.
 - **README** — complete rewrite with architecture diagram, backend comparison table,
   integration mode explanations, full CLI reference, and project structure tree.
 

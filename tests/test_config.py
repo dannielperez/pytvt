@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 
 import pytest
 
@@ -21,9 +20,7 @@ class TestLoadConfig:
             "TVT_MAX_CHANNELS",
             "TVT_CONCURRENCY",
             "TVT_SDK_PATH",
-            "TVT_SCAN_SCRIPT",
             "PYTVT_NETSDK_LIB",
-            "PYTVT_SCAN_SCRIPT",
         ):
             monkeypatch.delenv(key, raising=False)
         cfg = load_config(None)
@@ -58,12 +55,11 @@ class TestLoadConfig:
         monkeypatch.setenv("TVT_PASSWORD", "secret")
         monkeypatch.setenv("TVT_CONCURRENCY", "16")
         monkeypatch.setenv("TVT_SDK_PATH", "/opt/tvt-sdk")
-        monkeypatch.setenv("TVT_SCAN_SCRIPT", "/opt/scan_nvr.mjs")
         cfg = load_config(None)
         assert cfg.password == "secret"
         assert cfg.concurrency == 16
         assert cfg.sdk_path == "/opt/tvt-sdk"
-        assert cfg.scan_script == "/opt/scan_nvr.mjs"
+        assert cfg.scan_script is None
 
     def test_nonexistent_file_ignored(self):
         cfg = load_config("/nonexistent/config.json")
@@ -92,9 +88,7 @@ class TestLoadConfig:
             "TVT_MAX_CHANNELS",
             "TVT_CONCURRENCY",
             "TVT_SDK_PATH",
-            "TVT_SCAN_SCRIPT",
             "PYTVT_NETSDK_LIB",
-            "PYTVT_SCAN_SCRIPT",
         ):
             monkeypatch.delenv(key, raising=False)
         data = {
@@ -105,7 +99,6 @@ class TestLoadConfig:
             "max_channels": 8,
             "concurrency": 1,
             "sdk_path": "/opt/vendor-sdk",
-            "scan_script": "/opt/scan_nvr.mjs",
         }
         cfg_file = tmp_path / "config.json"
         cfg_file.write_text(json.dumps(data))
@@ -117,14 +110,11 @@ class TestLoadConfig:
         assert cfg.max_channels == 8
         assert cfg.concurrency == 1
         assert cfg.sdk_path == "/opt/vendor-sdk"
-        assert cfg.scan_script == "/opt/scan_nvr.mjs"
 
     def test_legacy_sdk_env_supported(self, monkeypatch):
         monkeypatch.setenv("PYTVT_NETSDK_LIB", "/legacy/path.so")
-        monkeypatch.setenv("PYTVT_SCAN_SCRIPT", "/legacy/scan_nvr.mjs")
         cfg = load_config(None)
         assert cfg.sdk_path == "/legacy/path.so"
-        assert cfg.scan_script == "/legacy/scan_nvr.mjs"
 
     def test_unknown_json_keys_ignored(self, tmp_path):
         cfg_file = tmp_path / "config.json"
