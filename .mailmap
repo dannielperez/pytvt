@@ -1,0 +1,7 @@
+# Mailmap to ensure consistent contributor attribution
+# https://git-scm.com/docs/gitmailmap
+
+# Danniel Perez primary mapping (all commits should map to this canonical identity)
+Danniel Perez <dannielperezvelez@gmail.com> <dannielperezvelez@gmail.com>
+Danniel Perez <dannielperezvelez@gmail.com> Danniel Perez <danniel@example.com>
+Danniel Perez <dannielperezvelez@gmail.com> dperez <dannielperezvelez@gmail.com>
