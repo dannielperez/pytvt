@@ -1,0 +1,22 @@
+{
+  "nvr_ip": "10.0.0.1",
+  "nvr_port": 6036,
+  "success": true,
+  "device_name": "NVR-01",
+  "device_model": "TD-3332B4",
+  "serial_number": "ABC123",
+  "firmware": "5.2.3.190",
+  "total_channels": 1,
+  "cameras": [
+    {
+      "channel": 1,
+      "name": "Lobby",
+      "address": "192.168.1.10",
+      "port": 9008,
+      "status": "Online",
+      "protocol": "TVT",
+      "model": "TD-9544S4"
+    }
+  ],
+  "error": null
+}

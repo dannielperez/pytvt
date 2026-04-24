@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pytvt"
-version = "0.7.0"
-description = "Bulk TVT NVR camera scanner and management toolkit"
+version = "0.8.0"
+description = "Python-only TVT NVR scanner and management toolkit"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
@@ -39,6 +39,7 @@ dev = [
     "mypy>=1.10",
     "build>=1.0",
     "twine>=5.0",
+    "pre-commit>=3.7",
 ]
 
 [project.scripts]

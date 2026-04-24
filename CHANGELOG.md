@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] — 2026-04-24
+
+### Changed
+
+- **Python-only runtime hardening** — removed the final Node.js bridge runtime assumptions from the maintained repository contract. `sdk-local` remains as a backend name for compatibility, but is now permanently implemented through Python `ctypes` only.
+- **CLI production hardening** — `scan-nvr` now supports explicit timeout control, raw JSON output, and failure exit codes suitable for automation. Added `pytvt doctor` for SDK/environment diagnostics.
+- **Release policy enforcement** — repository guardrails now cover `.gitignore`, pre-commit checks, repository scans, and wheel inspection so JavaScript/npm artifacts cannot quietly return.
+
+### Added
+
+- **Python-only guardrails** — added a repository policy check script and pre-commit configuration that fail on staged `*.js`, `*.mjs`, `*.cjs`, `package.json`, and `package-lock.json` files.
+- **Compatibility contract tests** — added a locked legacy `scan_nvr` payload fixture to ensure the Python implementation preserves the historical bridge JSON shape.
+- **Packaging safety checks** — tests now verify that built wheels contain no JavaScript/npm artifacts and no bundled native SDK binaries.
+- **Documentation refresh** — updated package, contributor, tooling, and research docs to reflect the current Python-only runtime contract and current management/runtime surface.
+
 ## [0.7.0] — 2026-04-24
 
 ### Added
@@ -286,6 +301,10 @@ comprehensive test coverage.
 
 - Licensed under MIT starting from 1.0.0. Previous versions were AGPLv3.
 
+[0.8.0]: https://github.com/dannielperez/pytvt/compare/v0.7.0...v0.8.0
+[0.7.0]: https://github.com/dannielperez/pytvt/compare/v0.6.2...v0.7.0
+[0.6.2]: https://github.com/dannielperez/pytvt/compare/v0.6.1...v0.6.2
+[0.6.1]: https://github.com/dannielperez/pytvt/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/dannielperez/pytvt/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/dannielperez/pytvt/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/dannielperez/pytvt/compare/v0.4.0...v0.5.0

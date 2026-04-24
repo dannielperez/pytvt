@@ -19,7 +19,7 @@ behavior.
 - `src/pytvt/nvr_api.py`: NVR CGI client
 - `src/pytvt/webapi/`: HTTP Web API client
 - `src/pytvt/device_manager.py`: unified backend facade
-- `src/pytvt/sdk_http_client.py`: SDK bridge client
+- `src/pytvt/sdk_http_client.py`: compatibility SDK HTTP client
 
 Compatibility-only surface:
 
@@ -30,9 +30,10 @@ Compatibility-only surface:
 
 - `src/pytvt/management/`
   - `client.py`: facade for management workflows
-  - `sdk.py`: SDK-backed management diagnostics and capability evidence
+  - `sdk.py`: device-SDK-backed management diagnostics and capability evidence
+  - `platform_sdk.py`: NVMS PlatformSDK-backed management inventory and diagnostics
   - `native.py`: native protocol stub (non-implemented by design)
-  - `sidecar.py`: sidecar bridge backend — a first-class runtime mode for SDK-agnostic environments
+  - `sidecar.py`: sidecar runtime backend for SDK-agnostic environments
   - `context.py`: normalized `SDKContext` model
 
 ## Operational tooling
@@ -47,10 +48,11 @@ Retained tooling lives in `tools/` and is intentionally minimal:
 
 ## Management runtime modes
 
-The management package supports three explicit backend modes:
+The management package supports these explicit backend modes:
 
 - `native_linux_sdk` — SDK-backed management on Linux (requires `libdvrnetsdk.so`)
-- `sidecar` — delegates to an external bridge process; SDK-agnostic by design; some operations remain provisional
+- `platform_sdk` — NVMS PlatformSDK-backed management (requires `libPlatClientSDK.so` / `PlatClientSDK.dll`)
+- `sidecar` — delegates to an external sidecar process; SDK-agnostic by design; some operations remain provisional
 - `native_protocol` — native protocol stub; not implemented by design
 - `auto` — SDK-first with fallback to `native_protocol`
 

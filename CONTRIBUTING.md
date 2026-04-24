@@ -72,7 +72,7 @@ pytvt separates code into three tiers. Understand which tier you are working in:
 | Tier | Location | CI-gated | Imported at runtime |
 |---|---|---|---|
 | **Published package** | `src/pytvt/` | Yes | Yes |
-| **Local helper runtimes** | `bridges/`, `tvt-api/` | No | Optional, developer-managed |
+| **Local helper runtimes** | `tvt-api/` | No | Optional, developer-managed |
 | **Research / reference** | `research/` | No | **No** — never import |
 | **Operational tools** | `tools/` | No | Imports *from* pytvt |
 
