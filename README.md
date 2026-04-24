@@ -944,3 +944,9 @@ for device in devices:
 [MIT License](LICENSE). See [CHANGELOG.md](CHANGELOG.md) for release history.
 
 Starting from version 1.0.0, this project is licensed under the MIT License. Previous versions were licensed under AGPLv3.
+
+## Contributors
+
+See [CONTRIBUTORS](CONTRIBUTORS) for the list of human contributors to this project.
+
+All code in this repository is authored and reviewed by human contributors. While development may have been aided by AI tools for code suggestions, all code is the responsibility of the named contributors.
