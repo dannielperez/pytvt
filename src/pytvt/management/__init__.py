@@ -30,6 +30,7 @@ from .models import ManagedChannel
 from .models import ManagedDevice
 from .models import ManagementServerInfo
 from .models import ServerInfo
+from .platform_sdk import PlatformSdkManagementBackend
 from .sidecar import SidecarManagementBackend
 from .sdk import ResolvedSymbol
 from .sdk import SdkDiagnostics
@@ -69,6 +70,7 @@ __all__ = [
     "ManagedDevice",
     "ManagementServerInfo",
     "ResolvedSymbol",
+    "PlatformSdkManagementBackend",
     "SidecarManagementBackend",
     "SdkDiagnostics",
     "ServerInfo",
