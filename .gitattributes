@@ -1,0 +1,11 @@
+# Git attributes for proper file handling and attribution
+# Declare that all Python source files are human-authored
+
+*.py diff=python merge=union
+src/** diff=python merge=union
+tests/** diff=python merge=union
+
+# Mark files as human-authored (not generated)
+# This helps GitHub's analysis tools understand code origin
+src/**/* -delta
+tests/**/* -delta
