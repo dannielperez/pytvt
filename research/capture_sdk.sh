@@ -26,7 +26,7 @@ TCPD_PID=$!
 sleep 2
 
 # Run SDK login
-NODE_PATH=/app/tvt/node_modules node /tmp/sdk_login.cjs 2>/dev/null
+python3 /tmp/sdk_login.py 2>/dev/null
 
 sleep 3
 

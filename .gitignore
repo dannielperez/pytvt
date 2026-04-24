@@ -23,11 +23,7 @@ build/
 *.h
 
 # Local vendor SDK checkouts/extractions
-bridges/sdk_local/tvt/
 tvt-api/tvt/
-
-# Node (bridges/sdk_local)
-bridges/sdk_local/node_modules/
 
 # Environment / secrets
 .env
