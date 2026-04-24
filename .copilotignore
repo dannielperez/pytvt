@@ -1,0 +1,6 @@
+# .copilotignore file
+# This file is used to indicate that this repository should not be associated with Copilot contributions
+# All code in this repository is human-authored and reviewed.
+
+# Ignore all files from Copilot analysis
+*
