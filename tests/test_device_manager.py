@@ -31,12 +31,29 @@ CREDS = dict(ip="10.0.0.1", username="admin", password="pass123")
 
 
 class TestNativeDetection:
-    def test_netsdk_not_available_on_non_linux(self) -> None:
+    def test_netsdk_not_available_on_non_linux_non_darwin(self) -> None:
+        """NetSDK should be unavailable on platforms other than Linux and macOS."""
         with patch("pytvt.netsdk.loader.platform") as mock_plat:
-            mock_plat.system.return_value = "Darwin"
+            mock_plat.system.return_value = "Windows"
             from pytvt.netsdk.loader import is_netsdk_available
 
             assert is_netsdk_available() is False
+
+    def test_netsdk_available_on_darwin(self) -> None:
+        """NetSDK should be detectable on macOS (Darwin) with proper SDK path."""
+        with patch("pytvt.netsdk.loader.platform") as mock_plat, \
+             patch("pytvt.netsdk.loader._autodetect_macos_sdk_path") as mock_detect, \
+             patch("pytvt.netsdk.loader.Path") as mock_path:
+            mock_plat.system.return_value = "Darwin"
+            mock_detect.return_value = "/path/to/sdk"
+
+            mock_path_inst = MagicMock()
+            mock_path_inst.exists.return_value = True
+            mock_path.return_value = mock_path_inst
+
+            from pytvt.netsdk.loader import is_netsdk_available
+            # When SDK is detected and exists, it should be available
+            assert is_netsdk_available() is True
 
     def test_netsdk_available_checks_file(self) -> None:
         with patch("pytvt.netsdk.loader.platform") as mock_plat, patch("pytvt.netsdk.loader.Path") as mock_path:
@@ -472,6 +489,25 @@ class TestLoaderUpdates:
     def test_find_lib_sdk_root_directory(self, tmp_path) -> None:
         sdk_root = tmp_path / "vendor-sdk"
         lib_path = sdk_root / "bin" / "linux" / "libdvrnetsdk.so"
+        lib_path.parent.mkdir(parents=True)
+        lib_path.write_text("", encoding="utf-8")
+
+        from pytvt.netsdk.loader import _find_lib
+
+        assert _find_lib(str(sdk_root)) == str(lib_path)
+    def test_find_lib_sdk_root_directory(self, tmp_path) -> None:
+        """Test that _find_lib can find SDK in vendor SDK root directory (platform-dependent)."""
+        import platform as stdlib_platform
+        
+        sdk_root = tmp_path / "vendor-sdk"
+        
+        if stdlib_platform.system() == "Darwin":
+            # On macOS, create dylib
+            lib_path = sdk_root / "binaries" / "libNetClientSDK.dylib"
+        else:
+            # On Linux, create .so
+            lib_path = sdk_root / "bin" / "linux" / "libdvrnetsdk.so"
+        
         lib_path.parent.mkdir(parents=True)
         lib_path.write_text("", encoding="utf-8")
 
