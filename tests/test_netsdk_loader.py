@@ -15,6 +15,18 @@ def _set_linux_platform(mock_platform) -> None:
 
 
 class TestNatLoader:
+    def test_load_sdk_missing_library_requires_external_sdk_installation(self) -> None:
+        with (
+            patch("pytvt.netsdk.loader.platform") as mock_platform,
+            patch("pytvt.netsdk.loader._find_lib", return_value="libdvrnetsdk.so"),
+            patch("pytvt.netsdk.loader._preload_companion_libraries"),
+            patch("pytvt.netsdk.loader.ct.CDLL", side_effect=OSError("not found")),
+        ):
+            _set_linux_platform(mock_platform)
+
+            with pytest.raises(NetSdkUnavailable, match="Install the vendor SDK separately"):
+                load_sdk()
+
     def test_load_sdk_requires_nat_companion(self) -> None:
         with (
             patch("pytvt.netsdk.loader.platform") as mock_platform,

@@ -30,8 +30,9 @@ These are implementation details and may change without notice:
 These are intentionally additive and may evolve:
 
 - `pytvt.management` package as a whole
+- `ManagementClient`, especially `platform_sdk`, `sidecar`, and other management runtime selection details
 - Management protocol-native backend in `src/pytvt/management/native.py`
-- Sidecar bridge backend (`sidecar` runtime mode) — SDK-agnostic; some management operations not yet implemented
+- Sidecar backend (`sidecar` runtime mode) — SDK-agnostic; some management operations not yet implemented
 - Management evidence model details while validation is ongoing
 - Manifest-based comparison tooling contracts in `tools/` (operational, not package API)
 
