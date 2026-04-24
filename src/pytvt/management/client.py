@@ -4,10 +4,11 @@ Backend selection
 -----------------
 ManagementClient selects exactly ONE backend at login time:
 
-    1. native_linux_sdk — explicit Linux SDK backend
-    2. sidecar           — explicit sidecar bridge backend
-    3. native_protocol  — explicit native protocol backend stub
-    4. auto             — deterministic SDK-first fallback to native_protocol
+    1. native_linux_sdk — NVR device SDK (NET_SDK_* symbols, libdvrnetsdk.so)
+    2. platform_sdk     — NVMS PlatformSDK (Plat_* symbols, libPlatClientSDK.so)
+    3. sidecar           — sidecar bridge backend
+    4. native_protocol  — native protocol backend stub
+    5. auto             — SDK-first fallback to native_protocol
 
 A single session ALWAYS uses one backend.  SDK + native mixing is never allowed
 within the same session.
@@ -34,6 +35,12 @@ from .exceptions import (
 )
 from .models import AlarmSubscription, DeviceStatus, ManagedChannel, ManagedDevice, ServerInfo
 from .native import NativeManagementBackend
+from .platform_models import (
+    PlatformAlarmZone,
+    PlatformResource,
+    PlatformServer,
+)
+from .platform_sdk import PlatformSdkManagementBackend
 from .sidecar import SidecarManagementBackend
 from .sdk import SdkManagementBackend
 
@@ -41,7 +48,7 @@ logger = logging.getLogger(__name__)
 
 SdkLoginMode = Literal["login", "login_ex"]
 SdkConnectType = Literal["tcp", "nat", "nat20"]
-BackendMode = Literal["auto", "native_linux_sdk", "native_protocol", "sidecar"]
+BackendMode = Literal["auto", "native_linux_sdk", "platform_sdk", "native_protocol", "sidecar"]
 
 
 class ManagementClient:
@@ -58,6 +65,7 @@ class ManagementClient:
         sdk_connect_type: SdkConnectType = "tcp",
         backend_mode: BackendMode = "auto",
         sidecar_command: str | None = None,
+        platform_sdk_path: str | None = None,
     ) -> None:
         self.host = host
         self.port = port
@@ -67,6 +75,7 @@ class ManagementClient:
         self.sdk_connect_type: SdkConnectType = sdk_connect_type
         self.backend_mode: BackendMode = backend_mode
         self.sidecar_command = sidecar_command
+        self.platform_sdk_path = platform_sdk_path
         self._backend: BaseManagementBackend | None = None
 
     # ------------------------------------------------------------------
@@ -94,6 +103,14 @@ class ManagementClient:
             )
             logger.debug("ManagementClient: native_linux_sdk backend forced for %s", self.host)
             return sdk
+
+        if self.backend_mode == "platform_sdk":
+            logger.debug("ManagementClient: platform_sdk backend forced for %s", self.host)
+            return PlatformSdkManagementBackend(
+                self.host,
+                port=self.port,
+                sdk_path=self.platform_sdk_path or self.sdk_path,
+            )
 
         if self.backend_mode == "sidecar":
             logger.debug("ManagementClient: sidecar backend forced for %s", self.host)
@@ -206,6 +223,171 @@ class ManagementClient:
     def subscribe_alarms(self) -> AlarmSubscription:
         return self._require_backend().subscribe_alarms()
 
+    def list_resources(self) -> list[dict[str, object]]:
+        """Return raw management resources if backend supports it."""
+
+        backend = self._require_backend()
+        if hasattr(backend, "list_resources"):
+            method = getattr(backend, "list_resources")
+            return method()
+
+        rows: list[dict[str, object]] = []
+        for device in backend.list_devices():
+            rows.append(
+                {
+                    "kind": "device",
+                    "id": device.device_id,
+                    "name": device.name,
+                    "ip": device.ip_address,
+                    "status": device.status,
+                    "raw_data": device.raw_data,
+                }
+            )
+        for channel in backend.list_channels():
+            rows.append(
+                {
+                    "kind": "channel",
+                    "id": channel.channel_id,
+                    "parent_device_id": channel.device_id,
+                    "name": channel.name,
+                    "status": channel.status,
+                    "raw_data": channel.raw_data,
+                }
+            )
+        return rows
+
+    def list_server_connection_events(self) -> list[dict[str, object]]:
+        """Return raw server-connect callback data when available."""
+
+        backend = self._require_backend()
+        if hasattr(backend, "list_server_connection_events"):
+            method = getattr(backend, "list_server_connection_events")
+            return method()
+        return []
+
+    def list_transfer_servers(self) -> list[PlatformServer] | list[dict[str, object]]:
+        """Return transfer/server nodes when backend exposes that callback data."""
+
+        backend = self._require_backend()
+        if hasattr(backend, "list_transfer_servers"):
+            method = getattr(backend, "list_transfer_servers")
+            return method()
+        return []
+
+    # ------------------------------------------------------------------
+    # PlatformSDK-specific read methods
+    # ------------------------------------------------------------------
+    #
+    # Each of the following helpers transparently passes through to the
+    # underlying PlatformSDK backend when it supports the call, and raises
+    # :class:`CapabilityNotAvailable` otherwise so that callers can feature
+    # detect without catching AttributeError.
+
+    def _platform_call(self, method_name: str, *args: object, **kwargs: object) -> object:
+        backend = self._require_backend()
+        method = getattr(backend, method_name, None)
+        if method is None:
+            raise CapabilityNotAvailable(
+                f"{method_name} is only available on the platform_sdk backend."
+            )
+        return method(*args, **kwargs)
+
+    # -- Normalized resource views --
+    def list_resources_normalized(self) -> list[PlatformResource]:
+        return self._platform_call("list_resources_normalized")  # type: ignore[return-value]
+
+    def list_areas(self) -> list[PlatformResource]:
+        return self._platform_call("list_areas")  # type: ignore[return-value]
+
+    def list_devices_normalized(self) -> list[PlatformResource]:
+        return self._platform_call("list_devices_normalized")  # type: ignore[return-value]
+
+    def list_channels_normalized(self) -> list[PlatformResource]:
+        return self._platform_call("list_channels_normalized")  # type: ignore[return-value]
+
+    def list_resources_tree(self) -> list[dict[str, object]]:
+        return self._platform_call("list_resources_tree")  # type: ignore[return-value]
+
+    def find_resource_by_guid(self, guid: str) -> PlatformResource | None:
+        return self._platform_call("find_resource_by_guid", guid)  # type: ignore[return-value]
+
+    def find_resource_by_name(self, name: str) -> list[PlatformResource]:
+        return self._platform_call("find_resource_by_name", name)  # type: ignore[return-value]
+
+    # -- Server enumeration --
+    def list_servers(self) -> list[PlatformServer]:
+        return self._platform_call("list_servers")  # type: ignore[return-value]
+
+    def list_storage_servers(self) -> list[PlatformServer]:
+        return self._platform_call("list_storage_servers")  # type: ignore[return-value]
+
+    def list_access_servers(self) -> list[PlatformServer]:
+        return self._platform_call("list_access_servers")  # type: ignore[return-value]
+
+    def list_alarm_servers(self) -> list[PlatformServer]:
+        return self._platform_call("list_alarm_servers")  # type: ignore[return-value]
+
+    def list_tv_wall_servers(self) -> list[PlatformServer]:
+        return self._platform_call("list_tv_wall_servers")  # type: ignore[return-value]
+
+    def list_intelligent_analysis_servers(self) -> list[PlatformServer]:
+        return self._platform_call("list_intelligent_analysis_servers")  # type: ignore[return-value]
+
+    def list_alarm_zones(self) -> list[PlatformAlarmZone]:
+        return self._platform_call("list_alarm_zones")  # type: ignore[return-value]
+
+    # -- Write scaffolds (dry_run=True by default) --
+    def create_user(self, *, dry_run: bool = True, **payload: object) -> dict[str, object]:
+        return self._platform_call("create_user", dry_run=dry_run, **payload)  # type: ignore[return-value]
+
+    def create_permission_group(
+        self, *, dry_run: bool = True, **payload: object
+    ) -> dict[str, object]:
+        return self._platform_call(
+            "create_permission_group", dry_run=dry_run, **payload
+        )  # type: ignore[return-value]
+
+    def create_transfer_server(
+        self, *, dry_run: bool = True, **payload: object
+    ) -> dict[str, object]:
+        return self._platform_call(
+            "create_transfer_server", dry_run=dry_run, **payload
+        )  # type: ignore[return-value]
+
+    def create_tv_wall(self, *, dry_run: bool = True, **payload: object) -> dict[str, object]:
+        return self._platform_call("create_tv_wall", dry_run=dry_run, **payload)  # type: ignore[return-value]
+
+    def add_device(self, *, dry_run: bool = True, **payload: object) -> dict[str, object]:
+        return self._platform_call("add_device", dry_run=dry_run, **payload)  # type: ignore[return-value]
+
+    # -- Not-yet-reachable APIs (raise CapabilityNotAvailable) --
+    def list_users(self) -> list[object]:
+        return self._platform_call("list_users")  # type: ignore[return-value]
+
+    def list_permission_groups(self) -> list[object]:
+        return self._platform_call("list_permission_groups")  # type: ignore[return-value]
+
+    def list_logs(self, **kwargs: object) -> list[object]:
+        return self._platform_call("list_logs", **kwargs)  # type: ignore[return-value]
+
+    def list_alarm_logs(self, **kwargs: object) -> list[object]:
+        return self._platform_call("list_alarm_logs", **kwargs)  # type: ignore[return-value]
+
+    def list_operation_logs(self, **kwargs: object) -> list[object]:
+        return self._platform_call("list_operation_logs", **kwargs)  # type: ignore[return-value]
+
+    def list_exception_logs(self, **kwargs: object) -> list[object]:
+        return self._platform_call("list_exception_logs", **kwargs)  # type: ignore[return-value]
+
+    def list_tv_walls(self) -> list[object]:
+        return self._platform_call("list_tv_walls")  # type: ignore[return-value]
+
+    def list_alarm_events(self) -> list[object]:
+        return self._platform_call("list_alarm_events")  # type: ignore[return-value]
+
+    def list_active_alarms(self) -> list[object]:
+        return self._platform_call("list_active_alarms")  # type: ignore[return-value]
+
     # ------------------------------------------------------------------
     # Capability probes (do not require a session)
     # ------------------------------------------------------------------
@@ -268,6 +450,8 @@ class ManagementClient:
             return None
         if isinstance(self._backend, SdkManagementBackend):
             return "sdk"
+        if isinstance(self._backend, PlatformSdkManagementBackend):
+            return "platform_sdk"
         if isinstance(self._backend, SidecarManagementBackend):
             return "sidecar"
         if isinstance(self._backend, NativeManagementBackend):
