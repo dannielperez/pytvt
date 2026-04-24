@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 
 from .models import ScannerConfig
 
@@ -26,36 +25,6 @@ def _first_env(*names: str) -> str | None:
             return value
     return None
 
-
-def resolve_scan_script(scan_script: str | os.PathLike[str] | None = None) -> Path | None:
-    """Resolve the sdk-local bridge script path.
-
-    Resolution order:
-        1. Explicit ``scan_script`` argument.
-        2. ``$TVT_SCAN_SCRIPT``.
-        3. Legacy ``$PYTVT_SCAN_SCRIPT``.
-        4. Local repo checkout fallback (developer workflow only).
-
-    Returns ``None`` when no candidate can be found.
-    """
-    raw_path: str | None
-    if scan_script is not None:
-        raw_path = os.fspath(scan_script)
-    else:
-        raw_path = _first_env("TVT_SCAN_SCRIPT", "PYTVT_SCAN_SCRIPT")
-
-    if raw_path:
-        return Path(raw_path).expanduser()
-
-    anchor = Path(__file__).resolve().parent
-    for parent in [anchor, *anchor.parents]:
-        candidate = parent / "bridges" / "sdk_local" / "scan_nvr.mjs"
-        if candidate.exists():
-            return candidate
-    return None
-
-
-SCAN_SCRIPT: Path | None = resolve_scan_script()
 
 # Mapping from config-file / env-var keys → (ScannerConfig field, type cast)
 _FIELD_MAP: dict[str, type] = {
@@ -99,7 +68,6 @@ def load_config(config_path: str | None = None) -> ScannerConfig:
         "max_channels": os.getenv("TVT_MAX_CHANNELS"),
         "concurrency": os.getenv("TVT_CONCURRENCY"),
         "sdk_path": _first_env("TVT_SDK_PATH", "PYTVT_NETSDK_LIB"),
-        "scan_script": _first_env("TVT_SCAN_SCRIPT", "PYTVT_SCAN_SCRIPT"),
     }
     for key, raw in _env.items():
         if raw is not None:

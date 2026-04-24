@@ -45,7 +45,7 @@ Release hardening for public PyPI distribution. This release keeps local SDK-ena
 
 ## Highlights
 
-**Runtime-only SDK loading** — Native TVT SDK components are now loaded only at runtime from explicit user-provided paths. `TVT_SDK_PATH` and `TVT_SCAN_SCRIPT` are supported across the Python package and local Node.js bridge, with legacy environment variables still honored for existing local setups.
+**Runtime-only SDK loading** — Native TVT SDK components are now loaded only at runtime from explicit user-provided paths. `TVT_SDK_PATH` is supported across the Python package, with the legacy SDK env var still honored for existing local setups.
 
 **Public-package safety** — Wheel and sdist builds exclude native SDK binaries, headers, bridge workspaces, research folders, and other local-only material. The published wheel remains pure Python.
 
@@ -54,8 +54,8 @@ Release hardening for public PyPI distribution. This release keeps local SDK-ena
 ## What's new
 
 - `TVT_SDK_PATH` support for `load_sdk()`, `NetSdkClient`, and `DeviceManager`
-- `TVT_SCAN_SCRIPT` support for the `sdk-local` backend
-- Legacy `PYTVT_NETSDK_LIB` and `PYTVT_SCAN_SCRIPT` compatibility retained
+- Python-native `sdk-local` backend using ctypes instead of a Node.js bridge
+- Legacy `PYTVT_NETSDK_LIB` compatibility retained
 - Expanded `.gitignore`, `MANIFEST.in`, and hatch build exclusions for native SDK artefacts
 - Updated README and contributor docs for compliant public distribution
 - Full test-suite validation and clean-install smoke verification for 0.5.1
@@ -63,7 +63,7 @@ Release hardening for public PyPI distribution. This release keeps local SDK-ena
 ## Upgrade notes
 
 - SDK users should prefer `TVT_SDK_PATH` over the legacy env var name
-- `sdk-local` users can point directly at a local `scan_nvr.mjs` bridge with `TVT_SCAN_SCRIPT`
+- `sdk-local` users only need `TVT_SDK_PATH`; no Node.js runtime is required
 - No SDK binaries, headers, or bridge folders are shipped in the PyPI artifacts
 
 # pytvt v0.2.0
