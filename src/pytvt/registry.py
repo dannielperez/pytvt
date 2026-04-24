@@ -92,7 +92,7 @@ def _install_defaults() -> None:
 
     register(BackendFamily.SDK, IntegrationMode.COMPAT_BRIDGE, sdk_scan)
 
-    # SDK family — direct SDK (Node.js subprocess → libdvrnetsdk)
+    # SDK family — direct SDK (local Python ctypes → libdvrnetsdk)
     from .sdk_local import sdk_scan_local
 
     register(BackendFamily.SDK, IntegrationMode.DIRECT_SDK, sdk_scan_local)

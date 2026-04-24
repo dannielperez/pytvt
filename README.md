@@ -23,10 +23,10 @@ To enable SDK-backed features, obtain the TVT SDK directly from the vendor and c
 | Feature | Requirement | Configuration |
 |---|---|---|
 | `netsdk` | `libdvrnetsdk.so` on Linux x86-64/aarch64 | Set `TVT_SDK_PATH=/path/to/libdvrnetsdk.so` or `TVT_SDK_PATH=/path/to/sdk-root` |
-| `sdk-local` | Node.js 18+ and a local `scan_nvr.mjs` bridge | Set `TVT_SCAN_SCRIPT=/path/to/scan_nvr.mjs`; set `TVT_SDK_PATH` if the bridge also needs the SDK location |
+| `sdk-local` | `libdvrnetsdk.so` on Linux x86-64/aarch64 | Set `TVT_SDK_PATH=/path/to/libdvrnetsdk.so` or `TVT_SDK_PATH=/path/to/sdk-root` |
 | `sdk` / `sdk_http` | A compatible SDK bridge service | Set `TVT_API_URL=http://host:3000` |
 
-Legacy environment variables `PYTVT_NETSDK_LIB` and `PYTVT_SCAN_SCRIPT` are still honored for existing developer workflows.
+Legacy environment variable `PYTVT_NETSDK_LIB` is still honored for existing developer workflows.
 
 All SDK features fail gracefully with clear errors when dependencies are absent. The default `protocol` and `webapi` backends work with a plain `pip install`.
 
@@ -125,7 +125,7 @@ For maintainer guidance, see `docs/PACKAGE_OVERVIEW.md` and `docs/PUBLIC_SURFACE
                        │    │    HTTP POST ──▶ SDK bridge service ─▶│── NVR :6036
                        │    │                                      │
                        │    └─ sdk-local (direct mode)             │
-                       │         Node subprocess ─▶ libdvrnetsdk ─▶│── NVR :6036
+                       │         Python ctypes ───▶ libdvrnetsdk ─▶│── NVR :6036
                        │                                           │
                        │  Output: console / CSV / JSON / XLSX      │
                        └───────────────────────────────────────────┘
@@ -145,7 +145,7 @@ The scanner supports three backends (integration modes), each suited to differen
 ## Features
 
 - Pure-Python TVT binary protocol client (standard XOR and head-variant SHA1 encryption)
-- Native SDK integration via an SDK bridge service or local subprocess
+- Native SDK integration via an SDK bridge service or local Python ctypes calls
 - LAN device discovery via SSDP multicast
 - Remote subnet sweep via unicast UDP + TCP port fingerprinting
 - Concurrent bulk scanning with configurable parallelism
@@ -172,14 +172,14 @@ The scanner supports three backends (integration modes), each suited to differen
 |---|---|---|---|---|
 | **protocol** | `--backend protocol` | Python only | Any | Default — works everywhere, no external deps |
 | **sdk** | `--backend sdk` | SDK bridge service | Any | Compatibility mode |
-| **sdk-local** | `--backend sdk-local` | Node.js 18+ + native SDK | Linux x86-64 only | Direct mode — no Docker required |
+| **sdk-local** | `--backend sdk-local` | Native SDK | Linux x86-64/aarch64 | Direct mode — pure Python ctypes |
 | **both** | `--backend both` | SDK bridge service | Any | Protocol first, SDK fallback on failure |
 
 ### Integration Modes
 
 **Compatibility mode** (`sdk` backend) — uses a compatible SDK bridge service that wraps the native TVT SDK behind HTTP.
 
-**Direct mode** (`sdk-local` backend) — runs a local `scan_nvr.mjs` bridge as a Node.js subprocess, calling the native `libdvrnetsdk.so` directly. Requires Linux x86-64, Node.js 18+, and a vendor-supplied SDK installation.
+**Direct mode** (`sdk-local` backend) — calls the native `libdvrnetsdk.so` directly through Python `ctypes`. Requires Linux x86-64/aarch64 and a vendor-supplied SDK installation.
 
 **Protocol mode** (default) — pure Python, no external dependencies. Works on any platform with TCP access to the NVR management port. Does not require the SDK at all.
 
@@ -307,8 +307,15 @@ export TVT_SDK_PATH=/opt/tvt-sdk
 ### Enable sdk-local
 
 ```bash
-export TVT_SCAN_SCRIPT=/opt/pytvt-bridges/scan_nvr.mjs
+export TVT_SDK_PATH=/opt/tvt-sdk
 pytvt devices.json --backend sdk-local
+```
+
+### Single-NVR SDK scan
+
+```bash
+python -m pytvt scan-nvr 10.0.0.10 6036 admin password
+pytvt-scan 10.0.0.10 6036 admin password --sdk-path /opt/tvt-sdk --no-sentinels
 ```
 
 ### Single-device Connect
@@ -633,7 +640,7 @@ Precedence (first wins):
 | `max_channels` | 64 | Max camera channels per NVR |
 | `concurrency` | 4 | Parallel NVR scans |
 
-Environment variables override config file values: `TVT_PORT`, `TVT_TIMEOUT`, `TVT_MAX_CHANNELS`, `TVT_CONCURRENCY`, `TVT_SDK_PATH`, `TVT_SCAN_SCRIPT`.
+Environment variables override config file values: `TVT_PORT`, `TVT_TIMEOUT`, `TVT_MAX_CHANNELS`, `TVT_CONCURRENCY`, `TVT_SDK_PATH`.
 
 ## Project Structure
 
@@ -655,7 +662,7 @@ pytvt/
 │   ├── sdk_http.py            # SDK HTTP backend (compat mode → external bridge)
 │   ├── sdk_http_client.py     # Typed SDK HTTP client
 │   ├── device_manager.py      # Unified facade with auto-backend selection
-│   ├── sdk_local.py           # SDK local subprocess backend (direct mode)
+│   ├── sdk_local.py           # SDK local backend (direct ctypes mode)
 │   ├── output.py              # CSV / JSON / XLSX formatters
 │   ├── nvr_api.py             # NVR web CGI client
 │   ├── snapshot.py            # Camera snapshot capture
@@ -666,10 +673,6 @@ pytvt/
 │       ├── types.py           # ctypes structure definitions
 │       ├── constants.py       # Enums (PtzCommand, StreamType, etc.)
 │       └── client.py          # NetSdkClient + DeviceSession
-├── bridges/
-│   └── sdk_local/             # Local-only Node.js SDK bridge (excluded from PyPI)
-│       ├── scan_nvr.mjs       # SDK FFI subprocess script
-│       └── package.json       # koffi dependency
 ├── tvt-api/                   # Local-only SDK bridge workspace (excluded from PyPI)
 ├── tests/                     # pytest test suite
 │   ├── conftest.py            # Shared fixtures + sample data
@@ -686,7 +689,7 @@ pytvt/
 │   ├── test_sdk_http_client.py # SdkHttpClient tests
 │   ├── test_netsdk_client.py  # netsdk ctypes binding tests
 │   ├── test_device_manager.py # DeviceManager facade tests
-│   └── test_sdk_local.py      # JSON extraction tests
+│   └── test_sdk_local.py      # Direct SDK local backend tests
 ├── tools/                     # Operational utilities (import from pytvt)
 │   └── enable_nvr_services.py # Batch NVR RTSP + API enablement
 ├── research/                  # Reverse-engineering reference (NOT runtime code)
@@ -695,8 +698,8 @@ pytvt/
 │   ├── verify_pw.py           # Verify password encryption against live NVR
 │   ├── verify_capture.py      # Verify encryption from captured SDK traffic
 │   ├── capture_sdk.sh         # Capture SDK ↔ NVR traffic via tcpdump
-│   ├── sdk_login.cjs          # Trigger SDK login for traffic capture
-│   └── test_sha1.mjs          # Test SDK PUB_SHA1Encrypt directly
+│   ├── sdk_login.py           # Trigger SDK login for traffic capture
+│   └── test_sha1.py           # Test SDK PUB_SHA1Encrypt directly
 ├── pyproject.toml             # Packaging (hatchling) + tool config
 ├── config.json                # Default non-sensitive settings
 ├── .env.example               # Credential template
@@ -715,7 +718,7 @@ pytvt distinguishes between three tiers of code:
 
 The PyPI wheel and sdist ship only the Python package in `src/pytvt/`. This is the supported public runtime.
 
-### Local helper runtimes (`bridges/`, `tvt-api/`)
+### Local helper runtimes (`tvt-api/`)
 
 These folders support developer workflows only. They are excluded from PyPI artifacts and may rely on separate, vendor-supplied SDK installations.
 
@@ -769,8 +772,8 @@ for device in devices:
 
 - **Protocol backend:** Retrieves camera channel metadata only — no video streaming or recording
 - **Head-variant NVRs** (protocolVer ≥ 11): Return basic channel data (name, status) but not IPC IP addresses
-- **SDK backends:** Native SDK (`libdvrnetsdk.so`) is Linux x86-64 only
-- **sdk-local backend:** Requires Node.js and the SDK shared library on the host
+- **SDK backends:** Native SDK (`libdvrnetsdk.so`) is Linux x86-64/aarch64 only
+- **sdk-local backend:** Requires the SDK shared library on the host and runs through Python `ctypes`
 - **Discovery:** SSDP multicast is limited to the local broadcast domain; remote subnets need `--subnet`
 - **No TLS:** The TVT protocol does not support encryption in transit
 - **Credential handling:** Passwords are XOR-encrypted on the wire (standard variant) — treat the NVR management network as trusted
@@ -780,7 +783,6 @@ for device in devices:
 | Project | Description |
 |---|---|
 | [2BAD/tvt](https://github.com/2BAD/tvt) | Original TVT protocol reverse engineering (TypeScript) |
-| [koffi](https://koffi.dev/) | FFI bindings used by the SDK bridge |
 
 ## License
 

@@ -13,7 +13,7 @@
 #   - LICENSE
 #
 # Explicitly excluded (not redistributed):
-#   - bridges/         Local Node.js bridge scripts
+#   - bridges/         Historical local bridge workspace
 #   - tvt-api/         Local SDK helper workspace
 #   - research/        Reverse-engineering research scripts
 #   - tools/           Maintenance utilities

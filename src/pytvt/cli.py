@@ -57,6 +57,10 @@ def _load_dotenv() -> None:
 def main() -> None:
     """Main scanner CLI — the ``pytvt`` command."""
     _load_dotenv()
+    if len(sys.argv) > 1 and sys.argv[1] == "scan-nvr":
+        scan_nvr_cli(sys.argv[2:])
+        return
+
     if len(sys.argv) > 1 and sys.argv[1] == "connect" and (len(sys.argv) == 2 or sys.argv[2].startswith("-")):
         _connect_main(sys.argv[2:])
         return
@@ -158,6 +162,55 @@ def diff_cli() -> None:
         print(format_diff_text(result))
 
 
+def _build_scan_nvr_parser() -> argparse.ArgumentParser:
+    """Construct the ``pytvt scan-nvr`` argument parser."""
+    parser = argparse.ArgumentParser(
+        prog="pytvt scan-nvr",
+        description="Scan a single TVT NVR via the local native SDK",
+    )
+    parser.add_argument("ip", help="NVR IP address or hostname")
+    parser.add_argument("port", nargs="?", type=int, default=6036, help="SDK port (default: 6036)")
+    parser.add_argument("username", nargs="?", default="admin", help="Login username (default: admin)")
+    parser.add_argument("password", nargs="?", default="", help="Login password")
+    parser.add_argument("--sdk-path", help="Path to libdvrnetsdk.so or the vendor SDK root")
+    parser.add_argument("--max-channels", type=int, default=64, help="Maximum IPC channels to enumerate")
+    parser.add_argument(
+        "--no-sentinels",
+        action="store_true",
+        help="Print raw JSON only instead of the legacy sentinel markers",
+    )
+    parser.add_argument("--indent", type=int, default=None, help="Indent JSON output for readability")
+    return parser
+
+
+def scan_nvr_cli(argv: list[str] | None = None) -> None:
+    """Handle ``pytvt scan-nvr`` and the ``pytvt-scan`` console script."""
+    from .sdk_local import scan_nvr_payload
+
+    parser = _build_scan_nvr_parser()
+    args = parser.parse_args(argv)
+
+    payload = scan_nvr_payload(
+        args.ip,
+        port=args.port,
+        username=args.username,
+        password=args.password,
+        sdk_path=args.sdk_path,
+        max_channels=args.max_channels,
+    )
+    rendered = json.dumps(payload, indent=args.indent)
+
+    if args.no_sentinels:
+        print(rendered)
+    else:
+        print("___JSON_START___")
+        print(rendered)
+        print("___JSON_END___")
+
+    if not payload.get("success", False):
+        sys.exit(1)
+
+
 # ── Argument parser ──────────────────────────────────────────────────
 
 
@@ -182,7 +235,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "-b",
         choices=CLI_BACKEND_CHOICES,
         default="protocol",
-        help="Scan backend: protocol (pure Python, default), sdk (HTTP API), sdk-local (subprocess), both (protocol then sdk)",
+        help="Scan backend: protocol (pure Python, default), sdk (HTTP API), sdk-local (direct Python ctypes), both (protocol then sdk)",
     )
     parser.add_argument("--xlsx", metavar="DIR", help="Output one .xlsx file per site into DIR (e.g. --xlsx files/)")
     parser.add_argument(
