@@ -61,6 +61,10 @@ def main() -> None:
         scan_nvr_cli(sys.argv[2:])
         return
 
+    if len(sys.argv) > 1 and sys.argv[1] == "doctor":
+        doctor_cli(sys.argv[2:])
+        return
+
     if len(sys.argv) > 1 and sys.argv[1] == "connect" and (len(sys.argv) == 2 or sys.argv[2].startswith("-")):
         _connect_main(sys.argv[2:])
         return
@@ -175,9 +179,21 @@ def _build_scan_nvr_parser() -> argparse.ArgumentParser:
     parser.add_argument("--sdk-path", help="Path to libdvrnetsdk.so or the vendor SDK root")
     parser.add_argument("--max-channels", type=int, default=64, help="Maximum IPC channels to enumerate")
     parser.add_argument(
-        "--no-sentinels",
+        "--timeout",
+        type=float,
+        default=10.0,
+        help="Connect/receive timeout in seconds (default: 10.0)",
+    )
+    parser.add_argument(
+        "--json",
         action="store_true",
         help="Print raw JSON only instead of the legacy sentinel markers",
+    )
+    parser.add_argument(
+        "--no-sentinels",
+        action="store_true",
+        dest="json_output",
+        help=argparse.SUPPRESS,
     )
     parser.add_argument("--indent", type=int, default=None, help="Indent JSON output for readability")
     return parser
@@ -197,10 +213,11 @@ def scan_nvr_cli(argv: list[str] | None = None) -> None:
         password=args.password,
         sdk_path=args.sdk_path,
         max_channels=args.max_channels,
+        timeout=args.timeout,
     )
     rendered = json.dumps(payload, indent=args.indent)
 
-    if args.no_sentinels:
+    if args.json or args.json_output:
         print(rendered)
     else:
         print("___JSON_START___")
@@ -208,6 +225,34 @@ def scan_nvr_cli(argv: list[str] | None = None) -> None:
         print("___JSON_END___")
 
     if not payload.get("success", False):
+        sys.exit(1)
+
+
+def _build_doctor_parser() -> argparse.ArgumentParser:
+    """Construct the ``pytvt doctor`` argument parser."""
+    parser = argparse.ArgumentParser(
+        prog="pytvt doctor",
+        description="Inspect pytvt runtime and SDK availability",
+    )
+    parser.add_argument("--sdk-path", help="Path to libdvrnetsdk.so or the vendor SDK root")
+    parser.add_argument("--json", action="store_true", help="Print machine-readable diagnostics JSON")
+    return parser
+
+
+def doctor_cli(argv: list[str] | None = None) -> None:
+    """Handle ``pytvt doctor`` diagnostics."""
+    from . import diagnostics
+
+    parser = _build_doctor_parser()
+    args = parser.parse_args(argv)
+
+    report = diagnostics(sdk_path=args.sdk_path)
+    if args.json:
+        print(json.dumps(report.to_dict(), indent=2))
+    else:
+        print(report)
+
+    if not report.sdk_available:
         sys.exit(1)
 
 

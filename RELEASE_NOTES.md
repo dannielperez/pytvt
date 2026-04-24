@@ -1,3 +1,29 @@
+# pytvt v0.8.0
+
+Final hardening release for the Python-only runtime.
+
+## Highlights
+
+**Permanent Python-only policy** — the repository now enforces a strict no-Node/no-JavaScript policy through `.gitignore`, pre-commit checks, repository tests, and wheel-content validation.
+
+**Production `scan-nvr` CLI** — the direct SDK CLI now supports explicit timeouts, raw JSON output for automation, non-zero exit codes on failure, and compatibility-locked payload tests.
+
+**SDK safety guarantees** — build-time tests confirm that the wheel contains no vendored `.so`, `.dll`, or `.dylib` files. Users must continue to supply the TVT SDK from their own installation via `TVT_SDK_PATH`.
+
+## What's new
+
+- `pytvt doctor` runtime diagnostics CLI
+- Pre-commit Python-only guard for staged files
+- Repository guardrail tests for repo root and built wheel contents
+- Legacy `scan_nvr` payload fixture to lock output compatibility
+- Maintainer docs refreshed for the current management/runtime surface and Python-only packaging contract
+
+## Upgrade notes
+
+- `sdk-local` remains supported but is permanently Python-only
+- No Node.js runtime is required anywhere in the supported runtime path
+- No vendor SDK binaries are bundled or redistributed
+
 # pytvt v0.6.0
 
 AutoNAT / P2P support and scalable connection pooling for managing many devices concurrently through the vendor SDK.

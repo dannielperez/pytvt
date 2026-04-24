@@ -1,6 +1,13 @@
 # pytvt
 
-Bulk-scan TVT NVRs and enumerate every connected IP camera — pure Python, no vendor tools required.
+Python toolkit for TVT device, NVR, and management-server workflows.
+
+Today `pytvt` covers two parallel tracks:
+
+- Stable device and NVR operations: discovery, bulk scanning, diffing, NVR CGI, TVT Web API, direct SDK access, AutoNAT/P2P login, and unified device management.
+- Additive management-server integration: `ManagementClient`, PlatformSDK-backed inventory/diagnostics, and sidecar-compatible runtime modes that are still explicitly provisional.
+
+The published package is pure Python. Optional vendor SDK integrations are loaded from user-supplied installations and are never bundled in the wheel or sdist.
 
 ## Installation
 
@@ -9,6 +16,48 @@ pip install pytvt
 ```
 
 Requires Python 3.10+. The published wheel contains only pure Python code.
+
+## What pytvt includes
+
+### Stable device and NVR surface
+
+- Bulk NVR scanning with `protocol`, `sdk`, `sdk-local`, and `both` execution modes
+- LAN discovery and remote subnet discovery
+- `NvrClient` for NVR CGI operations
+- `WebApiClient` for TVT HTTP Web API / LAPI operations
+- `DeviceManager` for unified device actions across `netsdk` and `sdk_http`
+- Direct SDK login helpers, including AutoNAT / P2P flows
+- Connection pooling and `connect-many` orchestration for large fleets
+- JSON / CSV / XLSX export and scan diffing
+
+### Provisional management-server surface
+
+- `ManagementClient` facade for management-server sessions
+- `platform_sdk` runtime backed by `libPlatClientSDK.so` / `PlatClientSDK.dll`
+- `native_linux_sdk`, `sidecar`, and `native_protocol` management runtime modes
+- Read-only inventory, topology, health, alarm, and capability analysis modules
+
+Management support is additive. It does not replace or downgrade the stable device/NVR flows.
+
+## Python-only architecture
+
+`pytvt` is permanently Python-only at the repository and packaging levels.
+
+- No Node.js runtime is required for any supported CLI or library path.
+- No JavaScript bridge, npm manifest, or Node build step is part of the supported runtime.
+- Proprietary SDK binaries are never redistributed in this repository or in PyPI artifacts.
+- Native SDK support remains optional and is loaded only from a user-supplied vendor installation.
+
+Repository guardrails enforce this policy through tests, packaging checks, `.gitignore`, and a pre-commit hook.
+
+## Runtime and SDK matrix
+
+| Runtime family | What it powers | Requirement | Packaging policy |
+|---|---|---|---|
+| Pure Python | `protocol`, discovery, diffing, NVR CGI, Web API, most CLI flows | `pip install pytvt` | Included in wheel/sdist |
+| Device SDK (`libdvrnetsdk.so`) | `sdk-local`, `DeviceManager` netsdk backend, `scan-nvr`, `connect`, `connect-many`, AutoNAT/P2P | User-supplied TVT device SDK on Linux x86-64/aarch64 | Never bundled |
+| Platform SDK (`libPlatClientSDK.so` / `PlatClientSDK.dll`) | `ManagementClient(backend_mode="platform_sdk")` and related platform analysis | User-supplied NVMS PlatformSDK | Never bundled |
+| External bridge/service | `sdk` / `sdk_http` compatibility path, management `sidecar` mode | External service/process you operate | Outside the package |
 
 ## SDK Installation Required
 
@@ -24,11 +73,15 @@ To enable SDK-backed features, obtain the TVT SDK directly from the vendor and c
 |---|---|---|
 | `netsdk` | `libdvrnetsdk.so` on Linux x86-64/aarch64 | Set `TVT_SDK_PATH=/path/to/libdvrnetsdk.so` or `TVT_SDK_PATH=/path/to/sdk-root` |
 | `sdk-local` | `libdvrnetsdk.so` on Linux x86-64/aarch64 | Set `TVT_SDK_PATH=/path/to/libdvrnetsdk.so` or `TVT_SDK_PATH=/path/to/sdk-root` |
+| `platform_sdk` | `libPlatClientSDK.so` or `PlatClientSDK.dll` | Pass `platform_sdk_path="/path/to/libPlatClientSDK.so"` to `ManagementClient` |
 | `sdk` / `sdk_http` | A compatible SDK bridge service | Set `TVT_API_URL=http://host:3000` |
+| `sidecar` | External management sidecar process | Pass `sidecar_command=...` or set `PYTVT_MGMT_SIDECAR_CMD` |
 
 Legacy environment variable `PYTVT_NETSDK_LIB` is still honored for existing developer workflows.
 
 All SDK features fail gracefully with clear errors when dependencies are absent. The default `protocol` and `webapi` backends work with a plain `pip install`.
+
+The SDK must always be supplied by the user through `TVT_SDK_PATH` or an explicit `sdk_path=` argument. `pytvt` does not download, embed, or vendor `libdvrnetsdk.so`, `libNatClientSDK.so`, or any other TVT binary.
 
 ### AutoNAT / P2P SDK Login
 
@@ -53,19 +106,24 @@ Higher-level APIs accept the same explicit path:
 ```python
 from pytvt import DeviceManager
 
-with DeviceManager("10.0.0.1", "admin", "password", sdk_path="/opt/tvt-sdk") as mgr:
+with DeviceManager("192.0.2.10", "admin", "example-password", sdk_path="/opt/tvt-sdk") as mgr:
   print(mgr.device_info())
 ```
 
 ## What is pytvt?
 
-`pytvt` is a Python toolkit for managing [TVT](https://en.tvt.net.cn/) (Shenzhen TVT Digital Technology) NVR and IPC devices at scale. It connects to NVRs, authenticates via the proprietary binary protocol, and retrieves full camera channel inventories — names, IPs, ports, models, online status — across dozens of sites in parallel.
+`pytvt` is a Python toolkit for working with [TVT](https://en.tvt.net.cn/) (Shenzhen TVT Digital Technology) devices and TVT-operated management environments.
 
-It also supports LAN auto-discovery via SSDP multicast and remote subnet sweeps, so you can find devices without an inventory file.
+At the device and NVR level, it can discover recorders, bulk-scan channel inventories, query or modify configuration through NVR CGI and Web API paths, capture snapshots, and connect through the vendor SDK when that path is available.
 
-Since v0.3.0, pytvt includes a **Web API client** for the TVT HTTP API (LAPI protocol), providing direct per-device management via HTTP Basic auth — device info, snapshots, password changes, image/stream configuration, and recording queries — all in pure Python with no binary dependencies.
+At the management-server level, it exposes an additive `ManagementClient` plus platform analysis modules for inventory, topology, alarms, and backend diagnostics. That management layer is usable today, but it remains intentionally marked provisional while backend coverage continues to expand.
 
-Since v0.5.0, the **`DeviceManager`** provides a unified facade for device operations that auto-selects the best available backend — native SDK (`netsdk` ctypes) on Linux, or a compatible SDK bridge over HTTP — so the same code works on any platform.
+For downstream code, the package now centers around a few clear entrypoints:
+
+- `scan_single_nvr()` and the `pytvt` scanner CLI for inventory-oriented fleet workflows
+- `NvrClient` and `WebApiClient` for direct device configuration and data access
+- `DeviceManager` for unified per-device operations across SDK-backed runtimes
+- `ManagementClient` for management-server sessions and platform inventory analysis
 
 ## Stability and Scope
 
@@ -73,13 +131,13 @@ Since v0.5.0, the **`DeviceManager`** provides a unified facade for device opera
 provisional management-server package.
 
 **Stable:**
-- Scanner, discovery, `NvrClient`, `WebApiClient`, `DeviceManager`, and
-  netsdk-backed device operations
+- Scanner, discovery, `NvrClient`, `WebApiClient`, `DeviceManager`,
+  connection-pool helpers, and netsdk-backed device operations
 
 **Provisional (`pytvt.management`):**
 - Management-server backend family and related validation tooling in `tools/`
-- Three runtime modes are supported: `native_linux_sdk` (Linux SDK), `sidecar`
-  (bridge process, SDK-agnostic), and `native_protocol` (stub)
+- Runtime modes include `native_linux_sdk`, `platform_sdk`, `sidecar`,
+  `native_protocol`, and `auto`
 - `sidecar` is a first-class runtime mode for environments where the native
   Linux SDK is not available; some management operations are not yet implemented
 - Management diagnostics and capability evidence are the primary outputs at
@@ -112,40 +170,34 @@ For maintainer guidance, see `docs/PACKAGE_OVERVIEW.md` and `docs/PUBLIC_SURFACE
 
 ## Architecture
 
-```
-                       ┌───────────────────────────────────────────┐
-                       │              pytvt (Python)               │
-                       │                                           │
-  Inventory JSON ─────▶│  CLI / Library API                        │
-  or --discover        │    │                                      │
-                       │    ├─ protocol (default)                  │
-                       │    │    Pure Python TCP client ──────────▶│── NVR :6036
-                       │    │                                      │
-                       │    ├─ sdk (compat mode)                   │
-                       │    │    HTTP POST ──▶ SDK bridge service ─▶│── NVR :6036
-                       │    │                                      │
-                       │    └─ sdk-local (direct mode)             │
-                       │         Python ctypes ───▶ libdvrnetsdk ─▶│── NVR :6036
-                       │                                           │
-                       │  Output: console / CSV / JSON / XLSX      │
-                       └───────────────────────────────────────────┘
-```
+`pytvt` is best understood as a Python package with two additive layers:
 
-The scanner supports three backends (integration modes), each suited to different deployment scenarios. You can also combine `protocol` with `sdk` fallback using `--backend both`.
+| Layer | Primary entrypoints | Typical targets |
+|---|---|---|
+| Device / NVR operations | `pytvt`, `pytvt-discover`, `pytvt-diff`, `pytvt-api`, `pytvt-snapshot`, `DeviceManager`, `NvrClient`, `WebApiClient` | NVRs, IPCs, single devices, fleet inventories |
+| Management-server operations | `ManagementClient`, `platform_inventory`, `platform_health`, `platform_alarms`, `platform_capabilities`, `platform_topology` | TVT NVMS / platform deployments |
+
+For device scanning specifically, the runtime choices are:
+
+- `protocol`: pure Python TCP implementation, no external SDK needed
+- `sdk`: compatibility path via an external SDK bridge service
+- `sdk-local`: direct Python `ctypes` calls into the vendor device SDK
+- `both`: protocol-first with SDK bridge fallback
 
 ## Why use it?
 
-- **No vendor software required** — the default `protocol` backend is pure Python with zero native dependencies
-- **Bulk operations** — scan dozens of NVRs in parallel, export per-site XLSX workbooks
-- **Multiple backends** — choose the integration mode that fits your environment
-- **Auto-discovery** — find TVT devices via SSDP multicast or remote subnet sweep
-- **Typed data models** — clean `dataclass`-based API for programmatic use
-- **CLI + library** — use from the command line or import as a Python package
+- **Pure Python distribution** — install from PyPI without bundling vendor binaries or Node tooling
+- **Broad TVT surface area** — scanner, discovery, NVR CGI, Web API, SDK-backed device actions, and management-server analysis
+- **Flexible runtime options** — pure Python where possible, explicit external SDK/service hooks where needed
+- **Bulk operations** — scan dozens of NVRs in parallel, diff results, export per-site XLSX workbooks
+- **Unified per-device API** — `DeviceManager` selects a workable backend without changing your higher-level code
+- **Operational diagnostics** — inspect SDK readiness with `pytvt doctor` and backend diagnostics helpers
 
 ## Features
 
 - Pure-Python TVT binary protocol client (standard XOR and head-variant SHA1 encryption)
-- Native SDK integration via an SDK bridge service or local Python ctypes calls
+- Native device SDK integration via an SDK bridge service or local Python `ctypes` calls
+- TVT management-server integration via `ManagementClient` and PlatformSDK / sidecar runtime modes
 - LAN device discovery via SSDP multicast
 - Remote subnet sweep via unicast UDP + TCP port fingerprinting
 - Concurrent bulk scanning with configurable parallelism
@@ -153,6 +205,8 @@ The scanner supports three backends (integration modes), each suited to differen
 - Output to console, CSV, JSON, or per-site XLSX
 - Failed device tracking with automatic retry support
 - Camera snapshot capture (SDK-based)
+- Single-device `connect` and fleet-oriented `connect-many` SDK login workflows
+- Runtime diagnostics through `diagnostics()` and `pytvt doctor`
 - NVR web CGI client for configuration management:
   - Channel listing (`query_channels()`), port config, password security
   - LAN device discovery/management, channel add/delete, IPC password change
@@ -174,6 +228,16 @@ The scanner supports three backends (integration modes), each suited to differen
 | **sdk** | `--backend sdk` | SDK bridge service | Any | Compatibility mode |
 | **sdk-local** | `--backend sdk-local` | Native SDK | Linux x86-64/aarch64 | Direct mode — pure Python ctypes |
 | **both** | `--backend both` | SDK bridge service | Any | Protocol first, SDK fallback on failure |
+
+## Management Runtime Modes
+
+| Runtime mode | Requirement | Status | Notes |
+|---|---|---|---|
+| `native_linux_sdk` | Device SDK (`libdvrnetsdk.so`) | Provisional | Linux management path via NET_SDK family |
+| `platform_sdk` | PlatformSDK (`libPlatClientSDK.so` / `PlatClientSDK.dll`) | Provisional but live-validated for read-only inventory flows | Best current path for NVMS inventory and diagnostics |
+| `sidecar` | External sidecar bridge process | Provisional | Supported runtime mode for SDK-agnostic environments |
+| `native_protocol` | None | Stub | Intentionally incomplete |
+| `auto` | SDK path optional | Provisional | SDK-first, native-protocol fallback |
 
 ### Integration Modes
 
@@ -199,6 +263,80 @@ pytvt-discover
 
 # Discover and scan in one command
 pytvt --discover -u admin -p password --xlsx files/
+
+# Inspect SDK readiness
+pytvt doctor --json
+
+# Probe one NVR through the local SDK
+pytvt scan-nvr 192.0.2.10 6036 admin example-password --sdk-path /opt/tvt-sdk --json
+
+# Connect to a single device via direct SDK or AutoNAT
+pytvt connect --host 192.0.2.10 -u admin -p example-password --sdk-path /opt/tvt-sdk
+pytvt connect --nat --id DEMO-DEVICE-001 -u admin -p example-password --sdk-path /opt/tvt-sdk
+
+# Connect to many devices concurrently
+pytvt connect-many --file devices.json -u admin -p example-password --sdk-path /opt/tvt-sdk --json
+```
+
+## CLI Surface
+
+Console scripts:
+
+- `pytvt` — bulk scanner plus `scan-nvr`, `doctor`, `connect`, and `connect-many` subcommands
+- `pytvt-discover` — device discovery
+- `pytvt-diff` — scan diffing
+- `pytvt-api` — NVR CGI operations
+- `pytvt-snapshot` — snapshot capture
+- `pytvt-scan` — direct alias for `pytvt scan-nvr`
+
+## scan-nvr CLI
+
+`scan-nvr` is the direct single-device SDK probe for the Python-only `sdk-local` path.
+
+```bash
+python -m pytvt scan-nvr 192.0.2.10 6036 admin example-password --sdk-path /opt/tvt-sdk
+pytvt-scan 192.0.2.10 6036 admin example-password --sdk-path /opt/tvt-sdk --json --indent 2
+```
+
+Optional flags:
+
+- `--timeout 15` — override the SDK connect/receive timeout in seconds
+- `--json` — emit raw JSON only
+- `--no-sentinels` — legacy alias for raw JSON output
+- `--max-channels 128` — cap IPC enumeration
+
+Expected output shape:
+
+```json
+{
+  "nvr_ip": "192.0.2.10",
+  "nvr_port": 6036,
+  "success": true,
+  "device_name": "NVR-01",
+  "device_model": "TD-3332B4",
+  "serial_number": "DEMO-DEVICE-001",
+  "firmware": "5.2.3.190",
+  "total_channels": 4,
+  "cameras": [
+    {
+      "channel": 1,
+      "name": "Lobby",
+      "address": "198.51.100.10",
+      "port": 9008,
+      "status": "Online",
+      "protocol": "TVT",
+      "model": "TD-9544S4"
+    }
+  ],
+  "error": null
+}
+```
+
+For runtime diagnostics, use:
+
+```bash
+pytvt doctor
+pytvt doctor --sdk-path /opt/tvt-sdk --json
 ```
 
 ## Web API Client (v0.3.0+)
@@ -208,7 +346,7 @@ The `WebApiClient` provides direct HTTP access to TVT devices (NVRs and IPCs) us
 ```python
 from pytvt.webapi import WebApiClient
 
-client = WebApiClient("192.168.1.100", "admin", "password")
+client = WebApiClient("198.51.100.25", "admin", "example-password")
 
 # Check what the device supports
 apis = client.get_supported_apis()
@@ -235,7 +373,7 @@ client.modify_password("old_pass", "new_pass")
 The Web API service must be enabled on the device. Use `ensure_webapi_available()` to auto-enable it via the NVR CGI if needed:
 
 ```python
-client = WebApiClient("192.168.1.100", "admin", "password")
+client = WebApiClient("198.51.100.25", "admin", "example-password")
 client.ensure_webapi_available()  # enables via NvrClient if disabled
 ```
 
@@ -253,7 +391,7 @@ from pytvt import DeviceManager, available_backends
 print(available_backends(sdk_path="/opt/tvt-sdk"))
 
 # Auto-detect best backend
-with DeviceManager("10.200.50.251", "admin", "password", sdk_path="/opt/tvt-sdk") as mgr:
+with DeviceManager("192.0.2.25", "admin", "example-password", sdk_path="/opt/tvt-sdk") as mgr:
     print(f"Using: {mgr.backend}")
 
     info = mgr.device_info()
@@ -265,7 +403,7 @@ with DeviceManager("10.200.50.251", "admin", "password", sdk_path="/opt/tvt-sdk"
     mgr.reboot()
 
 # Force a specific backend
-mgr = DeviceManager("10.200.50.251", "admin", "password", backend="sdk_http", api_url="http://localhost:3000")
+mgr = DeviceManager("192.0.2.25", "admin", "example-password", backend="sdk_http", api_url="http://localhost:3000")
 ```
 
 AutoNAT uses the same facade. Pass a device serial / UID instead of an IP address:
@@ -276,8 +414,8 @@ from pytvt import DeviceManager
 with DeviceManager(
   None,
   "admin",
-  "password",
-  identifier="ABC123456",
+  "example-password",
+  identifier="DEMO-DEVICE-001",
   sdk_path="/opt/tvt-sdk",
 ) as mgr:
   print(mgr.connection_method)
@@ -296,7 +434,7 @@ pip install pytvt
 
 Requires Python 3.10+ and network access to NVR port 6036. No native dependencies are needed for `protocol` or `webapi`.
 
-### Enable native SDK features
+### Enable device SDK features
 
 ```bash
 export TVT_SDK_PATH=/opt/tvt-sdk
@@ -304,7 +442,7 @@ export TVT_SDK_PATH=/opt/tvt-sdk
 
 `TVT_SDK_PATH` can point either to `libdvrnetsdk.so` itself or to the root of the unpacked vendor SDK.
 
-### Enable sdk-local
+### Enable sdk-local scanning
 
 ```bash
 export TVT_SDK_PATH=/opt/tvt-sdk
@@ -314,18 +452,35 @@ pytvt devices.json --backend sdk-local
 ### Single-NVR SDK scan
 
 ```bash
-python -m pytvt scan-nvr 10.0.0.10 6036 admin password
-pytvt-scan 10.0.0.10 6036 admin password --sdk-path /opt/tvt-sdk --no-sentinels
+python -m pytvt scan-nvr 192.0.2.10 6036 admin example-password
+pytvt-scan 192.0.2.10 6036 admin example-password --sdk-path /opt/tvt-sdk --json
 ```
+
+### Enable PlatformSDK-backed management
+
+```python
+from pytvt import ManagementClient
+
+client = ManagementClient(
+  "198.51.100.25",
+  backend_mode="platform_sdk",
+  platform_sdk_path="/opt/tvt-platform-sdk/libPlatClientSDK.so",
+)
+client.login("admin", "example-password")
+print(client.list_devices_normalized()[:3])
+client.close()
+```
+
+For live validation guidance and the currently verified PlatformSDK capability matrix, see [`docs/platform_sdk.md`](docs/platform_sdk.md).
 
 ### Single-device Connect
 
 ```bash
 # Direct SDK login
-pytvt connect --host 10.200.50.251 -u admin -p password --sdk-path /opt/tvt-sdk
+pytvt connect --host 192.0.2.25 -u admin -p example-password --sdk-path /opt/tvt-sdk
 
 # AutoNAT / P2P login by device serial / UID
-pytvt connect --nat --id ABC123456 -u admin -p password --sdk-path /opt/tvt-sdk
+pytvt connect --nat --id DEMO-DEVICE-001 -u admin -p example-password --sdk-path /opt/tvt-sdk
 ```
 
 Use `--nat-server` and `--nat-port` when your SDK build requires an explicit NAT2 endpoint override.
@@ -335,14 +490,14 @@ Use `--nat-server` and `--nat-port` when your SDK build requires an explicit NAT
 Connect to many devices concurrently via direct or AutoNAT:
 
 ```bash
-# devices.json: [{"ip": "10.0.0.1"}, {"identifier": "ABC123"}, ...]
-pytvt connect-many --file devices.json -u admin -p password --sdk-path /opt/tvt-sdk
+# devices.json: [{"ip": "192.0.2.10"}, {"identifier": "DEMO-DEVICE-001"}, ...]
+pytvt connect-many --file devices.json -u admin -p example-password --sdk-path /opt/tvt-sdk
 
 # Prefer NAT for devices with identifiers
-pytvt connect-many --file devices.json -u admin -p password --nat --concurrency 20
+pytvt connect-many --file devices.json -u admin -p example-password --nat --concurrency 20
 
 # JSON output
-pytvt connect-many --file devices.json -u admin -p password --json
+pytvt connect-many --file devices.json -u admin -p example-password --json
 ```
 
 Output table:
@@ -350,9 +505,9 @@ Output table:
 ```
 TARGET                         STATUS     LATENCY    METHOD     DEVICE               ERROR
 ----------------------------------------------------------------------------------------------
-10.0.0.1                       OK         42ms       direct     NVR-01
-ABC123                         OK         320ms      nat        NVR-02
-10.0.0.3                       FAIL       5001ms     direct                          Connection timed out
+192.0.2.10                     OK         42ms       direct     NVR-01
+DEMO-DEVICE-001                OK         320ms      nat        NVR-02
+192.0.2.30                     FAIL       5001ms     direct                          Connection timed out
 ```
 
 ### Scaling AutoNAT Connections
@@ -372,12 +527,12 @@ pool = ConnectionPool(
 )
 
 # Acquire and reuse sessions
-session = pool.acquire(ip="10.0.0.1", username="admin", password="pass")
+session = pool.acquire(ip="192.0.2.10", username="admin", password="example-password")
 info = session.device_info()
 pool.release(session)  # return to pool for reuse
 
 # Session is reused on next acquire for same target
-session2 = pool.acquire(ip="10.0.0.1", username="admin", password="pass")
+session2 = pool.acquire(ip="192.0.2.10", username="admin", password="example-password")
 assert session2 is session  # same handle
 
 pool.close()
@@ -390,12 +545,12 @@ from pytvt.connection_pool import connect_many
 from pytvt.models import DeviceEntry
 
 devices = [
-    DeviceEntry(ip="10.0.0.1"),
-    DeviceEntry(identifier="ABC123"),
-    DeviceEntry(ip="10.0.0.3", identifier="DEF456", connection_preference="nat"),
+    DeviceEntry(ip="192.0.2.10"),
+    DeviceEntry(identifier="DEMO-DEVICE-001"),
+    DeviceEntry(ip="192.0.2.30", identifier="DEMO-DEVICE-002", connection_preference="nat"),
 ]
 
-results = connect_many(devices, "admin", "password", sdk_path="/opt/tvt-sdk", max_workers=20)
+results = connect_many(devices, "admin", "example-password", sdk_path="/opt/tvt-sdk", max_workers=20)
 for r in results:
     print(f"{r.target}: {'OK' if r.success else 'FAIL'} via {r.connection_method} ({r.latency_ms}ms)")
 ```
@@ -475,14 +630,14 @@ pytvt-discover --json
 pytvt-discover --scanner-json discovered.json --site "Office"
 
 # Remote subnet sweep
-pytvt-discover --subnet 10.200.50.0/24
+pytvt-discover --subnet 198.51.100.0/24
 
 # Multiple subnets
-pytvt-discover --subnet 10.200.50.0/24 --subnet 10.200.51.0/24
+pytvt-discover --subnet 198.51.100.0/24 --subnet 198.51.101.0/24
 
 # Discover + scan in one command
 pytvt --discover --xlsx files/
-pytvt --subnet 10.200.50.0/24 -o results.json
+pytvt --subnet 198.51.100.0/24 -o results.json
 ```
 
 ### Scan Diffing
@@ -522,7 +677,7 @@ Devices are matched by `nvr_ip`. Cameras within a device are matched by `channel
 
   ~~ CHANGED DEVICES (1)
   ----------------------------------------------------------------------------
-  ~ 10.10.10.100 / NVR-01 @ Site A
+  ~ 192.0.2.100 / NVR-01 @ Site A
       firmware: '5.1.0' → '5.2.3'
       cameras: 29 → 30
       + ch 29: New Entrance Cam
@@ -571,17 +726,17 @@ for device in diff.devices_changed:
 ```
 ================================================================================
   Site: Demo Site
-  NVR:  NVR-01 (10.10.10.100)
+  NVR:  NVR-01 (192.0.2.100)
 ================================================================================
   Device: NVR32 | Model: TD-3332B4
   Firmware: 5.2.3.19033B241010
-  S/N: ABC123456789
+  S/N: DEMO-DEVICE-100
   Total Channels: 29
   ----------------------------------------------------------------------------
   Ch   Camera Name                  Address            Port   Status   Model
   --   ---------------------------  -----------------  ----   ------   -----
-  1    Lobby                        192.168.1.100      9008   Online   IP-5IRD4S4C4-28
-  2    Parking                      192.168.1.101      9008   Online   IP-5IRD4S4C4-28
+  1    Lobby                        198.51.100.100    9008   Online   IP-5IRD4S4C4-28
+  2    Parking                      198.51.100.101    9008   Online   IP-5IRD4S4C4-28
 
 ================================================================================
   SUMMARY: 2/2 NVRs scanned successfully, 58 total cameras found
@@ -598,7 +753,7 @@ JSON array of device objects. At minimum each needs `ip`:
 [
   {
     "site": "Site A Downtown",
-    "ip": "10.10.10.100",
+    "ip": "192.0.2.100",
     "mac": "58:5B:69:AA:BB:01",
     "hostname": "NVR1",
     "manufacturer": "TVT"

@@ -4,15 +4,19 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import json
+
 import pytest
 
 from pytvt.cli import (
     _build_connect_parser,
     _build_parser,
+    _build_doctor_parser,
     _build_scan_nvr_parser,
     _connect_main,
     _dedupe_by_mac,
     _dedupe_devices,
+    doctor_cli,
     main,
     scan_nvr_cli,
 )
@@ -97,6 +101,18 @@ class TestBuildScanNvrParser:
         args = _build_scan_nvr_parser().parse_args(["10.0.0.1", "--sdk-path", "/opt/tvt-sdk"])
         assert args.sdk_path == "/opt/tvt-sdk"
 
+    def test_scan_nvr_parser_timeout_and_json(self):
+        args = _build_scan_nvr_parser().parse_args(["10.0.0.1", "--timeout", "15", "--json"])
+        assert args.timeout == 15
+        assert args.json is True
+
+
+class TestBuildDoctorParser:
+    def test_doctor_parser(self):
+        args = _build_doctor_parser().parse_args(["--sdk-path", "/opt/tvt-sdk", "--json"])
+        assert args.sdk_path == "/opt/tvt-sdk"
+        assert args.json is True
+
 
 class TestConnectCommand:
     def test_main_dispatches_scan_nvr(self):
@@ -112,6 +128,13 @@ class TestConnectCommand:
             main()
 
         mock_connect.assert_called_once_with(argv[2:])
+
+    def test_main_dispatches_doctor(self):
+        argv = ["pytvt", "doctor"]
+        with patch("sys.argv", argv), patch("pytvt.cli.doctor_cli") as mock_doctor:
+            main()
+
+        mock_doctor.assert_called_once_with(argv[2:])
 
     def test_connect_main_success(self, capsys):
         with patch("pytvt.device_manager.DeviceManager") as mock_manager:
@@ -138,7 +161,7 @@ class TestConnectCommand:
             "pytvt.sdk_local.scan_nvr_payload",
             return_value={"success": True, "cameras": [], "nvr_ip": "10.0.0.1", "nvr_port": 6036},
         ):
-            scan_nvr_cli(["10.0.0.1", "--no-sentinels"])
+            scan_nvr_cli(["10.0.0.1", "--json"])
 
         out = capsys.readouterr().out
         assert "___JSON_START___" not in out
@@ -168,7 +191,7 @@ class TestConnectCommand:
             "pytvt.sdk_local.scan_nvr_payload",
             return_value={"success": True, "cameras": [], "nvr_ip": "10.0.0.1", "nvr_port": 6036},
         ) as mock_payload:
-            scan_nvr_cli(["10.0.0.1", "6036", "admin", "secret", "--sdk-path", "/opt/tvt-sdk"])
+            scan_nvr_cli(["10.0.0.1", "6036", "admin", "secret", "--sdk-path", "/opt/tvt-sdk", "--timeout", "15"])
 
         mock_payload.assert_called_once_with(
             "10.0.0.1",
@@ -177,7 +200,91 @@ class TestConnectCommand:
             password="secret",
             sdk_path="/opt/tvt-sdk",
             max_channels=64,
+            timeout=15.0,
         )
+
+    def test_scan_nvr_cli_invalid_credentials_json_output(self, capsys):
+        with patch(
+            "pytvt.sdk_local.scan_nvr_payload",
+            return_value={
+                "success": False,
+                "error": "Login failed",
+                "cameras": [],
+                "nvr_ip": "10.0.0.1",
+                "nvr_port": 6036,
+            },
+        ):
+            with pytest.raises(SystemExit, match="1"):
+                scan_nvr_cli(["10.0.0.1", "6036", "admin", "supersecret", "--json"])
+
+        out = capsys.readouterr().out
+        payload = json.loads(out)
+        assert payload["error"] == "Login failed"
+        assert "supersecret" not in out
+
+    def test_scan_nvr_cli_unreachable_host_json_output(self, capsys):
+        with patch(
+            "pytvt.sdk_local.scan_nvr_payload",
+            return_value={
+                "success": False,
+                "error": "Connection refused",
+                "cameras": [],
+                "nvr_ip": "10.0.0.9",
+                "nvr_port": 6036,
+            },
+        ):
+            with pytest.raises(SystemExit, match="1"):
+                scan_nvr_cli(["10.0.0.9", "--json"])
+
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["error"] == "Connection refused"
+
+    def test_scan_nvr_cli_sdk_not_loaded_json_output(self, capsys):
+        with patch(
+            "pytvt.sdk_local.scan_nvr_payload",
+            return_value={
+                "success": False,
+                "error": "TVT SDK is not available",
+                "cameras": [],
+                "nvr_ip": "10.0.0.1",
+                "nvr_port": 6036,
+            },
+        ):
+            with pytest.raises(SystemExit, match="1"):
+                scan_nvr_cli(["10.0.0.1", "--json"])
+
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["error"] == "TVT SDK is not available"
+
+    def test_doctor_cli_json_failure_exits_nonzero(self, capsys):
+        class Report:
+            sdk_available = False
+
+            @staticmethod
+            def to_dict():
+                return {"sdk_available": False}
+
+        with patch("pytvt.diagnostics.diagnostics", return_value=Report()):
+            with pytest.raises(SystemExit, match="1"):
+                doctor_cli(["--json"])
+
+        assert json.loads(capsys.readouterr().out) == {"sdk_available": False}
+
+    def test_doctor_cli_human_output_success(self, capsys):
+        class Report:
+            sdk_available = True
+
+            @staticmethod
+            def to_dict():
+                return {"sdk_available": True}
+
+            def __str__(self):
+                return "doctor ok"
+
+        with patch("pytvt.diagnostics.diagnostics", return_value=Report()):
+            doctor_cli([])
+
+        assert capsys.readouterr().out.strip() == "doctor ok"
 
 
 # ── _dedupe_by_mac ───────────────────────────────────────────────────

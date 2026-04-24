@@ -25,6 +25,14 @@ build/
 # Local vendor SDK checkouts/extractions
 tvt-api/tvt/
 
+# Python-only policy guardrails
+node_modules/
+*.js
+*.mjs
+*.cjs
+package.json
+package-lock.json
+
 # Environment / secrets
 .env
 
