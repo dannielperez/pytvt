@@ -88,6 +88,23 @@ provisional management-server package.
 Management-server support is strictly additive. It does not replace or regress
 legacy device/NVR behavior.
 
+### Platform SDK backend (v0.7.0+)
+
+`ManagementClient(backend_mode="platform_sdk")` wraps TVT's
+`libPlatClientSDK.so` / `PlatClientSDK.dll` through `ctypes` and exposes a
+read-only view of a TVT management server: resources, areas, device and
+channel inventories, server roster, alarm zones, and connection events.
+Normalized outputs are typed dataclasses with sensitive fields redacted;
+write operations default to `dry_run=True` and refuse real mutations.
+
+A complementary set of pure-Python, read-only analysis modules —
+`platform_topology`, `platform_health`, `platform_alarms`,
+`platform_classification`, `platform_capabilities`, and
+`platform_inventory` — compose on top of it to produce JSON-safe
+operational snapshots. Credentials for the `tools/validate_platform_inventory.py`
+live-test CLI are read from environment variables / `.env`, never from
+command-line flags. See [`docs/platform_sdk.md`](docs/platform_sdk.md).
+
 `pytvt` does not vendor SDK binaries. SDKs are loaded via explicit path
 (`sdk_path=`) or manifest-aware tooling in `tools/`.
 
