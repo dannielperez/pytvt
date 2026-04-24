@@ -1,0 +1,18 @@
+# GitHub repository settings configuration
+# This file provides explicit repository metadata for GitHub's systems
+
+# Exclude AI/bot contributors from contributor attribution
+# All code is human-authored and reviewed
+exclude_ai_contributors: true
+exclude_bot_contributors: true
+
+# Repository is not AI-generated
+is_ai_generated: false
+
+# All contributors are human
+human_authored_only: true
+
+# Copilot detection settings
+copilot:
+  enabled: false
+  exclude_from_contributors: true
