@@ -20,6 +20,8 @@ from __future__ import annotations
 import ctypes as ct
 import os
 import platform
+import subprocess
+import struct
 from ctypes.util import find_library
 from pathlib import Path
 
@@ -74,6 +76,16 @@ def _is_darwin() -> bool:
 
 def _autodetect_macos_sdk_path() -> str | None:
     """Best-effort lookup for ~/git/tvt-sdk/sdk/macos/*/binaries/libNetClientSDK.dylib."""
+    env_sdk = os.environ.get(SDK_PATH_ENV_VAR) or os.environ.get(LEGACY_SDK_PATH_ENV_VAR)
+    if env_sdk:
+        env_path = Path(env_sdk).expanduser()
+        if env_path.is_file() and env_path.name == MAC_LIB_NAME:
+            return str(env_path.parent)
+        if env_path.is_dir() and (env_path / MAC_LIB_NAME).exists():
+            return str(env_path)
+        if env_path.is_dir() and (env_path / "binaries" / MAC_LIB_NAME).exists():
+            return str(env_path / "binaries")
+
     home = Path.home()
     sdk_root = home / "git" / "tvt-sdk" / "sdk" / "macos"
     
@@ -92,6 +104,11 @@ def _autodetect_macos_sdk_path() -> str | None:
                 return str(candidate)
     except (OSError, StopIteration):
         pass
+
+    # Optional fallback: local app bundle that may carry companion frameworks.
+    iptool_frameworks = Path("/Applications/IPTool.app/Contents/Frameworks")
+    if (iptool_frameworks / MAC_LIB_NAME).exists():
+        return str(iptool_frameworks)
     
     return None
 
@@ -255,6 +272,10 @@ def _preload_macos_companions(lib_dir: str | None) -> None:
     env_frameworks = os.environ.get("TVT_MAC_FRAMEWORKS_PATH")
     if env_frameworks:
         search_dirs.append(env_frameworks)
+
+    iptool_frameworks = "/Applications/IPTool.app/Contents/Frameworks"
+    if Path(iptool_frameworks).exists():
+        search_dirs.append(iptool_frameworks)
     
     for lib_name in _MAC_COMPANION_LIBS:
         for search_dir in search_dirs:
@@ -265,6 +286,81 @@ def _preload_macos_companions(lib_dir: str | None) -> None:
                     break  # Successfully loaded, move to next lib
                 except OSError:
                     pass  # Try next search_dir
+
+
+def _darwin_binary_arches(path: Path) -> set[str]:
+    """Return architecture names reported by `lipo -archs` for *path*."""
+    try:
+        proc = subprocess.run(
+            ["lipo", "-archs", str(path)],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (FileNotFoundError, subprocess.SubprocessError):
+        return set()
+
+    if proc.returncode != 0:
+        return set()
+    return {token.strip() for token in proc.stdout.split() if token.strip()}
+
+
+def sdk_binary_arches(path: str | os.PathLike[str]) -> set[str]:
+    """Return detectable architecture names for a vendor SDK binary."""
+    p = Path(path).expanduser()
+    if not p.exists():
+        return set()
+    if p.suffix == ".dylib":
+        return _darwin_binary_arches(p)
+    try:
+        proc = subprocess.run(
+            ["file", str(p)],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (FileNotFoundError, subprocess.SubprocessError):
+        return set()
+    output = proc.stdout.lower()
+    if "x86-64" in output or "x86_64" in output:
+        return {"x86_64"}
+    if "aarch64" in output or "arm64" in output:
+        return {"aarch64"}
+    return set()
+
+
+def python_architecture() -> str:
+    """Return the Python process architecture width and machine."""
+    return f"{platform.machine()}-{struct.calcsize('P') * 8}"
+
+
+def resolve_sdk_library_path(sdk_path: str | os.PathLike[str] | None = None) -> str:
+    """Resolve the SDK library path without loading it."""
+    return _find_lib(sdk_path)
+
+
+def _validate_macos_library_arch(lib_path: str) -> None:
+    """Prevent process-kill crashes from loading x86_64-only SDK into arm64 Python."""
+    runtime_arch = platform.machine()
+    if runtime_arch != "arm64":
+        return
+
+    path = Path(lib_path).expanduser()
+    if not path.exists() or path.suffix != ".dylib":
+        return
+
+    archs = _darwin_binary_arches(path)
+    if not archs:
+        return
+
+    if "arm64" not in archs and "x86_64" in archs:
+        raise NetSdkUnavailable(
+            "Detected x86_64-only macOS TVT SDK on Apple Silicon. "
+            "Run under Rosetta (for example: `arch -x86_64 /usr/bin/python3 ...`) "
+            "or provide a universal/arm64 SDK build."
+        )
 
 
 def load_sdk(
@@ -336,6 +432,7 @@ def _load_sdk_macos(sdk_path: str | os.PathLike[str] | None = None) -> ct.CDLL:
         )
 
     lib_path = _find_lib(sdk_path)
+    _validate_macos_library_arch(lib_path)
 
     lib_dir = _lib_dir(lib_path)
     _preload_companion_libraries(lib_dir)
@@ -431,6 +528,11 @@ def _is_netsdk_available_macos(sdk_path: str | os.PathLike[str] | None = None) -
     """Check if the native SDK is available on macOS."""
     try:
         lib_path = _find_lib(sdk_path)
+    except NetSdkUnavailable:
+        return False
+
+    try:
+        _validate_macos_library_arch(lib_path)
     except NetSdkUnavailable:
         return False
 
