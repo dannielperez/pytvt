@@ -65,6 +65,10 @@ def main() -> None:
         doctor_cli(sys.argv[2:])
         return
 
+    if len(sys.argv) > 1 and sys.argv[1] == "sdk":
+        sdk_cli(sys.argv[2:])
+        return
+
     if len(sys.argv) > 1 and sys.argv[1] == "connect" and (len(sys.argv) == 2 or sys.argv[2].startswith("-")):
         _connect_main(sys.argv[2:])
         return
@@ -73,6 +77,12 @@ def main() -> None:
         len(sys.argv) == 2 or sys.argv[2].startswith("-")
     ):
         _connect_many_main(sys.argv[2:])
+        return
+
+    if len(sys.argv) > 1 and sys.argv[1] == "workflow":
+        from .workflow_cli import workflow_cli
+
+        workflow_cli(sys.argv[2:])
         return
 
     args = _build_parser().parse_args()
@@ -241,7 +251,7 @@ def _build_doctor_parser() -> argparse.ArgumentParser:
 
 def doctor_cli(argv: list[str] | None = None) -> None:
     """Handle ``pytvt doctor`` diagnostics."""
-    from . import diagnostics
+    from .diagnostics import diagnostics
 
     parser = _build_doctor_parser()
     args = parser.parse_args(argv)
@@ -253,6 +263,136 @@ def doctor_cli(argv: list[str] | None = None) -> None:
         print(report)
 
     if not report.sdk_available:
+        sys.exit(1)
+
+
+def _build_sdk_parser() -> argparse.ArgumentParser:
+    """Construct the ``pytvt sdk`` argument parser."""
+    parser = argparse.ArgumentParser(prog="pytvt sdk", description="Native SDK validation and maintenance commands")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    scan = sub.add_parser("scan-match", help="Scan for one LAN device by MAC and optional IP without changing it")
+    scan.add_argument("--mac", required=True, help="Target MAC address")
+    scan.add_argument("--ip", help="Optional expected IP address")
+    scan.add_argument("--sdk-path", help="Path to vendor SDK library or root")
+    scan.add_argument("--timeout-ms", type=int, default=3000, help="Discovery timeout in milliseconds")
+    scan.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+
+    modify = sub.add_parser("modify-ip", help="Modify a LAN device IP by MAC through the native SDK")
+    modify.add_argument("--mac", required=True, help="Target MAC address")
+    modify.add_argument("--old-ip", help="Current IP address, used for dry-run scan matching")
+    modify.add_argument("--new-ip", required=True, help="New IP address")
+    modify.add_argument("--mask", required=True, help="Subnet mask")
+    modify.add_argument("--gateway", required=True, help="Default gateway")
+    modify.add_argument("--username", help="Device username, if required by the SDK/device")
+    modify.add_argument("--password", help="Device password, if required by the SDK/device")
+    modify.add_argument("--sdk-path", help="Path to vendor SDK library or root")
+    modify.add_argument("--timeout", type=float, default=5.0, help="SDK operation timeout in seconds")
+    modify.add_argument("--verify-timeout-ms", type=int, default=3000, help="Post-change verification timeout in milliseconds")
+    modify.add_argument("--dry-run", action="store_true", help="Validate SDK, symbols, arguments, and target scan only")
+    modify.add_argument("--yes", action="store_true", help="Required for real IP modification")
+    modify.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+
+    verify = sub.add_parser("verify-ip", help="Verify one LAN device by MAC at the requested new IP")
+    verify.add_argument("--mac", required=True, help="Target MAC address")
+    verify.add_argument("--new-ip", required=True, help="Expected post-change IP address")
+    verify.add_argument("--sdk-path", help="Path to vendor SDK library or root")
+    verify.add_argument("--timeout-ms", type=int, default=3000, help="Discovery timeout in milliseconds")
+    verify.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+    return parser
+
+
+def sdk_cli(argv: list[str] | None = None) -> None:
+    """Handle ``pytvt sdk`` commands."""
+    from .netsdk.ip_modify import (
+        modify_device_ip_by_mac,
+        scan_device_match,
+        validate_modify_ip_dry_run,
+        verify_device_ip_after_modify,
+    )
+
+    parser = _build_sdk_parser()
+    args = parser.parse_args(argv)
+
+    if args.command == "scan-match":
+        payload = scan_device_match(
+            mac=args.mac,
+            ip=args.ip,
+            timeout_ms=args.timeout_ms,
+            sdk_path=args.sdk_path,
+        )
+    elif args.command == "verify-ip":
+        payload = verify_device_ip_after_modify(
+            mac=args.mac,
+            new_ip=args.new_ip,
+            timeout_ms=args.timeout_ms,
+            sdk_path=args.sdk_path,
+        )
+    elif args.command == "modify-ip":
+        if args.dry_run:
+            payload = validate_modify_ip_dry_run(
+                mac=args.mac,
+                old_ip=args.old_ip,
+                new_ip=args.new_ip,
+                subnet_mask=args.mask,
+                gateway=args.gateway,
+                sdk_path=args.sdk_path,
+            )
+        else:
+            if not args.yes:
+                parser.error("real SDK IP modification requires --yes")
+            result = modify_device_ip_by_mac(
+                args.mac,
+                args.old_ip,
+                args.new_ip,
+                args.mask,
+                args.gateway,
+                username=args.username,
+                password=args.password,
+                timeout=args.timeout,
+                sdk_path=args.sdk_path,
+            )
+            verification = None
+            verified = False
+            blocked = not result.success
+            if result.success:
+                verification = verify_device_ip_after_modify(
+                    mac=result.mac,
+                    new_ip=result.new_ip,
+                    timeout_ms=max(500, int(args.verify_timeout_ms)),
+                    sdk_path=args.sdk_path,
+                )
+                verified = bool(verification.get("verified"))
+                blocked = not verified
+            payload = {
+                "success": bool(result.success and verified),
+                "status": "verified" if result.success and verified else "blocked",
+                "blocked": blocked,
+                "verified": verified,
+                "mac": result.mac,
+                "old_ip": result.old_ip,
+                "new_ip": result.new_ip,
+                "error_code": result.error_code,
+                "error_message": result.error_message,
+                "sdk_function_used": result.sdk_function_used,
+                "elapsed_ms": result.elapsed_ms,
+                "verification_timeout_ms": int(args.verify_timeout_ms),
+                "diagnostics": (verification or {}).get("diagnostics"),
+                "verification": verification,
+            }
+    else:
+        parser.error(f"unsupported sdk command: {args.command}")
+
+    if args.json:
+        print(json.dumps(payload, indent=2))
+    else:
+        print(json.dumps(payload, indent=2))
+
+    if payload.get("dry_run"):
+        if payload.get("blocked"):
+            sys.exit(1)
+        return
+    if not payload.get("success", payload.get("matched", False)) and not payload.get("verified", False):
         sys.exit(1)
 
 
