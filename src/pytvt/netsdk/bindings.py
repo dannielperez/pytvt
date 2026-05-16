@@ -20,12 +20,26 @@ from . import types as t
 
 # Shared library handle — set by bind()
 _lib: ct.CDLL | None = None
+# macOS exports C++ symbols with one leading underscore in dlsym/ctypes lookups.
+# `nm` output includes an additional underscore prefix and should not be copied verbatim.
+NET_CLIENT_REQUEST_MODIFY_DEVICE_IP = "_Z32NET_CLIENT_RequestModifyDeviceIpjPKcjRP11CBufferData"
+NET_CLIENT_REQUEST_MODIFY_DEVICE_IP_OBSERVER = "_Z32NET_CLIENT_RequestModifyDeviceIpjPKcjPvP13CWaitObserver"
 
 
 def bind(lib: ct.CDLL) -> None:
     """Bind all function prototypes to the loaded library."""
     global _lib
     _lib = lib
+
+    # The pure NetSdkClient runtime expects NET_SDK_* signatures.
+    # macOS MonitorClient exports NET_CLIENT_* with incompatible signatures,
+    # so fail explicitly instead of binding wrong prototypes.
+    if not hasattr(lib, "NET_SDK_Init") and hasattr(lib, "NET_CLIENT_Initial"):
+        raise RuntimeError(
+            "Loaded macOS NET_CLIENT_* SDK namespace. "
+            "NetSdkClient currently supports NET_SDK_* runtime calls only. "
+            "Use NVR HTTP API flow for IP updates, or a dedicated NET_CLIENT adapter."
+        )
 
     # ── Init / cleanup ──────────────────────────────────────────
     lib.NET_SDK_Init.restype = ct.c_bool
@@ -323,43 +337,48 @@ def bind(lib: ct.CDLL) -> None:
     lib.NET_SDK_UnlockAccessControl.restype = ct.c_bool
     lib.NET_SDK_UnlockAccessControl.argtypes = [ct.c_long, ct.c_long]
     
-    # Apply macOS compatibility layer if needed (NET_CLIENT_* API)
-    _create_net_client_compatibility_layer(lib)
+    # NET_CLIENT_* compatibility is intentionally not auto-aliased here because
+    # call signatures differ from NET_SDK_* and can crash the process.
 
 
 def _create_net_client_compatibility_layer(lib: ct.CDLL) -> None:
-    """Create NET_SDK_* aliases for NET_CLIENT_* functions on macOS.
-    
-    This allows code that calls NET_SDK_* to work transparently with
-    libNetClientSDK.dylib (macOS) in addition to libdvrnetsdk.so (Linux).
-    
-    The NET_CLIENT_* API has C++ name mangling, so we use getattr to
-    retrieve the mangled names and alias them to NET_SDK_* conventions.
+    """Deprecated placeholder for NET_CLIENT support.
+
+    NET_CLIENT_* to NET_SDK_* aliasing is unsafe because signatures differ.
+    Keep this symbol to avoid import breakage in downstream callers.
     """
-    # Map of NET_SDK_* function names to potential NET_CLIENT_* variants
-    # Format: "NET_SDK_FunctionName" -> ["NET_CLIENT_FunctionName", ...]
-    mapping = {
-        "NET_SDK_Init": ["NET_CLIENT_Initial"],
-        "NET_SDK_Cleanup": ["NET_CLIENT_Finalize"],
-        "NET_SDK_Login": ["NET_CLIENT_LoginServerUnit"],
-        "NET_SDK_Logout": ["NET_CLIENT_LogoutServerUnit"],
-        "NET_SDK_GetDeviceInfo": ["NET_CLIENT_GetDeviceInfo"],
-        "NET_SDK_GetDeviceIPCInfo": ["NET_CLIENT_RequestAllChannelsInfo"],
-        "NET_SDK_GetLastError": ["NET_CLIENT_GetLastError"],
-        "NET_SDK_SetConnectTime": ["NET_CLIENT_SetConnectTime"],
-    }
-    
-    for sdk_name, client_names in mapping.items():
-        # Skip if already has NET_SDK_ version (Linux path)
-        if hasattr(lib, sdk_name):
-            continue
-        
-        # Try each potential NET_CLIENT_* name
-        for client_name in client_names:
-            if hasattr(lib, client_name):
-                # Found it—create an alias
-                try:
-                    setattr(lib, sdk_name, getattr(lib, client_name))
-                    break
-                except (AttributeError, TypeError):
-                    pass
+    return None
+
+
+def bind_device_ip_modify(lib: ct.CDLL) -> str:
+    """Bind only the validated native IP modification symbol and return its name."""
+    if hasattr(lib, "NET_SDK_SetDeviceIP"):
+        lib.NET_SDK_SetDeviceIP.restype = ct.c_bool
+        lib.NET_SDK_SetDeviceIP.argtypes = [
+            ct.c_char_p,
+            ct.c_char_p,
+            ct.c_char_p,
+            ct.c_char_p,
+            ct.c_char_p,
+            ct.c_char_p,
+            ct.c_char_p,
+        ]
+        return "NET_SDK_SetDeviceIP"
+    if hasattr(lib, "NET_SDK_ModifyDeviceNetInfo"):
+        lib.NET_SDK_ModifyDeviceNetInfo.restype = ct.c_bool
+        lib.NET_SDK_ModifyDeviceNetInfo.argtypes = [ct.POINTER(t.NET_SDK_DEVICE_IP_INFO)]
+        return "NET_SDK_ModifyDeviceNetInfo"
+    if hasattr(lib, NET_CLIENT_REQUEST_MODIFY_DEVICE_IP):
+        func = getattr(lib, NET_CLIENT_REQUEST_MODIFY_DEVICE_IP)
+        func.restype = ct.c_bool
+        func.argtypes = [ct.c_uint, ct.c_char_p, ct.c_uint, ct.POINTER(ct.c_void_p)]
+        return "NET_CLIENT_RequestModifyDeviceIp"
+    if hasattr(lib, NET_CLIENT_REQUEST_MODIFY_DEVICE_IP_OBSERVER):
+        func = getattr(lib, NET_CLIENT_REQUEST_MODIFY_DEVICE_IP_OBSERVER)
+        func.restype = ct.c_bool
+        func.argtypes = [ct.c_uint, ct.c_char_p, ct.c_uint, ct.c_void_p, ct.c_void_p]
+        return "NET_CLIENT_RequestModifyDeviceIp"
+    raise RuntimeError(
+        "Loaded TVT SDK does not export NET_SDK_SetDeviceIP, "
+        "NET_SDK_ModifyDeviceNetInfo, or NET_CLIENT_RequestModifyDeviceIp."
+    )

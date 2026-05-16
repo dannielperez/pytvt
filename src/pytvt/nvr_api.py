@@ -112,8 +112,10 @@ import base64
 import hashlib
 import http.client
 import re
+import subprocess
 import sys
 from dataclasses import dataclass, field
+from xml.sax.saxutils import escape
 
 from ._crypto import aes_ecb_zeropad
 from .models import (
@@ -159,6 +161,7 @@ class NvrClient:
         self._session_key: str | None = None
         self._security_ver: str | None = None
         self._legacy_auth: str | None = None  # Basic auth header for legacy firmware
+        self._login_nonce: str | None = None
 
     def __enter__(self):
         return self
@@ -280,6 +283,7 @@ class NvrClient:
         # Some firmware versions don't return a token in reqLogin;
         # doLogin will return it instead. Use "null" as placeholder.
         self._token = token  # may be None
+        self._login_nonce = nonce
 
         # Step 2: Hash password = SHA512(MD5(password).upper() + "#" + nonce)
         md5_hex = hashlib.md5(self.password.encode()).hexdigest().upper()
@@ -796,6 +800,73 @@ class NvrClient:
         md5_hex = hashlib.md5(password.encode()).hexdigest().upper()
         return base64.b64encode(md5_hex.encode()).decode()
 
+    def _ui_auth_hash(self) -> str:
+        """Hash used by web UI auth dialogs for privileged actions.
+
+        TVT firmware expects SHA512(MD5(password).upper() + "#" + nonce)
+        for privileged <auth> actions (validated against live UserMgr flow).
+        """
+        nonce = self._login_nonce or ""
+        md5_hex = hashlib.md5(self.password.encode()).hexdigest().upper()
+        return hashlib.sha512((md5_hex + "#" + nonce).encode()).hexdigest()
+
+    def _set_user_email_web_ui(self, user: User, target_email: str) -> dict:
+        """Try editUser with web-UI payload shape (includes <auth> block).
+
+        Some firmware rejects direct editUser/editUserList payloads unless the
+        request matches the browser's UserMgr flow.
+        """
+        auth_group_id = (user.auth_group or "Administrator").strip() or "Administrator"
+        auth_hash = self._ui_auth_hash()
+
+        payload_variants = [
+            (
+                "webui_full",
+                (
+                    "<content>"
+                    f"<userId>{escape(user.user_id)}</userId>"
+                    f"<userName><![CDATA[{user.username}]]></userName>"
+                    f"<authGroup id =\"{escape(auth_group_id)}\" ></authGroup>"
+                    f"<bindMacSwitch>{'true' if user.bind_mac else 'false'}</bindMacSwitch>"
+                    "<modifyPassword>false</modifyPassword>"
+                    f"<mac><![CDATA[{escape(user.mac or '00:00:00:00:00:00')}]]></mac>"
+                    f"<email><![CDATA[{target_email}]]></email>"
+                    f"<enabled>{'true' if user.enabled else 'false'}</enabled>"
+                    "</content>"
+                    "<auth>"
+                    f"<userName>{escape(self.username)}</userName>"
+                    f"<password>{auth_hash}</password>"
+                    "</auth>"
+                ),
+            ),
+            (
+                "webui_minimal",
+                (
+                    "<content>"
+                    f"<userId>{escape(user.user_id)}</userId>"
+                    f"<userName><![CDATA[{user.username}]]></userName>"
+                    f"<email><![CDATA[{target_email}]]></email>"
+                    "<modifyPassword>false</modifyPassword>"
+                    "</content>"
+                    "<auth>"
+                    f"<userName>{escape(self.username)}</userName>"
+                    f"<password>{auth_hash}</password>"
+                    "</auth>"
+                ),
+            ),
+        ]
+
+        attempts: list[str] = []
+        for variant, content in payload_variants:
+            data = self._post("editUser", self._build_request_with_content(content))
+            status = self._parse_xml_field(data, "status")
+            if status == "success":
+                return {"ok": True, "command": "editUser", "variant": variant}
+            error_code = self._parse_xml_field(data, "errorCode") or "unknown"
+            attempts.append(f"{variant}:status={status or 'missing'}:error={error_code}")
+
+        raise NvrApiError("webui editUser failed; " + " | ".join(attempts))
+
     def change_own_password(self, old_password: str, new_password: str) -> None:
         """Change the current user's password (editUserPassword).
 
@@ -816,6 +887,199 @@ class NvrClient:
         self._logged_in = False
         self._cookie = None
         self._token = None
+
+    def set_user_email(self, *, username: str = "admin", email: str, verify: bool = True) -> dict:
+        """Set/reset-email value for a user account via the NVR web CGI.
+
+        The API shape varies across firmware, so this method tries supported
+        command names in order and verifies by re-querying users.
+
+        Args:
+            username: Account to update (default ``admin``).
+            email: Email address to set on the account.
+            verify: Re-read user list and confirm persisted email.
+
+        Returns:
+            Dict with update metadata (command used, previous/new email).
+        """
+        self._require_login()
+        target = username.strip()
+        if not target:
+            raise NvrApiError("username cannot be empty")
+        target_email = email.strip()
+        if not target_email:
+            raise NvrApiError("email cannot be empty")
+
+        users = self.query_users()
+        user = next((u for u in users if u.username.lower() == target.lower()), None)
+        if user is None:
+            raise NvrApiError(f"User not found: {target}")
+
+        payload = (
+            '<content type="list">'
+            f'<item id="{escape(user.user_id)}">'
+            f"<userName><![CDATA[{user.username}]]></userName>"
+            f"<userType>{escape(user.user_type or 'normal')}</userType>"
+            f"<enabled>{'true' if user.enabled else 'false'}</enabled>"
+            f"<authGroup>{escape(user.auth_group or 'Administrator')}</authGroup>"
+            f"<email><![CDATA[{target_email}]]></email>"
+            f"<bindMacSwitch>{'true' if user.bind_mac else 'false'}</bindMacSwitch>"
+            f"<mac>{escape(user.mac or '00:00:00:00:00:00')}</mac>"
+            "</item>"
+            "</content>"
+        )
+
+        attempts: list[str] = []
+        for cmd in ("editUser", "editUserList"):
+            data = self._post(cmd, self._build_request_with_content(payload))
+            status = self._parse_xml_field(data, "status")
+            if status != "success":
+                error_code = self._parse_xml_field(data, "errorCode") or "unknown"
+                attempts.append(f"{cmd}:status={status or 'missing'}:error={error_code}")
+                continue
+
+            if verify:
+                refreshed = self.query_users()
+                updated = next((u for u in refreshed if u.username.lower() == target.lower()), None)
+                if updated is None:
+                    attempts.append(f"{cmd}:verify=user_missing")
+                    continue
+                if (updated.email or "").strip() != target_email:
+                    got = (updated.email or "").strip()
+                    attempts.append(f"{cmd}:verify=email_mismatch:{got!r}")
+                    continue
+
+            return {
+                "ok": True,
+                "command": cmd,
+                "user_id": user.user_id,
+                "username": user.username,
+                "old_email": user.email,
+                "new_email": target_email,
+            }
+
+        # Fallback: replay the browser's edit-user payload shape.
+        try:
+            webui = self._set_user_email_web_ui(user, target_email)
+            if verify:
+                try:
+                    refreshed = self.query_users()
+                except NvrApiError as exc:
+                    # Some firmware invalidates/changes auth context after
+                    # editUser on the current account; re-login then re-query.
+                    if exc.error_code in {"536871011", "536870948"}:
+                        self.login()
+                        refreshed = self.query_users()
+                    else:
+                        raise
+                updated = next((u for u in refreshed if u.username.lower() == target.lower()), None)
+                if updated is None:
+                    attempts.append("webui:verify=user_missing")
+                elif (updated.email or "").strip() != target_email:
+                    got = (updated.email or "").strip()
+                    attempts.append(f"webui:verify=email_mismatch:{got!r}")
+                else:
+                    return {
+                        "ok": True,
+                        "command": webui.get("command", "editUser"),
+                        "variant": webui.get("variant", "webui"),
+                        "user_id": user.user_id,
+                        "username": user.username,
+                        "old_email": user.email,
+                        "new_email": target_email,
+                    }
+            else:
+                return {
+                    "ok": True,
+                    "command": webui.get("command", "editUser"),
+                    "variant": webui.get("variant", "webui"),
+                    "user_id": user.user_id,
+                    "username": user.username,
+                    "old_email": user.email,
+                    "new_email": target_email,
+                }
+        except NvrApiError as exc:
+            attempts.append(str(exc))
+
+        raise NvrApiError("set_user_email failed; " + " | ".join(attempts))
+
+    def set_admin_email(self, *, email: str, verify: bool = True) -> dict:
+        """Set/reset-email value on the ``admin`` account.
+
+        This is a convenience wrapper for callers that only target the
+        admin user and prefer an explicit method name.
+        """
+        return self.set_user_email(username="admin", email=email, verify=verify)
+
+    def query_secure_email(self) -> dict:
+        """Query the Password Reset via E-mail configuration (querySecureEmailcfg).
+
+        Returns:
+            Dict with ``enabled`` (bool) and ``email`` (str) keys.
+        """
+        self._require_login()
+        data = self._post("querySecureEmailcfg", self._build_request())
+        self._check_response(data, "querySecureEmailcfg")
+        raw_email = self._parse_xml_field(data, "email") or ""
+        # Strip CDATA wrapper if present (some firmware returns literal CDATA text)
+        if raw_email.startswith("<![CDATA[") and raw_email.endswith("]]>"):
+            raw_email = raw_email[9:-3]
+        return {
+            "enabled": self._parse_xml_field(data, "switch") == "true",
+            "email": raw_email,
+        }
+
+    def set_secure_email(self, *, email: str, enabled: bool = True, verify: bool = True) -> dict:
+        """Set the Password Reset via E-mail address and enable/disable it.
+
+        This is the global NVR-level password-reset email (Function Panel >
+        Edit Security Question > Password Reset via E-mail), distinct from the
+        per-user reset email set by ``set_user_email``.
+
+        Args:
+            email: Email address to set.
+            enabled: Whether to enable the Password Reset feature (default True).
+            verify: Re-query and confirm the value persisted.
+
+        Returns:
+            Dict with update metadata.
+        """
+        self._require_login()
+        target_email = email.strip()
+        if not target_email:
+            raise NvrApiError("email cannot be empty")
+
+        old = self.query_secure_email()
+        auth_hash = self._ui_auth_hash()
+
+        content = (
+            "<content>"
+            f"<switch>{'true' if enabled else 'false'}</switch>"
+            f"<email><![CDATA[{target_email}]]></email>"
+            "</content>"
+            "<auth>"
+            f"<userName>{escape(self.username)}</userName>"
+            f"<password>{auth_hash}</password>"
+            "</auth>"
+        )
+        data = self._post("editSecureEMailCfg", self._build_request_with_content(content))
+        self._check_response(data, "editSecureEMailCfg")
+
+        if verify:
+            updated = self.query_secure_email()
+            if updated["email"].strip() != target_email or updated["enabled"] != enabled:
+                raise NvrApiError(
+                    f"set_secure_email verify failed: got email={updated['email']!r} "
+                    f"enabled={updated['enabled']}"
+                )
+
+        return {
+            "ok": True,
+            "command": "editSecureEMailCfg",
+            "old_email": old["email"],
+            "new_email": target_email,
+            "enabled": enabled,
+        }
 
     def update_device_credentials(
         self, dev_ids: list[str] | None = None, username: str = "admin", password: str | None = None
@@ -997,6 +1261,13 @@ def main():
     sync_parser.add_argument("--device-user", default="admin", help="Username to set for IPC devices")
     sync_parser.add_argument("--device-password", help="Password to set (default: NVR password)")
 
+    set_admin_email_parser = sub.add_parser("set-admin-email", help="Set/reset email for admin account")
+    set_admin_email_parser.add_argument("--email", required=True, help="Email value to store")
+
+    set_email_parser = sub.add_parser("set-user-email", help="Set/reset email for a user account")
+    set_email_parser.add_argument("--target-user", default="admin", help="User account to update")
+    set_email_parser.add_argument("--email", required=True, help="Email value to store")
+
     chall_parser = sub.add_parser(
         "change-admin-and-sync", help="Change admin password and update all stored IPC credentials"
     )
@@ -1107,6 +1378,20 @@ def main():
             pwd = args.device_password or args.password
             count = nvr.update_device_credentials(username=args.device_user, password=pwd)
             print(f"Updated stored credentials for {count} devices.")
+
+        elif args.command == "set-admin-email":
+            result = nvr.set_admin_email(email=args.email)
+            print(
+                f"User {result['username']} (id={result['user_id']}) email: "
+                f"{result['old_email'] or '<empty>'} -> {result['new_email']}"
+            )
+
+        elif args.command == "set-user-email":
+            result = nvr.set_user_email(username=args.target_user, email=args.email)
+            print(
+                f"User {result['username']} (id={result['user_id']}) email: "
+                f"{result['old_email'] or '<empty>'} -> {result['new_email']}"
+            )
 
         elif args.command == "change-admin-and-sync":
             result = nvr.change_admin_password_and_sync(args.password, args.new_password)

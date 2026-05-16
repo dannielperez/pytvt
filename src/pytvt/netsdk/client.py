@@ -233,6 +233,10 @@ class NatUnavailableError(NetSdkError):
     """Raised when AutoNAT support is unavailable in the current SDK setup."""
 
 
+class NetSdkCapabilityError(NetSdkError, NetSdkUnavailable):
+    """Raised when the loaded SDK lacks a required capability."""
+
+
 class NatLoginFailed(NetSdkError):
     """Raised when an AutoNAT login attempt fails."""
 
@@ -993,8 +997,6 @@ class NetSdkClient:
         mac = mac.strip().upper()
         if not mac:
             raise ValueError("mac is required")
-        if not password:
-            raise ValueError("password is required")
 
         set_device_ip = getattr(self._lib, "NET_SDK_SetDeviceIP", None)
         if set_device_ip is not None:
@@ -1013,7 +1015,7 @@ class NetSdkClient:
 
         modify_net_info = getattr(self._lib, "NET_SDK_ModifyDeviceNetInfo", None)
         if modify_net_info is None:
-            raise NetSdkUnavailable(
+            raise NetSdkCapabilityError(
                 "Loaded TVT NetSDK does not export NET_SDK_SetDeviceIP or "
                 "NET_SDK_ModifyDeviceNetInfo.",
             )
