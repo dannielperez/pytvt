@@ -12,12 +12,14 @@ from pytvt.cli import (
     _build_connect_parser,
     _build_parser,
     _build_doctor_parser,
+    _build_sdk_parser,
     _build_scan_nvr_parser,
     _connect_main,
     _dedupe_by_mac,
     _dedupe_devices,
     doctor_cli,
     main,
+    sdk_cli,
     scan_nvr_cli,
 )
 from pytvt.device_manager import Backend
@@ -114,6 +116,26 @@ class TestBuildDoctorParser:
         assert args.json is True
 
 
+class TestBuildSdkParser:
+    def test_sdk_modify_ip_dry_run_args(self):
+        args = _build_sdk_parser().parse_args(
+            [
+                "modify-ip",
+                "--mac",
+                "AA:BB:CC:DD:EE:FF",
+                "--new-ip",
+                "10.1.1.20",
+                "--mask",
+                "255.255.255.0",
+                "--gateway",
+                "10.1.1.1",
+                "--dry-run",
+            ]
+        )
+        assert args.command == "modify-ip"
+        assert args.dry_run is True
+
+
 class TestConnectCommand:
     def test_main_dispatches_scan_nvr(self):
         argv = ["pytvt", "scan-nvr", "10.0.0.1"]
@@ -135,6 +157,169 @@ class TestConnectCommand:
             main()
 
         mock_doctor.assert_called_once_with(argv[2:])
+
+    def test_main_dispatches_sdk(self):
+        argv = ["pytvt", "sdk", "modify-ip", "--mac", "AA:BB:CC:DD:EE:FF", "--new-ip", "10.1.1.20", "--mask", "255.255.255.0", "--gateway", "10.1.1.1", "--dry-run"]
+        with patch("sys.argv", argv), patch("pytvt.cli.sdk_cli") as mock_sdk:
+            main()
+
+        mock_sdk.assert_called_once_with(argv[2:])
+
+    def test_sdk_cli_dry_run_success(self, capsys):
+        with patch(
+            "pytvt.netsdk.ip_modify.validate_modify_ip_dry_run",
+            return_value={"dry_run": True, "valid_arguments": True, "target_match": {"ip": "10.1.1.10"}},
+        ):
+            sdk_cli(
+                [
+                    "modify-ip",
+                    "--mac",
+                    "AA:BB:CC:DD:EE:FF",
+                    "--new-ip",
+                    "10.1.1.20",
+                    "--mask",
+                    "255.255.255.0",
+                    "--gateway",
+                    "10.1.1.1",
+                    "--dry-run",
+                    "--json",
+                ]
+            )
+
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["dry_run"] is True
+
+    def test_sdk_cli_dry_run_never_calls_modify(self, capsys):
+        with patch(
+            "pytvt.netsdk.ip_modify.validate_modify_ip_dry_run",
+            return_value={"dry_run": True, "valid_arguments": True, "target_match": {"ip": "10.1.1.10"}},
+        ):
+            with patch("pytvt.netsdk.ip_modify.modify_device_ip_by_mac") as mock_modify:
+                sdk_cli(
+                    [
+                        "modify-ip",
+                        "--mac",
+                        "AA:BB:CC:DD:EE:FF",
+                        "--new-ip",
+                        "10.1.1.20",
+                        "--mask",
+                        "255.255.255.0",
+                        "--gateway",
+                        "10.1.1.1",
+                        "--dry-run",
+                        "--json",
+                    ]
+                )
+
+        json.loads(capsys.readouterr().out)
+        mock_modify.assert_not_called()
+
+    def test_sdk_cli_blocked_dry_run_exits_nonzero(self, capsys):
+        with patch(
+            "pytvt.netsdk.ip_modify.validate_modify_ip_dry_run",
+            return_value={"dry_run": True, "blocked": True, "valid_arguments": True, "target_match": None},
+        ):
+            with pytest.raises(SystemExit, match="1"):
+                sdk_cli(
+                    [
+                        "modify-ip",
+                        "--mac",
+                        "AA:BB:CC:DD:EE:FF",
+                        "--new-ip",
+                        "10.1.1.20",
+                        "--mask",
+                        "255.255.255.0",
+                        "--gateway",
+                        "10.1.1.1",
+                        "--dry-run",
+                        "--json",
+                    ]
+                )
+
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["blocked"] is True
+
+    def test_sdk_cli_scan_match_success(self, capsys):
+        with patch(
+            "pytvt.netsdk.ip_modify.scan_device_match",
+            return_value={"scan_only": True, "matched": True, "target_match": {"ip": "10.1.1.10"}},
+        ):
+            sdk_cli(["scan-match", "--mac", "AA:BB:CC:DD:EE:FF", "--json"])
+
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["matched"] is True
+
+    def test_sdk_cli_verify_only_failure_exits_nonzero(self, capsys):
+        with patch(
+            "pytvt.netsdk.ip_modify.verify_device_ip_after_modify",
+            return_value={"verified": False, "blocked": True, "status": "blocked", "reason": "not found"},
+        ):
+            with pytest.raises(SystemExit, match="1"):
+                sdk_cli(["verify-ip", "--mac", "AA:BB:CC:DD:EE:FF", "--new-ip", "10.1.1.20", "--json"])
+
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["blocked"] is True
+
+    def test_sdk_cli_modify_requires_yes(self):
+        with pytest.raises(SystemExit, match="2"):
+            sdk_cli(
+                [
+                    "modify-ip",
+                    "--mac",
+                    "AA:BB:CC:DD:EE:FF",
+                    "--new-ip",
+                    "10.1.1.20",
+                    "--mask",
+                    "255.255.255.0",
+                    "--gateway",
+                    "10.1.1.1",
+                ]
+            )
+
+    def test_sdk_cli_modify_success_but_verification_failure_blocks(self, capsys):
+        with patch(
+            "pytvt.netsdk.ip_modify.modify_device_ip_by_mac",
+            return_value=type(
+                "ModifyResult",
+                (),
+                {
+                    "success": True,
+                    "mac": "AA:BB:CC:DD:EE:FF",
+                    "old_ip": "10.1.1.10",
+                    "new_ip": "10.1.1.20",
+                    "error_code": None,
+                    "error_message": None,
+                    "sdk_function_used": "NET_CLIENT_RequestModifyDeviceIp",
+                    "elapsed_ms": 12,
+                },
+            )(),
+        ):
+            with patch(
+                "pytvt.netsdk.ip_modify.verify_device_ip_after_modify",
+                return_value={"verified": False, "blocked": True, "status": "blocked", "reason": "scan did not confirm"},
+            ):
+                with pytest.raises(SystemExit, match="1"):
+                    sdk_cli(
+                        [
+                            "modify-ip",
+                            "--mac",
+                            "AA:BB:CC:DD:EE:FF",
+                            "--old-ip",
+                            "10.1.1.10",
+                            "--new-ip",
+                            "10.1.1.20",
+                            "--mask",
+                            "255.255.255.0",
+                            "--gateway",
+                            "10.1.1.1",
+                            "--yes",
+                            "--json",
+                        ]
+                    )
+
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["status"] == "blocked"
+        assert payload["verified"] is False
 
     def test_connect_main_success(self, capsys):
         with patch("pytvt.device_manager.DeviceManager") as mock_manager:
