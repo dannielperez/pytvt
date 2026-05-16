@@ -49,6 +49,7 @@ pytvt-discover = "pytvt.cli:discover"
 pytvt-api = "pytvt.cli:api"
 pytvt-snapshot = "pytvt.cli:snapshot"
 pytvt-diff = "pytvt.cli:diff_cli"
+pytvt-workflow = "pytvt.workflow_cli:workflow_cli"
 
 [project.urls]
 Homepage = "https://github.com/dannielperez/pytvt"

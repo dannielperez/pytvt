@@ -60,6 +60,7 @@ from .registry import resolve_execution_plan
 from .scanner import filter_tvt_devices, load_devices, scan_single_nvr
 from .sdk_http_client import CommandResult, DeviceInfoResult, DeviceTimeResult, RtspUrlResult, SdkHttpClient
 from .webapi import WebApiClient
+from . import workflows  # Provisional — technician-facing workflow orchestrations.
 
 # Lazy diagnostics accessor — avoids heavy ctypes probes at import time.
 def diagnostics(sdk_path=None):
@@ -136,4 +137,6 @@ __all__ = [
     "ScanDiff",
     "diff_scans",
     "load_scan_file",
+    # Workflows (Provisional)
+    "workflows",
 ]
