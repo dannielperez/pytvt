@@ -12,7 +12,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 EXCLUDED_DIRS = {".git", ".pytest_cache", ".mypy_cache", ".ruff_cache", "build", "dist", "__pycache__"}
 FORBIDDEN_NAMES = {"package.json", "package-lock.json"}
 FORBIDDEN_SUFFIXES = {".js", ".mjs", ".cjs"}
-FORBIDDEN_NATIVE_SUFFIXES = {".so", ".dll", ".dylib"}
+FORBIDDEN_NATIVE_SUFFIXES = {".so", ".dll", ".dylib", ".h", ".hpp", ".lib", ".a"}
+FORBIDDEN_PACKAGE_PARTS = {"bridges", "research", "node_modules"}
 ALLOWLIST: set[Path] = set()
 POLICY_MESSAGE = "pytvt is Python-only; Node/JS is not allowed"
 
@@ -69,6 +70,39 @@ def test_built_wheel_contains_no_javascript_or_native_sdk_artifacts(tmp_path):
         or name.endswith("package-lock.json")
     ]
     native_matches = [name for name in names if Path(name).suffix in FORBIDDEN_NATIVE_SUFFIXES]
+    forbidden_parts = [name for name in names if set(Path(name).parts) & FORBIDDEN_PACKAGE_PARTS]
 
     assert js_matches == [], f"{POLICY_MESSAGE}: wheel contains forbidden entries {js_matches}"
     assert native_matches == [], f"Wheel must not bundle vendor SDK binaries: {native_matches}"
+    assert forbidden_parts == [], f"Wheel must not include bridge/research artifacts: {forbidden_parts}"
+
+
+def test_built_sdist_contains_no_javascript_or_native_sdk_artifacts(tmp_path):
+    import tarfile
+
+    out_dir = tmp_path / "dist"
+    subprocess.run(
+        [sys.executable, "-m", "build", "--sdist", "--outdir", str(out_dir)],
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    sdist_path = next(out_dir.glob("*.tar.gz"))
+
+    with tarfile.open(sdist_path) as archive:
+        names = archive.getnames()
+
+    js_matches = [
+        name
+        for name in names
+        if name.endswith(tuple(FORBIDDEN_SUFFIXES))
+        or name.endswith("package.json")
+        or name.endswith("package-lock.json")
+    ]
+    native_matches = [name for name in names if Path(name).suffix in FORBIDDEN_NATIVE_SUFFIXES]
+    forbidden_parts = [name for name in names if set(Path(name).parts) & FORBIDDEN_PACKAGE_PARTS]
+
+    assert js_matches == [], f"{POLICY_MESSAGE}: sdist contains forbidden entries {js_matches}"
+    assert native_matches == [], f"sdist must not bundle SDK binaries or headers: {native_matches}"
+    assert forbidden_parts == [], f"sdist must not include bridge/research artifacts: {forbidden_parts}"

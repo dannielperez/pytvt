@@ -83,6 +83,34 @@ All SDK features fail gracefully with clear errors when dependencies are absent.
 
 The SDK must always be supplied by the user through `TVT_SDK_PATH` or an explicit `sdk_path=` argument. `pytvt` does not download, embed, or vendor `libdvrnetsdk.so`, `libNatClientSDK.so`, or any other TVT binary.
 
+### Native SDK IP modification
+
+LAN device IP changes use the native SDK first. The operator-safe sequence is:
+
+1. Scan-match the target camera by MAC and current IP.
+2. Run a dry-run to validate SDK loading, symbol selection, and target matching.
+3. Modify a single camera with `--yes`.
+4. Verify the same camera at the new IP before touching NVR channel mappings or site gateway LAN settings.
+
+```bash
+python -m pytvt sdk scan-match --mac AA:BB:CC:DD:EE:FF --ip 10.160.9.50 --sdk-path /opt/tvt-sdk
+python -m pytvt sdk modify-ip --mac AA:BB:CC:DD:EE:FF --old-ip 10.160.9.50 --new-ip 10.160.29.50 --mask 255.255.255.0 --gateway 10.160.29.1 --sdk-path /opt/tvt-sdk --dry-run
+python -m pytvt sdk modify-ip --mac AA:BB:CC:DD:EE:FF --old-ip 10.160.9.50 --new-ip 10.160.29.50 --mask 255.255.255.0 --gateway 10.160.29.1 --username admin --password "$TVT_PASSWORD" --sdk-path /opt/tvt-sdk --verify-timeout-ms 5000 --yes
+python -m pytvt sdk verify-ip --mac AA:BB:CC:DD:EE:FF --new-ip 10.160.29.50 --sdk-path /opt/tvt-sdk --timeout-ms 5000
+```
+
+On Linux this uses `NET_SDK_SetDeviceIP` when available, otherwise the header-documented `NET_SDK_ModifyDeviceNetInfo(NET_SDK_DEVICE_IP_INFO*)`. On macOS the MonitorClient SDK exports the separate `NET_CLIENT_RequestModifyDeviceIp` capability. If the macOS SDK is x86_64-only on Apple Silicon, run an x86_64 Python under Rosetta, for example `arch -x86_64 python -m pytvt ...`, or supply a universal/arm64 SDK build.
+
+Do not update NVR channel mappings or gateway LAN settings until a native SDK IP modification succeeds and the device is verified by a rescan or connection at the new IP. The recorder API `editDevNetworkList` path is only a fallback.
+
+Stop immediately if any of the following occurs:
+
+1. The scan-match command cannot find the target by MAC/current IP.
+2. Dry-run reports blocked status, missing symbols, or an SDK load error.
+3. Real modify returns blocked status.
+4. Verification does not find the target MAC at the requested new IP.
+5. Any migration batch leaves even one camera unverified.
+
 ### AutoNAT / P2P SDK Login
 
 On Linux, the vendor SDK also exposes AutoNAT / P2P login through `NET_SDK_LoginEx(...)` with `NET_SDK_CONNECT_NAT` or `NET_SDK_CONNECT_NAT20`. `pytvt` now wraps that SDK-managed flow directly; it does not implement the NAT traversal protocol itself.
