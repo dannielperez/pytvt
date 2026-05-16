@@ -3,7 +3,7 @@
 Rotates the *native TVT* admin password on every channel of one or more
 NVRs, keeping the NVR's stored credentials in sync with the camera side.
 
-Validated at Caridad Caparra migration (50 cameras across two NVRs). The
+Validated at a production fleet migration (50 cameras across two NVRs). The
 sequence below was derived empirically from observed NVR behaviour:
 
 1. **Online channels are already in sync.** The NVR would not report a

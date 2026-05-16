@@ -48,7 +48,7 @@ _DEFAULT_SETTLE_SECONDS = 8
 
 Cameras take several seconds to apply a new address and reboot; the
 NVR's online-status poller is itself asynchronous. 8 s matches field
-observations at Caridad Caparra.
+observations from production deployments.
 """
 
 
