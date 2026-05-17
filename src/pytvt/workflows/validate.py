@@ -30,7 +30,7 @@ from __future__ import annotations
 import ipaddress
 from dataclasses import asdict, dataclass, field
 
-from pytvt.nvr_api import NvrClient
+from pytvt.xml_api import NvrClient
 
 from .exceptions import WorkflowError
 from .progress import NullProgressSink, ProgressEvent, ProgressSink

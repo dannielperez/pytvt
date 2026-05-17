@@ -1,4 +1,4 @@
-"""Tests for pytvt.webapi.client — WebApiClient with mocked HTTP."""
+"""Tests for pytvt.web_api.client — WebApiClient with mocked HTTP."""
 
 from __future__ import annotations
 
@@ -8,14 +8,14 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from pytvt.webapi.client import LAPI_BASE, WebApiClient
-from pytvt.webapi.errors import (
+from pytvt.web_api.client import LAPI_BASE, WebApiClient
+from pytvt.web_api.errors import (
     AuthenticationError,
     DeviceOfflineError,
     UnsupportedFunctionError,
     WebApiError,
 )
-from pytvt.webapi.models import (
+from pytvt.web_api.models import (
     ChannelInfo,
     DateTimeInfo,
     DeviceInfo,
@@ -85,7 +85,7 @@ class TestClientInit:
 
 
 class TestGetSupportedAPIs:
-    @patch("pytvt.webapi.client.http.client.HTTPConnection")
+    @patch("pytvt.web_api.client.http.client.HTTPConnection")
     def test_parses_api_names(self, mock_conn_cls, client):
         body = _xml_ok(
             "<SupportedAPIs>"
@@ -104,7 +104,7 @@ class TestGetSupportedAPIs:
         assert "GetChannelInfo" in apis
         assert client._supported_apis == apis
 
-    @patch("pytvt.webapi.client.http.client.HTTPConnection")
+    @patch("pytvt.web_api.client.http.client.HTTPConnection")
     def test_supports_cached(self, mock_conn_cls, client):
         body = _xml_ok("<SupportedAPIs>  <SupportedAPI><apiName>GetDeviceInfo</apiName></SupportedAPI></SupportedAPIs>")
         mock_conn = MagicMock()
@@ -121,7 +121,7 @@ class TestGetSupportedAPIs:
 
 
 class TestGetDeviceInfo:
-    @patch("pytvt.webapi.client.http.client.HTTPConnection")
+    @patch("pytvt.web_api.client.http.client.HTTPConnection")
     def test_parses_device_info(self, mock_conn_cls, client):
         body = _xml_ok(
             "<DeviceInfo>"
@@ -154,7 +154,7 @@ class TestGetDeviceInfo:
 
 
 class TestGetChannelInfo:
-    @patch("pytvt.webapi.client.http.client.HTTPConnection")
+    @patch("pytvt.web_api.client.http.client.HTTPConnection")
     def test_parses_multiple_channels(self, mock_conn_cls, client):
         body = _xml_ok(
             "<ChannelInfoList>"
@@ -189,7 +189,7 @@ class TestGetChannelInfo:
 
 
 class TestGetDiskInfo:
-    @patch("pytvt.webapi.client.http.client.HTTPConnection")
+    @patch("pytvt.web_api.client.http.client.HTTPConnection")
     def test_parses_disks(self, mock_conn_cls, client):
         body = _xml_ok(
             "<DiskInfoList>"
@@ -220,7 +220,7 @@ class TestGetDiskInfo:
 
 
 class TestGetDateAndTime:
-    @patch("pytvt.webapi.client.http.client.HTTPConnection")
+    @patch("pytvt.web_api.client.http.client.HTTPConnection")
     def test_parses_datetime(self, mock_conn_cls, client):
         body = _xml_ok(
             "<DateAndTime>"
@@ -247,7 +247,7 @@ class TestGetDateAndTime:
 
 
 class TestModifyPassword:
-    @patch("pytvt.webapi.client.http.client.HTTPConnection")
+    @patch("pytvt.web_api.client.http.client.HTTPConnection")
     def test_updates_stored_credentials(self, mock_conn_cls, client):
         body = _xml_ok("")
         mock_conn = MagicMock()
@@ -260,7 +260,7 @@ class TestModifyPassword:
         expected = b64encode(b"admin:NewPass456!").decode()
         assert client._auth_header == f"Basic {expected}"
 
-    @patch("pytvt.webapi.client.http.client.HTTPConnection")
+    @patch("pytvt.web_api.client.http.client.HTTPConnection")
     def test_sends_correct_xml(self, mock_conn_cls, client):
         body = _xml_ok("")
         mock_conn = MagicMock()
@@ -282,7 +282,7 @@ class TestModifyPassword:
 
 
 class TestGetImageConfig:
-    @patch("pytvt.webapi.client.http.client.HTTPConnection")
+    @patch("pytvt.web_api.client.http.client.HTTPConnection")
     def test_parses_image_config(self, mock_conn_cls, client):
         body = _xml_ok(
             "<ImageConfig>"
@@ -309,7 +309,7 @@ class TestGetImageConfig:
 
 
 class TestSnapshotRouting:
-    @patch("pytvt.webapi.client.http.client.HTTPConnection")
+    @patch("pytvt.web_api.client.http.client.HTTPConnection")
     def test_webapi_snapshot_success(self, mock_conn_cls, client):
         jpeg_bytes = b"\xff\xd8\xff\xe0" + b"\x00" * 200  # fake JPEG
         mock_conn = MagicMock()
@@ -321,7 +321,7 @@ class TestSnapshotRouting:
         assert result.method == "webapi"
         assert result.image_data == jpeg_bytes
 
-    @patch("pytvt.webapi.client.http.client.HTTPConnection")
+    @patch("pytvt.web_api.client.http.client.HTTPConnection")
     def test_webapi_snapshot_too_small(self, mock_conn_cls, client):
         mock_conn = MagicMock()
         mock_conn_cls.return_value = mock_conn
@@ -331,7 +331,7 @@ class TestSnapshotRouting:
         assert result.success is False
         assert "invalid" in result.error.lower() or "empty" in result.error.lower()
 
-    @patch("pytvt.webapi.client.http.client.HTTPConnection")
+    @patch("pytvt.web_api.client.http.client.HTTPConnection")
     def test_get_snapshot_tries_both_methods(self, mock_conn_cls, client):
         """When GetSnapshot fails, falls back to GetSnapshotByTime."""
         client._supported_apis = {"GetSnapshot", "GetSnapshotByTime"}
@@ -363,7 +363,7 @@ class TestSnapshotRouting:
         assert result.success is False
         assert "No supported" in result.error
 
-    @patch("pytvt.webapi.client.http.client.HTTPConnection")
+    @patch("pytvt.web_api.client.http.client.HTTPConnection")
     def test_rtsp_fallback_no_url(self, mock_conn_cls, client):
         """Without rtsp_url, RTSP fallback is skipped."""
         client._supported_apis = set()
@@ -377,7 +377,7 @@ class TestSnapshotRouting:
 
 
 class TestErrorHandling:
-    @patch("pytvt.webapi.client.http.client.HTTPConnection")
+    @patch("pytvt.web_api.client.http.client.HTTPConnection")
     def test_401_raises_auth_error(self, mock_conn_cls, client):
         mock_conn = MagicMock()
         mock_conn_cls.return_value = mock_conn
@@ -386,7 +386,7 @@ class TestErrorHandling:
         with pytest.raises(AuthenticationError):
             client.get_device_info()
 
-    @patch("pytvt.webapi.client.http.client.HTTPConnection")
+    @patch("pytvt.web_api.client.http.client.HTTPConnection")
     def test_connection_refused_raises_offline(self, mock_conn_cls, client):
         mock_conn = MagicMock()
         mock_conn_cls.return_value = mock_conn
@@ -395,7 +395,7 @@ class TestErrorHandling:
         with pytest.raises(DeviceOfflineError):
             client.get_device_info()
 
-    @patch("pytvt.webapi.client.http.client.HTTPConnection")
+    @patch("pytvt.web_api.client.http.client.HTTPConnection")
     def test_timeout_raises_offline(self, mock_conn_cls, client):
         mock_conn = MagicMock()
         mock_conn_cls.return_value = mock_conn
@@ -404,7 +404,7 @@ class TestErrorHandling:
         with pytest.raises(DeviceOfflineError):
             client.get_device_info()
 
-    @patch("pytvt.webapi.client.http.client.HTTPConnection")
+    @patch("pytvt.web_api.client.http.client.HTTPConnection")
     def test_tvt_error_code_in_response(self, mock_conn_cls, client):
         body = _xml_error(400, 12, "Not supported")
         mock_conn = MagicMock()
@@ -414,7 +414,7 @@ class TestErrorHandling:
         with pytest.raises(UnsupportedFunctionError):
             client.get_device_info()
 
-    @patch("pytvt.webapi.client.http.client.HTTPConnection")
+    @patch("pytvt.web_api.client.http.client.HTTPConnection")
     def test_http_500_raises_webapi_error(self, mock_conn_cls, client):
         mock_conn = MagicMock()
         mock_conn_cls.return_value = mock_conn

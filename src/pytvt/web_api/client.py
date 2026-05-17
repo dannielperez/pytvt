@@ -4,7 +4,7 @@ Implements the TVT HTTP API protocol documented in the *HTTP API Protocol
 User Guide for IP Media Device v2.0.0*.  Uses HTTP Basic auth per request
 and XML request/response bodies.
 
-This is separate from :class:`pytvt.nvr_api.NvrClient` which targets
+This is separate from :class:`pytvt.xml_api.NvrClient` which targets
 the NVMS-9000 NVR CGI interface with session-based auth.
 
 Key design choices
@@ -12,7 +12,7 @@ Key design choices
 - **Capability-first**: Call :meth:`get_supported_apis` before assuming
   any endpoint exists.  Firmware versions vary widely.
 - **Per-request auth**: HTTP Basic auth on every request (no session state).
-- **Preserve existing paths**: The existing :class:`~pytvt.nvr_api.NvrClient`
+- **Preserve existing paths**: The existing :class:`~pytvt.xml_api.NvrClient`
   login/enablement flow is reused via :meth:`ensure_webapi_available` to
   enable the HTTP API service if it's disabled.
 """
@@ -689,7 +689,7 @@ class WebApiClient:
         Priority:
         1. Web API ``GetSnapshot`` if supported
         2. Web API ``GetSnapshotByTime`` if supported
-        3. RTSP fallback via existing :func:`pytvt.nvr_api.rtsp_snapshot`
+        3. RTSP fallback via existing :func:`pytvt.xml_api.rtsp_snapshot`
 
         For the RTSP fallback, call :meth:`get_snapshot_with_rtsp_fallback`
         which requires additional connection parameters.
@@ -739,7 +739,7 @@ class WebApiClient:
 
         Priority:
         1. Web API snapshot (GetSnapshot / GetSnapshotByTime)
-        2. RTSP via ffmpeg (existing :func:`pytvt.nvr_api.rtsp_snapshot`)
+        2. RTSP via ffmpeg (existing :func:`pytvt.xml_api.rtsp_snapshot`)
 
         For RTSP fallback, either provide ``rtsp_url`` directly or
         ``output_path`` where the JPEG file will be saved.
@@ -766,7 +766,7 @@ class WebApiClient:
                 channel_id,
             )
             try:
-                from pytvt.nvr_api import rtsp_snapshot
+                from pytvt.xml_api import rtsp_snapshot
 
                 ok = rtsp_snapshot(rtsp_url, output_path, timeout=rtsp_timeout)
                 if ok:
@@ -903,7 +903,7 @@ class WebApiClient:
 
         If :meth:`get_supported_apis` fails because the Web API service
         is disabled, this method uses the existing
-        :class:`~pytvt.nvr_api.NvrClient` to log in via the NVR CGI and
+        :class:`~pytvt.xml_api.NvrClient` to log in via the NVR CGI and
         enable the API server.
 
         Args:
@@ -928,7 +928,7 @@ class WebApiClient:
             self.host,
         )
         try:
-            from pytvt.nvr_api import NvrClient
+            from pytvt.xml_api import NvrClient
 
             with NvrClient(
                 self.host,
