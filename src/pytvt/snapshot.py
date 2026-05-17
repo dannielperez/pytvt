@@ -463,7 +463,7 @@ def direct_snapshot_all(
     Returns:
         List of dicts with keys: channel, name, ip, file, success, status.
     """
-    from .nvr_api import NvrClient, rtsp_snapshot as _rtsp_snap
+    from .xml_api import NvrClient, rtsp_snapshot as _rtsp_snap
 
     os.makedirs(output_dir, exist_ok=True)
     results = []
@@ -544,7 +544,7 @@ def direct_snapshot_channel(
     Returns:
         True if the snapshot was saved successfully.
     """
-    from .nvr_api import NvrClient, rtsp_snapshot as _rtsp_snap
+    from .xml_api import NvrClient, rtsp_snapshot as _rtsp_snap
 
     with NvrClient(nvr_ip, username, password, port=web_port, timeout=timeout) as nvr:
         nvr.login()
@@ -585,7 +585,7 @@ def direct_snapshot_from_json(
     Returns:
         Dict with keys: total, success, failed.
     """
-    from .nvr_api import NvrClient, rtsp_snapshot as _rtsp_snap
+    from .xml_api import NvrClient, rtsp_snapshot as _rtsp_snap
 
     with open(json_path) as f:
         data = json.load(f)

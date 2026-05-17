@@ -1,12 +1,12 @@
-"""Tests for pytvt.nvr_api."""
+"""Tests for pytvt.xml_api."""
 
 from __future__ import annotations
 
 import base64
 
-import pytvt.nvr_api as nvr_api
+import pytvt.xml_api as nvr_api
 from pytvt.models import NvrApiError, PlatformAccessDisabledError
-from pytvt.nvr_api import NvrClient
+from pytvt.xml_api import NvrClient
 
 
 class TestQueryNvrLanFreeDevices:
