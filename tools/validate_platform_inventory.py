@@ -48,7 +48,7 @@ except ImportError:  # pragma: no cover - python-dotenv is a declared dep
 from pytvt.platform_sdk import ManagementClient
 from pytvt.platform_sdk.exceptions import CapabilityNotAvailable
 from pytvt.platform_sdk.platform_constants import redact_sensitive
-from pytvt.platform_inventory import get_platform_inventory_snapshot
+from pytvt.platform_sdk.inventory import get_platform_inventory_snapshot
 
 
 def _asdict(obj: Any) -> Any:

@@ -14,7 +14,7 @@ from __future__ import annotations
 from typing import Any
 from typing import Callable
 
-from .platform_sdk.exceptions import CapabilityNotAvailable
+from .exceptions import CapabilityNotAvailable
 
 __all__ = ["detect_capabilities"]
 
