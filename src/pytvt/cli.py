@@ -211,7 +211,7 @@ def _build_scan_nvr_parser() -> argparse.ArgumentParser:
 
 def scan_nvr_cli(argv: list[str] | None = None) -> None:
     """Handle ``pytvt scan-nvr`` and the ``pytvt-scan`` console script."""
-    from .sdk_local import scan_nvr_payload
+    from .device_sdk.sdk_local import scan_nvr_payload
 
     parser = _build_scan_nvr_parser()
     args = parser.parse_args(argv)
@@ -304,7 +304,7 @@ def _build_sdk_parser() -> argparse.ArgumentParser:
 
 def sdk_cli(argv: list[str] | None = None) -> None:
     """Handle ``pytvt sdk`` commands."""
-    from .netsdk.ip_modify import (
+    from .device_sdk.ip_modify import (
         modify_device_ip_by_mac,
         scan_device_match,
         validate_modify_ip_dry_run,
@@ -476,7 +476,7 @@ def _build_connect_parser() -> argparse.ArgumentParser:
 def _connect_main(argv: list[str] | None = None) -> None:
     """Handle ``pytvt connect``."""
     _load_dotenv()
-    from .device_manager import DeviceManager
+    from .device_sdk.manager import DeviceManager
 
     parser = _build_connect_parser()
     args = parser.parse_args(argv)

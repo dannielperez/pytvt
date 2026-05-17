@@ -2,7 +2,7 @@
 
 Usage::
 
-    from pytvt.netsdk import NetSdkClient
+    from pytvt.device_sdk import NetSdkClient
 
     with NetSdkClient() as sdk:
         devices = sdk.discover()
