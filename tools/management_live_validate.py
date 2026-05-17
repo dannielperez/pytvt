@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Disposable full-sequence live validator for pytvt.management.
+"""Disposable full-sequence live validator for pytvt.platform_sdk.
 
 Purpose:
 - Exercise login, get_server_info, list_devices, get_device_statuses, and

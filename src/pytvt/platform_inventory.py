@@ -9,11 +9,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from .management.exceptions import CapabilityNotAvailable
-from .management.platform_constants import redact_sensitive
-from .management.platform_models import PlatformAlarmZone
-from .management.platform_models import PlatformResource
-from .management.platform_models import PlatformServer
+from .platform_sdk.exceptions import CapabilityNotAvailable
+from .platform_sdk.platform_constants import redact_sensitive
+from .platform_sdk.platform_models import PlatformAlarmZone
+from .platform_sdk.platform_models import PlatformResource
+from .platform_sdk.platform_models import PlatformServer
 from .platform_alarms import normalize_alarm_events
 from .platform_capabilities import detect_capabilities
 from .platform_classification import classify_resource

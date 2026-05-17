@@ -14,9 +14,9 @@ from typing import Any
 from typing import Iterable
 from typing import Literal
 
-from .management.platform_constants import NODETYPE_CHANNEL
-from .management.platform_models import PlatformResource
-from .management.platform_models import PlatformServer
+from .platform_sdk.platform_constants import NODETYPE_CHANNEL
+from .platform_sdk.platform_models import PlatformResource
+from .platform_sdk.platform_models import PlatformServer
 from .platform_topology import PlatformSite
 from .platform_topology import build_site_topology
 

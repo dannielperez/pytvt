@@ -29,7 +29,7 @@ These are implementation details and may change without notice:
 
 These are intentionally additive and may evolve:
 
-- `pytvt.management` package as a whole
+- `pytvt.platform_sdk` package as a whole
 - `ManagementClient`, especially `platform_sdk`, `sidecar`, and other management runtime selection details
 - Management protocol-native backend in `src/pytvt/management/native.py`
 - Sidecar backend (`sidecar` runtime mode) — SDK-agnostic; some management operations not yet implemented
