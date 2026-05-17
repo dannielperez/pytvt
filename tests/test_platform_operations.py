@@ -7,7 +7,7 @@ from datetime import timezone
 
 import pytest
 
-from pytvt.management.platform_constants import (
+from pytvt.platform_sdk.platform_constants import (
     DEVTYPE_IPC,
     DEVTYPE_NONE,
     DEVTYPE_NVR,
@@ -15,7 +15,7 @@ from pytvt.management.platform_constants import (
     NODETYPE_CHANNEL,
     NODETYPE_DEVICE,
 )
-from pytvt.management.platform_models import (
+from pytvt.platform_sdk.platform_models import (
     PlatformAlarmZone,
     PlatformResource,
     PlatformServer,
@@ -26,7 +26,7 @@ from pytvt.platform_classification import classify_resource
 from pytvt.platform_health import compute_device_health
 from pytvt.platform_inventory import get_platform_inventory_snapshot
 from pytvt.platform_topology import ORPHAN_SITE_ID, build_site_topology
-from pytvt.management.exceptions import CapabilityNotAvailable
+from pytvt.platform_sdk.exceptions import CapabilityNotAvailable
 
 
 # ---------------------------------------------------------------------------

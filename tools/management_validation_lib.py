@@ -33,7 +33,7 @@ from manifest_resolver import (
     resolve_manifest,
 )
 
-from pytvt.management import AlarmSubscription, CapabilityNotAvailable, ManagementClient
+from pytvt.platform_sdk import AlarmSubscription, CapabilityNotAvailable, ManagementClient
 from pytvt.netsdk.loader import LEGACY_SDK_PATH_ENV_VAR, SDK_PATH_ENV_VAR
 
 ERROR_CODE_RE = re.compile(r"error_code=(\d+)")

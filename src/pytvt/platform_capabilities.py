@@ -1,6 +1,6 @@
 """Capability detection for the PlatformSDK management backend.
 
-Probes a :class:`~pytvt.management.ManagementClient` by calling each
+Probes a :class:`~pytvt.platform_sdk.ManagementClient` by calling each
 read-only method inside a ``try`` block and reports which capabilities
 are currently reachable.  Unreachable ones raise
 :class:`CapabilityNotAvailable`, which we treat as "not available" rather
@@ -14,7 +14,7 @@ from __future__ import annotations
 from typing import Any
 from typing import Callable
 
-from .management.exceptions import CapabilityNotAvailable
+from .platform_sdk.exceptions import CapabilityNotAvailable
 
 __all__ = ["detect_capabilities"]
 

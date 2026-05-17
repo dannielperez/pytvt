@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from pytvt.management.exceptions import ManagementError
+from pytvt.platform_sdk.exceptions import ManagementError
 
 
 class WorkflowError(ManagementError):
     """Base class for workflow-level failures.
 
-    Distinct from the per-device :class:`pytvt.management.ManagementError`
+    Distinct from the per-device :class:`pytvt.platform_sdk.ManagementError`
     hierarchy in that workflow errors represent the orchestration failing
     to complete, not an individual backend call.
     """

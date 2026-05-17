@@ -2,7 +2,7 @@
 
 These tests do NOT require the live SDK binary or a running management server.
 They exercise only the pure-Python parsing / normalization code paths in
-``pytvt.management.platform_constants``, ``platform_models``, and the
+``pytvt.platform_sdk.platform_constants``, ``platform_models``, and the
 ``PlatformSDKClient`` helpers that don't touch ctypes.
 """
 
@@ -12,8 +12,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from pytvt.management import platform_constants as pc
-from pytvt.management.platform_constants import (
+from pytvt.platform_sdk import platform_constants as pc
+from pytvt.platform_sdk.platform_constants import (
     connect_state_is_online,
     connect_state_name,
     decode_area_rights,
@@ -23,18 +23,18 @@ from pytvt.management.platform_constants import (
     redact_sensitive,
     server_type_name,
 )
-from pytvt.management.platform_models import (
+from pytvt.platform_sdk.platform_models import (
     PlatformAlarmZone,
     PlatformResource,
     PlatformServer,
 )
-from pytvt.management.platform_sdk import (
+from pytvt.platform_sdk.platform_backend import (
     PlatformSDKClient,
     PlatformSdkManagementBackend,
     _PlatSessionState,
     _resource_to_model,
 )
-from pytvt.management.exceptions import (
+from pytvt.platform_sdk.exceptions import (
     CapabilityNotAvailable,
     SessionExpired,
 )

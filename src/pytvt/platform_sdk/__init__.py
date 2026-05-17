@@ -30,7 +30,7 @@ from .models import ManagedChannel
 from .models import ManagedDevice
 from .models import ManagementServerInfo
 from .models import ServerInfo
-from .platform_sdk import PlatformSdkManagementBackend
+from .platform_backend import PlatformSdkManagementBackend
 from .sidecar import SidecarManagementBackend
 from .sdk import ResolvedSymbol
 from .sdk import SdkDiagnostics
