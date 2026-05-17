@@ -13,7 +13,7 @@ import os
 import sys
 from typing import Sequence
 
-from .nvr_api import NvrClient
+from .xml_api import NvrClient
 from .workflows import (
     ConsoleProgressSink,
     WorkflowError,

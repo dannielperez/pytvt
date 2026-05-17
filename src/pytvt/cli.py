@@ -125,7 +125,7 @@ def discover() -> None:
 def api() -> None:
     """NVR API CLI — the ``pytvt-api`` command."""
     _load_dotenv()
-    from .nvr_api import main as _main
+    from .xml_api import main as _main
 
     _main()
 

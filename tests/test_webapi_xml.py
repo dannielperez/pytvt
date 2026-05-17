@@ -1,4 +1,4 @@
-"""Tests for pytvt.webapi.xml — XML building and parsing helpers."""
+"""Tests for pytvt.web_api.xml — XML building and parsing helpers."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import xml.etree.ElementTree as ET
 
 import pytest
 
-from pytvt.webapi.xml import (
+from pytvt.web_api.xml import (
     build_set_request,
     extract_status,
     find_all_text,

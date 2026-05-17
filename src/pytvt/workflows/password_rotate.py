@@ -35,7 +35,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Iterable, Sequence
 
 from pytvt.models import NvrApiError
-from pytvt.nvr_api import Channel, NvrClient
+from pytvt.xml_api import Channel, NvrClient
 
 from .exceptions import WorkflowError, WorkflowPrecheckError
 from .progress import NullProgressSink, ProgressEvent, ProgressSink

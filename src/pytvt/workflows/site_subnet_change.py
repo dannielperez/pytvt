@@ -33,7 +33,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Sequence
 
 from pytvt.models import NvrApiError
-from pytvt.nvr_api import Channel, NvrClient, NvrLanFreeDevice
+from pytvt.xml_api import Channel, NvrClient, NvrLanFreeDevice
 
 from .exceptions import WorkflowError, WorkflowPrecheckError
 from .password_rotate import (
