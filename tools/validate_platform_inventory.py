@@ -45,9 +45,9 @@ except ImportError:  # pragma: no cover - python-dotenv is a declared dep
     def load_dotenv(*_args: Any, **_kwargs: Any) -> bool:
         return False
 
-from pytvt.management import ManagementClient
-from pytvt.management.exceptions import CapabilityNotAvailable
-from pytvt.management.platform_constants import redact_sensitive
+from pytvt.platform_sdk import ManagementClient
+from pytvt.platform_sdk.exceptions import CapabilityNotAvailable
+from pytvt.platform_sdk.platform_constants import redact_sensitive
 from pytvt.platform_inventory import get_platform_inventory_snapshot
 
 

@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from .management.platform_constants import (
+from .platform_sdk.platform_constants import (
     DEVTYPE_DAHUA,
     DEVTYPE_DVR,
     DEVTYPE_HIK,
@@ -23,7 +23,7 @@ from .management.platform_constants import (
     NODETYPE_DEVICE,
     NODETYPE_SENSOR,
 )
-from .management.platform_models import PlatformResource
+from .platform_sdk.platform_models import PlatformResource
 
 __all__ = ["classify_resource"]
 

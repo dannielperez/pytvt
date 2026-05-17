@@ -40,7 +40,7 @@ from .platform_models import (
     PlatformResource,
     PlatformServer,
 )
-from .platform_sdk import PlatformSdkManagementBackend
+from .platform_backend import PlatformSdkManagementBackend
 from .sidecar import SidecarManagementBackend
 from .sdk import SdkManagementBackend
 
