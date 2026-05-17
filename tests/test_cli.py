@@ -1,4 +1,4 @@
-"""Tests for pytvt.cli — parser construction, dedup helpers, entry points."""
+"""Tests for pytvt.tools.cli — parser construction, dedup helpers, entry points."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import json
 
 import pytest
 
-from pytvt.cli import (
+from pytvt.tools.cli import (
     _build_connect_parser,
     _build_parser,
     _build_doctor_parser,
@@ -139,28 +139,28 @@ class TestBuildSdkParser:
 class TestConnectCommand:
     def test_main_dispatches_scan_nvr(self):
         argv = ["pytvt", "scan-nvr", "10.0.0.1"]
-        with patch("sys.argv", argv), patch("pytvt.cli.scan_nvr_cli") as mock_scan:
+        with patch("sys.argv", argv), patch("pytvt.tools.cli.scan_nvr_cli") as mock_scan:
             main()
 
         mock_scan.assert_called_once_with(argv[2:])
 
     def test_main_dispatches_connect(self):
         argv = ["pytvt", "connect", "--nat", "--id", "ABC123456", "-u", "admin", "-p", "pass"]
-        with patch("sys.argv", argv), patch("pytvt.cli._connect_main") as mock_connect:
+        with patch("sys.argv", argv), patch("pytvt.tools.cli._connect_main") as mock_connect:
             main()
 
         mock_connect.assert_called_once_with(argv[2:])
 
     def test_main_dispatches_doctor(self):
         argv = ["pytvt", "doctor"]
-        with patch("sys.argv", argv), patch("pytvt.cli.doctor_cli") as mock_doctor:
+        with patch("sys.argv", argv), patch("pytvt.tools.cli.doctor_cli") as mock_doctor:
             main()
 
         mock_doctor.assert_called_once_with(argv[2:])
 
     def test_main_dispatches_sdk(self):
         argv = ["pytvt", "sdk", "modify-ip", "--mac", "AA:BB:CC:DD:EE:FF", "--new-ip", "10.1.1.20", "--mask", "255.255.255.0", "--gateway", "10.1.1.1", "--dry-run"]
-        with patch("sys.argv", argv), patch("pytvt.cli.sdk_cli") as mock_sdk:
+        with patch("sys.argv", argv), patch("pytvt.tools.cli.sdk_cli") as mock_sdk:
             main()
 
         mock_sdk.assert_called_once_with(argv[2:])
