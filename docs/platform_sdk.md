@@ -82,7 +82,7 @@ The script redacts sensitive keys (`password`, `token`, …) in all output.
 
 ## Constant semantics
 
-`pytvt.management.platform_constants` exposes name lookups and bitmask
+`pytvt.platform_sdk.platform_constants` exposes name lookups and bitmask
 decoders for:
 
 * `MSGTYPE_*` — PlatformSDK message-type ids
