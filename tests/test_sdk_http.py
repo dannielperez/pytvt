@@ -1,4 +1,4 @@
-"""Tests for pytvt.sdk_http — HTTP API backend (mocked)."""
+"""Tests for pytvt.device_sdk.sdk_http — HTTP API backend (mocked)."""
 
 from __future__ import annotations
 
@@ -8,11 +8,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from pytvt.models import DeviceEntry, ScannerConfig
-from pytvt.sdk_http import sdk_scan
+from pytvt.device_sdk.sdk_http import sdk_scan
 
 
 class TestSdkScan:
-    @patch("pytvt.sdk_http.urllib.request.urlopen")
+    @patch("pytvt.device_sdk.sdk_http.urllib.request.urlopen")
     def test_success(self, mock_urlopen, sample_device, default_config):
         response_data = json.dumps(
             {
@@ -39,7 +39,7 @@ class TestSdkScan:
         assert result.device_model == "TD-3332B4"
         assert len(result.cameras) == 1
 
-    @patch("pytvt.sdk_http.urllib.request.urlopen")
+    @patch("pytvt.device_sdk.sdk_http.urllib.request.urlopen")
     def test_connection_error(self, mock_urlopen, sample_device, default_config):
         import urllib.error
 
@@ -48,14 +48,14 @@ class TestSdkScan:
         assert result.success is False
         assert "connection error" in result.error.lower()
 
-    @patch("pytvt.sdk_http.urllib.request.urlopen")
+    @patch("pytvt.device_sdk.sdk_http.urllib.request.urlopen")
     def test_timeout(self, mock_urlopen, sample_device, default_config):
         mock_urlopen.side_effect = TimeoutError()
         result = sdk_scan(sample_device, default_config)
         assert result.success is False
         assert "timeout" in result.error.lower()
 
-    @patch("pytvt.sdk_http.urllib.request.urlopen")
+    @patch("pytvt.device_sdk.sdk_http.urllib.request.urlopen")
     def test_invalid_json(self, mock_urlopen, sample_device, default_config):
         mock_resp = MagicMock()
         mock_resp.read.return_value = b"not json"

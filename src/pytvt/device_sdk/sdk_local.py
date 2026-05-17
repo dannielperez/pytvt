@@ -3,14 +3,14 @@
 The historical ``sdk-local`` backend used a Node.js bridge script to call the
 vendor SDK. That bridge has been removed. The backend name is retained for
 backwards compatibility, but execution now stays entirely inside Python and
-uses :class:`pytvt.netsdk.client.NetSdkClient` directly.
+uses :class:`pytvt.device_sdk.client.NetSdkClient` directly.
 """
 
 from __future__ import annotations
 
-from .models import CameraInfo, DeviceEntry, ScannerConfig, ScanResult
-from .netsdk.client import NetSdkClient, NetSdkError
-from .netsdk.loader import NetSdkUnavailable
+from ..models import CameraInfo, DeviceEntry, ScannerConfig, ScanResult
+from .client import NetSdkClient, NetSdkError
+from .loader import NetSdkUnavailable
 
 
 def scan_nvr_payload(

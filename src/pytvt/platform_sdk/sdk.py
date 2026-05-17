@@ -5,7 +5,7 @@ Phase 3 design goals
 - Inspect a real vendor library using export evidence instead of file presence.
 - Keep every management operation explicit about whether its symbol is
     confirmed, merely a candidate, or still missing.
-- Reuse validated ctypes signatures already present in ``pytvt.netsdk`` when
+- Reuse validated ctypes signatures already present in ``pytvt.device_sdk`` when
     and only when the exact exported symbol has matching in-repo evidence.
 - Stop before unsafe calls whenever the symbol identity or signature evidence is
     incomplete.
@@ -40,7 +40,7 @@ from dataclasses import field
 from pathlib import Path
 from typing import Any, Callable, Literal
 
-from pytvt.netsdk import types as netsdk_types
+from pytvt.device_sdk import types as netsdk_types
 
 from .base import BaseManagementBackend
 from .context import CapabilityMap
@@ -446,9 +446,9 @@ SYMBOL_EVIDENCE: tuple[SymbolEvidence, ...] = (
     SymbolEvidence(
         purpose="init",
         confirmed_names=("NET_SDK_Init",),
-        signature_source="pytvt.netsdk.bindings.NET_SDK_Init",
+        signature_source="pytvt.device_sdk.bindings.NET_SDK_Init",
         signature_ready=True,
-        notes="Export present in staged libdvrnetsdk.so and validated in pytvt.netsdk.",
+        notes="Export present in staged libdvrnetsdk.so and validated in pytvt.device_sdk.",
         confidence="high",
         evidence_records=(
             _record(
@@ -464,9 +464,9 @@ SYMBOL_EVIDENCE: tuple[SymbolEvidence, ...] = (
         purpose="login",
         confirmed_names=("NET_SDK_Login",),
         candidate_names=("NET_SDK_LoginEx",),
-        signature_source="pytvt.netsdk.bindings.NET_SDK_Login",
+        signature_source="pytvt.device_sdk.bindings.NET_SDK_Login",
         signature_ready=True,
-        notes="Exact NET_SDK_Login prototype already exists in pytvt.netsdk bindings.",
+        notes="Exact NET_SDK_Login prototype already exists in pytvt.device_sdk bindings.",
         confidence="medium",
         evidence_records=(
             _record(
@@ -505,9 +505,9 @@ SYMBOL_EVIDENCE: tuple[SymbolEvidence, ...] = (
     SymbolEvidence(
         purpose="logout",
         confirmed_names=("NET_SDK_Logout",),
-        signature_source="pytvt.netsdk.bindings.NET_SDK_Logout",
+        signature_source="pytvt.device_sdk.bindings.NET_SDK_Logout",
         signature_ready=True,
-        notes="Used by existing pytvt.netsdk session code.",
+        notes="Used by existing pytvt.device_sdk session code.",
         confidence="high",
         evidence_records=(
             _record(
@@ -522,7 +522,7 @@ SYMBOL_EVIDENCE: tuple[SymbolEvidence, ...] = (
     SymbolEvidence(
         purpose="set_nat2_addr",
         confirmed_names=("NET_SDK_SetNat2Addr",),
-        signature_source="pytvt.netsdk.bindings.NET_SDK_SetNat2Addr",
+        signature_source="pytvt.device_sdk.bindings.NET_SDK_SetNat2Addr",
         signature_ready=True,
         notes=(
             "NAT2 pre-login endpoint configuration used by LoginEx NAT20 mode in "
@@ -543,7 +543,7 @@ SYMBOL_EVIDENCE: tuple[SymbolEvidence, ...] = (
     SymbolEvidence(
         purpose="server_info",
         confirmed_names=("NET_SDK_GetDeviceInfo",),
-        signature_source="pytvt.netsdk.bindings.NET_SDK_GetDeviceInfo",
+        signature_source="pytvt.device_sdk.bindings.NET_SDK_GetDeviceInfo",
         signature_ready=True,
         notes=(
             "Semantics assumed minimal: device-level info, not yet confirmed as "
@@ -557,7 +557,7 @@ SYMBOL_EVIDENCE: tuple[SymbolEvidence, ...] = (
                 suspected_capability="server_info",
                 source_type="linux_sdk_probe",
                 confidence="high",
-                notes="Observed Linux export with validated ctypes signature already present in pytvt.netsdk.",
+                notes="Observed Linux export with validated ctypes signature already present in pytvt.device_sdk.",
             ),
             _record(
                 symbol_name="GetDeviceInfo",
@@ -581,7 +581,7 @@ SYMBOL_EVIDENCE: tuple[SymbolEvidence, ...] = (
         purpose="device_enumeration",
         confirmed_names=("NET_SDK_GetDeviceIPCInfo",),
         candidate_names=("NET_SDK_DiscoverDevice",),
-        signature_source="pytvt.netsdk.bindings.NET_SDK_GetDeviceIPCInfo",
+        signature_source="pytvt.device_sdk.bindings.NET_SDK_GetDeviceIPCInfo",
         signature_ready=True,
         notes=(
             "Selected NET_SDK_GetDeviceIPCInfo as the only session-bound Linux SDK path "
@@ -600,7 +600,7 @@ SYMBOL_EVIDENCE: tuple[SymbolEvidence, ...] = (
                 suspected_capability="device_enumeration",
                 source_type="linux_sdk_probe",
                 confidence="high",
-                notes="Observed Linux export with validated ctypes signature in pytvt.netsdk.bindings and existing client usage for IPC info retrieval.",
+                notes="Observed Linux export with validated ctypes signature in pytvt.device_sdk.bindings and existing client usage for IPC info retrieval.",
             ),
             _record(
                 symbol_name="NET_SDK_DiscoverDevice",
@@ -639,7 +639,7 @@ SYMBOL_EVIDENCE: tuple[SymbolEvidence, ...] = (
         purpose="status_query",
         confirmed_names=("NET_SDK_GetDeviceCHStatus",),
         candidate_names=("NET_SDK_GetAlarmStatus", "NET_SDK_GetAlarmStatusEx"),
-        signature_source="pytvt.netsdk.bindings.NET_SDK_GetDeviceCHStatus",
+        signature_source="pytvt.device_sdk.bindings.NET_SDK_GetDeviceCHStatus",
         signature_ready=True,
         notes=(
             "Selected NET_SDK_GetDeviceCHStatus as a narrow channel-connectivity status path. "
@@ -700,7 +700,7 @@ SYMBOL_EVIDENCE: tuple[SymbolEvidence, ...] = (
     SymbolEvidence(
         purpose="alarm_subscription",
         confirmed_names=("NET_SDK_SetupAlarmChan",),
-        signature_source="pytvt.netsdk.bindings.NET_SDK_SetupAlarmChan",
+        signature_source="pytvt.device_sdk.bindings.NET_SDK_SetupAlarmChan",
         signature_ready=True,
         notes=(
             "Phase 7 maps subscribe_alarms to alarm-channel registration only via "
@@ -715,7 +715,7 @@ SYMBOL_EVIDENCE: tuple[SymbolEvidence, ...] = (
                 suspected_capability="alarm_subscription",
                 source_type="linux_sdk_probe",
                 confidence="high",
-                notes="Observed Linux export with validated ctypes signature already present in pytvt.netsdk; returns alarm-channel handle.",
+                notes="Observed Linux export with validated ctypes signature already present in pytvt.device_sdk; returns alarm-channel handle.",
             ),
             _record(
                 symbol_name="NET_SDK_GetAlarmStatus",
@@ -752,7 +752,7 @@ SYMBOL_EVIDENCE: tuple[SymbolEvidence, ...] = (
     SymbolEvidence(
         purpose="alarm_unsubscribe",
         confirmed_names=("NET_SDK_CloseAlarmChan",),
-        signature_source="pytvt.netsdk.bindings.NET_SDK_CloseAlarmChan",
+        signature_source="pytvt.device_sdk.bindings.NET_SDK_CloseAlarmChan",
         signature_ready=True,
         notes=(
             "Teardown path for alarm-channel registration. Required for safe lifecycle "
@@ -813,7 +813,7 @@ def _build_function_bindings() -> dict[str, BoundSdkFunction]:
             symbol_name="NET_SDK_Init",
             argtypes=(),
             restype=ct.c_bool,
-            signature_source="pytvt.netsdk.bindings.NET_SDK_Init",
+            signature_source="pytvt.device_sdk.bindings.NET_SDK_Init",
         ),
         "login": BoundSdkFunction(
             purpose="login",
@@ -826,7 +826,7 @@ def _build_function_bindings() -> dict[str, BoundSdkFunction]:
                 ct.POINTER(netsdk_types.NET_SDK_DEVICEINFO),
             ),
             restype=ct.c_long,
-            signature_source="pytvt.netsdk.bindings.NET_SDK_Login",
+            signature_source="pytvt.device_sdk.bindings.NET_SDK_Login",
         ),
         "login_ex": BoundSdkFunction(
             purpose="login_ex",
@@ -841,28 +841,28 @@ def _build_function_bindings() -> dict[str, BoundSdkFunction]:
                 ct.c_char_p,
             ),
             restype=ct.c_long,
-            signature_source="pytvt.netsdk.bindings.NET_SDK_LoginEx",
+            signature_source="pytvt.device_sdk.bindings.NET_SDK_LoginEx",
         ),
         "set_nat2_addr": BoundSdkFunction(
             purpose="set_nat2_addr",
             symbol_name="NET_SDK_SetNat2Addr",
             argtypes=(ct.c_char_p, ct.c_ushort),
             restype=ct.c_bool,
-            signature_source="pytvt.netsdk.bindings.NET_SDK_SetNat2Addr",
+            signature_source="pytvt.device_sdk.bindings.NET_SDK_SetNat2Addr",
         ),
         "logout": BoundSdkFunction(
             purpose="logout",
             symbol_name="NET_SDK_Logout",
             argtypes=(ct.c_long,),
             restype=ct.c_bool,
-            signature_source="pytvt.netsdk.bindings.NET_SDK_Logout",
+            signature_source="pytvt.device_sdk.bindings.NET_SDK_Logout",
         ),
         "server_info": BoundSdkFunction(
             purpose="server_info",
             symbol_name="NET_SDK_GetDeviceInfo",
             argtypes=(ct.c_long, ct.POINTER(netsdk_types.NET_SDK_DEVICEINFO)),
             restype=ct.c_bool,
-            signature_source="pytvt.netsdk.bindings.NET_SDK_GetDeviceInfo",
+            signature_source="pytvt.device_sdk.bindings.NET_SDK_GetDeviceInfo",
         ),
         "device_enumeration": BoundSdkFunction(
             purpose="device_enumeration",
@@ -874,7 +874,7 @@ def _build_function_bindings() -> dict[str, BoundSdkFunction]:
                 ct.POINTER(ct.c_long),
             ),
             restype=ct.c_bool,
-            signature_source="pytvt.netsdk.bindings.NET_SDK_GetDeviceIPCInfo",
+            signature_source="pytvt.device_sdk.bindings.NET_SDK_GetDeviceIPCInfo",
         ),
         "status_query": BoundSdkFunction(
             purpose="status_query",
@@ -886,21 +886,21 @@ def _build_function_bindings() -> dict[str, BoundSdkFunction]:
                 ct.POINTER(ct.c_long),
             ),
             restype=ct.c_bool,
-            signature_source="pytvt.netsdk.bindings.NET_SDK_GetDeviceCHStatus",
+            signature_source="pytvt.device_sdk.bindings.NET_SDK_GetDeviceCHStatus",
         ),
         "alarm_subscription": BoundSdkFunction(
             purpose="alarm_subscription",
             symbol_name="NET_SDK_SetupAlarmChan",
             argtypes=(ct.c_long,),
             restype=ct.c_long,
-            signature_source="pytvt.netsdk.bindings.NET_SDK_SetupAlarmChan",
+            signature_source="pytvt.device_sdk.bindings.NET_SDK_SetupAlarmChan",
         ),
         "alarm_unsubscribe": BoundSdkFunction(
             purpose="alarm_unsubscribe",
             symbol_name="NET_SDK_CloseAlarmChan",
             argtypes=(ct.c_long,),
             restype=ct.c_bool,
-            signature_source="pytvt.netsdk.bindings.NET_SDK_CloseAlarmChan",
+            signature_source="pytvt.device_sdk.bindings.NET_SDK_CloseAlarmChan",
         ),
     }
 
@@ -1169,7 +1169,7 @@ def _resolve_symbol_registry(
         if evidence.purpose == "login" and login_mode == "login_ex":
             confirmed_names = ("NET_SDK_LoginEx",)
             candidate_names = ("NET_SDK_Login",)
-            signature_source = "pytvt.netsdk.bindings.NET_SDK_LoginEx"
+            signature_source = "pytvt.device_sdk.bindings.NET_SDK_LoginEx"
             signature_ready = True
 
         confirmed_match = next((name for name in confirmed_names if name in exported_symbols), None)
@@ -1572,7 +1572,7 @@ class SDKClient:
 
         Safe go/no-go rules:
         - GO only when init/login/logout symbols are confirmed and signatures are
-          sourced from existing pytvt.netsdk bindings.
+          sourced from existing pytvt.device_sdk bindings.
         - STOP if the symbol is only a candidate or if its signature evidence is
           incomplete.
 

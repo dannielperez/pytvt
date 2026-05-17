@@ -1,10 +1,10 @@
-"""Tests for pytvt.netsdk.constants — enum/flag values match the C SDK."""
+"""Tests for pytvt.device_sdk.constants — enum/flag values match the C SDK."""
 
 from __future__ import annotations
 
 import pytest
 
-from pytvt.netsdk.constants import (
+from pytvt.device_sdk.constants import (
     AlarmType,
     CameraType,
     ConnectType,

@@ -11,7 +11,7 @@ import json
 import urllib.error
 import urllib.request
 
-from .models import CameraInfo, DeviceEntry, ScannerConfig, ScanResult
+from ..models import CameraInfo, DeviceEntry, ScannerConfig, ScanResult
 
 
 def sdk_scan(device: DeviceEntry, config: ScannerConfig) -> ScanResult:

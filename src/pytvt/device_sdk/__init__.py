@@ -1,4 +1,4 @@
-"""pytvt.netsdk — ctypes bindings for the TVT NetSDK (libdvrnetsdk.so).
+"""pytvt.device_sdk — ctypes bindings for the TVT NetSDK (libdvrnetsdk.so).
 
 Provides a Pythonic interface to the TVT C++ SDK binary protocol library
 for device management operations not available via HTTP APIs:

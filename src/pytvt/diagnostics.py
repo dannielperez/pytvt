@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import __version__
-from .netsdk.loader import (
+from .device_sdk.loader import (
     _NAT_DEPENDENCY_GROUP,
     _OPTIONAL_DEPENDENCY_GROUPS,
     LIB_NAME,

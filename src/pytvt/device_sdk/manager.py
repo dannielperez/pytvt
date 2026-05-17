@@ -14,7 +14,7 @@ chosen.
 
 Usage::
 
-    from pytvt.device_manager import DeviceManager
+    from pytvt.device_sdk.manager import DeviceManager
 
     mgr = DeviceManager("10.0.0.1", "admin", "pass")
     print(f"Using backend: {mgr.backend}")
@@ -36,8 +36,8 @@ import shutil
 import subprocess
 from enum import Enum, unique
 
-from .models import DeviceEntry
-from .sdk_http_client import (
+from ..models import DeviceEntry
+from .http_client import (
     CommandResult,
     DeviceInfoResult,
     DeviceTimeResult,
@@ -75,7 +75,7 @@ class NoBackendAvailable(RuntimeError):
 def _netsdk_available(sdk_path: str | None = None, *, require_nat: bool = False) -> bool:
     """Check if the native SDK can be loaded (Linux + library present)."""
     try:
-        from .netsdk.loader import is_netsdk_available
+        from .loader import is_netsdk_available
 
         return is_netsdk_available(sdk_path=sdk_path, require_nat=require_nat)
     except Exception:
@@ -283,7 +283,7 @@ class DeviceManager:
     def _get_netsdk_session(self):
         """Return a logged-in DeviceSession (netsdk backend)."""
         if self._netsdk_session is None:
-            from .netsdk.client import NetSdkClient
+            from .client import NetSdkClient
 
             client = NetSdkClient(sdk_path=self._sdk_path)
             self._netsdk_session = client.connect(
@@ -453,7 +453,7 @@ class DeviceManager:
 
     def _netsdk_rtsp_url(self, *, channel: int = 0, stream_type: int = 0) -> RtspUrlResult:
         try:
-            from .netsdk.constants import StreamType
+            from .constants import StreamType
 
             st = StreamType(stream_type)
             session = self._get_netsdk_session()
@@ -464,7 +464,7 @@ class DeviceManager:
 
     def _netsdk_ptz(self, *, channel: int = 0, command: int = 0, speed: int = 4) -> CommandResult:
         try:
-            from .netsdk.constants import PtzCommand, PtzSpeed
+            from .constants import PtzCommand, PtzSpeed
 
             session = self._get_netsdk_session()
             session.ptz(PtzCommand(command), channel=channel, speed=PtzSpeed(speed))
@@ -480,7 +480,7 @@ class DeviceManager:
         preset_index: int = 1,
     ) -> CommandResult:
         try:
-            from .netsdk.constants import PtzCommand
+            from .constants import PtzCommand
 
             session = self._get_netsdk_session()
             session.ptz_preset(PtzCommand(command), preset_index, channel=channel)
