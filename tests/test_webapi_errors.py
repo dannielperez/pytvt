@@ -1,10 +1,10 @@
-"""Tests for pytvt.webapi.errors — exception mapping and raise_for_status."""
+"""Tests for pytvt.web_api.errors — exception mapping and raise_for_status."""
 
 from __future__ import annotations
 
 import pytest
 
-from pytvt.webapi.errors import (
+from pytvt.web_api.errors import (
     AuthenticationError,
     DeviceOfflineError,
     PasswordExpiredError,

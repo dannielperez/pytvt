@@ -54,12 +54,12 @@ from .models import (
 )
 from .management import ManagementClient
 from .management import ManagementError
-from .nvr_api import NvrClient
+from .xml_api import NvrClient
 from .output import save_csv, save_failed_devices, save_json, save_xlsx_per_site
 from .registry import resolve_execution_plan
 from .scanner import filter_tvt_devices, load_devices, scan_single_nvr
 from .sdk_http_client import CommandResult, DeviceInfoResult, DeviceTimeResult, RtspUrlResult, SdkHttpClient
-from .webapi import WebApiClient
+from .web_api import WebApiClient
 from . import workflows  # Provisional — technician-facing workflow orchestrations.
 
 # Lazy diagnostics accessor — avoids heavy ctypes probes at import time.
