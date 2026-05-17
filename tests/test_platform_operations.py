@@ -20,12 +20,12 @@ from pytvt.platform_sdk.platform_models import (
     PlatformResource,
     PlatformServer,
 )
-from pytvt.platform_alarms import normalize_alarm_events
-from pytvt.platform_capabilities import detect_capabilities
-from pytvt.platform_classification import classify_resource
-from pytvt.platform_health import compute_device_health
-from pytvt.platform_inventory import get_platform_inventory_snapshot
-from pytvt.platform_topology import ORPHAN_SITE_ID, build_site_topology
+from pytvt.platform_sdk.alarms import normalize_alarm_events
+from pytvt.platform_sdk.capabilities import detect_capabilities
+from pytvt.platform_sdk.classification import classify_resource
+from pytvt.platform_sdk.health import compute_device_health
+from pytvt.platform_sdk.inventory import get_platform_inventory_snapshot
+from pytvt.platform_sdk.topology import ORPHAN_SITE_ID, build_site_topology
 from pytvt.platform_sdk.exceptions import CapabilityNotAvailable
 
 

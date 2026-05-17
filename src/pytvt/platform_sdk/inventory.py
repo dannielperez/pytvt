@@ -9,16 +9,16 @@ from __future__ import annotations
 
 from typing import Any
 
-from .platform_sdk.exceptions import CapabilityNotAvailable
-from .platform_sdk.platform_constants import redact_sensitive
-from .platform_sdk.platform_models import PlatformAlarmZone
-from .platform_sdk.platform_models import PlatformResource
-from .platform_sdk.platform_models import PlatformServer
-from .platform_alarms import normalize_alarm_events
-from .platform_capabilities import detect_capabilities
-from .platform_classification import classify_resource
-from .platform_health import compute_device_health
-from .platform_topology import build_site_topology
+from .exceptions import CapabilityNotAvailable
+from .platform_constants import redact_sensitive
+from .platform_models import PlatformAlarmZone
+from .platform_models import PlatformResource
+from .platform_models import PlatformServer
+from .alarms import normalize_alarm_events
+from .capabilities import detect_capabilities
+from .classification import classify_resource
+from .health import compute_device_health
+from .topology import build_site_topology
 
 __all__ = ["get_platform_inventory_snapshot"]
 

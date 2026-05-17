@@ -21,11 +21,11 @@ from dataclasses import field
 from typing import Any
 from typing import Iterable
 
-from .platform_sdk.platform_constants import NODETYPE_AREA
-from .platform_sdk.platform_constants import NODETYPE_CHANNEL
-from .platform_sdk.platform_constants import NODETYPE_DEVICE
-from .platform_sdk.platform_models import PlatformAlarmZone
-from .platform_sdk.platform_models import PlatformResource
+from .platform_constants import NODETYPE_AREA
+from .platform_constants import NODETYPE_CHANNEL
+from .platform_constants import NODETYPE_DEVICE
+from .platform_models import PlatformAlarmZone
+from .platform_models import PlatformResource
 
 __all__ = ["PlatformSite", "build_site_topology"]
 
