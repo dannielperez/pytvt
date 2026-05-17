@@ -395,15 +395,28 @@ class TestImportBoundary:
         violations = []
 
         for py_file in sorted(src_dir.glob("**/*.py")):
+            # Skip files inside the in-package CLI lane (pytvt/tools/*) — those
+            # are CLI entrypoints and may legitimately import everything.
+            if "tools" in py_file.parts:
+                continue
+            # __main__.py is the CLI dispatcher; it must reach into pytvt.tools.cli.
+            if py_file.name == "__main__.py":
+                continue
             lines = py_file.read_text().splitlines()
             for lineno, line in enumerate(lines, 1):
                 stripped = line.strip()
                 # Skip comments
                 if stripped.startswith("#"):
                     continue
-                # Check for imports referencing research or tools paths
-                for keyword in ("research.", "research/", "tools.", "tools/"):
+                # Flag imports from the repo-root research/ or tools/ trees, but
+                # NOT references to the in-package pytvt.tools.* CLI lane.
+                for keyword in ("research.", "research/", "tools/"):
                     if keyword in stripped and ("import" in stripped or "open(" in stripped):
                         violations.append(f"{py_file.name}:{lineno}: {stripped}")
+                # bare "tools." (no leading "pytvt.") flags the old repo-root scripts.
+                if "tools." in stripped and "pytvt.tools." not in stripped and (
+                    "import" in stripped or "open(" in stripped
+                ):
+                    violations.append(f"{py_file.name}:{lineno}: {stripped}")
 
         assert violations == [], "Runtime code must not depend on research/ or tools/:\n" + "\n".join(violations)

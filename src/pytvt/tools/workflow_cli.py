@@ -13,8 +13,8 @@ import os
 import sys
 from typing import Sequence
 
-from .xml_api import NvrClient
-from .workflows import (
+from ..xml_api import NvrClient
+from ..workflows import (
     ConsoleProgressSink,
     WorkflowError,
     WorkflowPrecheckError,
@@ -314,7 +314,7 @@ def _run_validate(args: argparse.Namespace) -> None:
             print("ERROR: baseline has no 'runs' array", file=sys.stderr)
             sys.exit(2)
         # Reconstruct a minimal baseline SiteValidationResult to feed compare_sites.
-        from .workflows import SiteValidationResult  # avoid top-level import cycle
+        from ..workflows import SiteValidationResult  # avoid top-level import cycle
 
         first = baseline_runs[0]
         baseline_result = SiteValidationResult(

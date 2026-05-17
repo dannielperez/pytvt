@@ -21,17 +21,17 @@ from pathlib import Path
 
 import dotenv
 
-from .config import DEFAULT_API_URL, load_config
-from .constants import CLI_BACKEND_CHOICES
-from .discovery import (
+from ..config import DEFAULT_API_URL, load_config
+from ..constants import CLI_BACKEND_CHOICES
+from ..discovery import (
     discover_devices,
     discover_subnet,
     discovery_to_scanner_format,
     print_discovery_report,
     save_discovery_xlsx,
 )
-from .models import DeviceEntry, ScannerConfig, ScanResult
-from .output import (
+from ..models import DeviceEntry, ScannerConfig, ScanResult
+from ..output import (
     print_nvr_report,
     print_summary,
     save_csv,
@@ -39,7 +39,7 @@ from .output import (
     save_json,
     save_xlsx_per_site,
 )
-from .scanner import filter_tvt_devices, load_devices, scan_single_nvr
+from ..scanner import filter_tvt_devices, load_devices, scan_single_nvr
 
 
 def _load_dotenv() -> None:
@@ -117,7 +117,7 @@ def main() -> None:
 def discover() -> None:
     """Discovery CLI — the ``pytvt-discover`` command."""
     _load_dotenv()
-    from .discovery import main as _main
+    from ..discovery import main as _main
 
     _main()
 
@@ -125,7 +125,7 @@ def discover() -> None:
 def api() -> None:
     """NVR API CLI — the ``pytvt-api`` command."""
     _load_dotenv()
-    from .xml_api import main as _main
+    from ..xml_api import main as _main
 
     _main()
 
@@ -152,7 +152,7 @@ def diff_cli() -> None:
 
     args = parser.parse_args()
 
-    from .diff import diff_scans, format_diff_json, format_diff_summary, format_diff_text, load_scan_file
+    from ..diff import diff_scans, format_diff_json, format_diff_summary, format_diff_text, load_scan_file
 
     try:
         old_results = load_scan_file(args.old)
@@ -211,7 +211,7 @@ def _build_scan_nvr_parser() -> argparse.ArgumentParser:
 
 def scan_nvr_cli(argv: list[str] | None = None) -> None:
     """Handle ``pytvt scan-nvr`` and the ``pytvt-scan`` console script."""
-    from .device_sdk.sdk_local import scan_nvr_payload
+    from ..device_sdk.sdk_local import scan_nvr_payload
 
     parser = _build_scan_nvr_parser()
     args = parser.parse_args(argv)
@@ -251,7 +251,7 @@ def _build_doctor_parser() -> argparse.ArgumentParser:
 
 def doctor_cli(argv: list[str] | None = None) -> None:
     """Handle ``pytvt doctor`` diagnostics."""
-    from .diagnostics import diagnostics
+    from ..diagnostics import diagnostics
 
     parser = _build_doctor_parser()
     args = parser.parse_args(argv)
@@ -304,7 +304,7 @@ def _build_sdk_parser() -> argparse.ArgumentParser:
 
 def sdk_cli(argv: list[str] | None = None) -> None:
     """Handle ``pytvt sdk`` commands."""
-    from .device_sdk.ip_modify import (
+    from ..device_sdk.ip_modify import (
         modify_device_ip_by_mac,
         scan_device_match,
         validate_modify_ip_dry_run,
@@ -476,7 +476,7 @@ def _build_connect_parser() -> argparse.ArgumentParser:
 def _connect_main(argv: list[str] | None = None) -> None:
     """Handle ``pytvt connect``."""
     _load_dotenv()
-    from .device_sdk.manager import DeviceManager
+    from ..device_sdk.manager import DeviceManager
 
     parser = _build_connect_parser()
     args = parser.parse_args(argv)
@@ -554,7 +554,7 @@ def _build_connect_many_parser() -> argparse.ArgumentParser:
 
 def _connect_many_main(argv: list[str] | None = None) -> None:
     """Handle ``pytvt connect-many``."""
-    from .connection_pool import connect_many
+    from ..connection_pool import connect_many
 
     parser = _build_connect_many_parser()
     args = parser.parse_args(argv)
@@ -765,7 +765,7 @@ def _print_scan_header(
     config: ScannerConfig,
 ) -> None:
     """Print a brief banner before scanning starts."""
-    from .registry import resolve_execution_plan
+    from ..registry import resolve_execution_plan
 
     plan = resolve_execution_plan(backend)
     print(f"\nTVT NVR Camera Scanner")

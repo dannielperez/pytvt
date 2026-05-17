@@ -430,21 +430,21 @@ class TestConnectMany:
 
 class TestConnectManyParser:
     def test_parser_requires_file(self) -> None:
-        from pytvt.cli import _build_connect_many_parser
+        from pytvt.tools.cli import _build_connect_many_parser
 
         parser = _build_connect_many_parser()
         with pytest.raises(SystemExit):
             parser.parse_args(["--user", "a", "--password", "b"])
 
     def test_parser_requires_user(self) -> None:
-        from pytvt.cli import _build_connect_many_parser
+        from pytvt.tools.cli import _build_connect_many_parser
 
         parser = _build_connect_many_parser()
         with pytest.raises(SystemExit):
             parser.parse_args(["--file", "x.json", "--password", "b"])
 
     def test_parser_accepts_all_flags(self) -> None:
-        from pytvt.cli import _build_connect_many_parser
+        from pytvt.tools.cli import _build_connect_many_parser
 
         parser = _build_connect_many_parser()
         args = parser.parse_args([
@@ -478,14 +478,14 @@ class TestConnectManyParser:
 
 class TestConnectManyMain:
     def test_connect_many_main_file_not_found(self, tmp_path) -> None:
-        from pytvt.cli import _connect_many_main
+        from pytvt.tools.cli import _connect_many_main
 
         with pytest.raises(SystemExit):
             _connect_many_main(["--file", str(tmp_path / "nope.json"), "-u", "a", "-p", "b"])
 
     @patch("pytvt.connection_pool.connect_many")
     def test_connect_many_main_json_output(self, mock_cm, tmp_path) -> None:
-        from pytvt.cli import _connect_many_main
+        from pytvt.tools.cli import _connect_many_main
 
         devices_file = tmp_path / "devices.json"
         devices_file.write_text(json.dumps([{"ip": "10.0.0.1"}, {"identifier": "ABC123"}]))
@@ -508,7 +508,7 @@ class TestConnectManyMain:
 
     @patch("pytvt.connection_pool.connect_many")
     def test_connect_many_main_exits_on_failure(self, mock_cm, tmp_path) -> None:
-        from pytvt.cli import _connect_many_main
+        from pytvt.tools.cli import _connect_many_main
 
         devices_file = tmp_path / "devices.json"
         devices_file.write_text(json.dumps([{"ip": "10.0.0.1"}]))

@@ -490,7 +490,7 @@ class TestDiffCli:
         _write_scan_file(old_path, old_results)
         _write_scan_file(new_path, new_results)
 
-        from pytvt.cli import diff_cli
+        from pytvt.tools.cli import diff_cli
 
         with patch("sys.argv", ["pytvt-diff", str(old_path), str(new_path)]), patch("builtins.print") as mock_print:
             diff_cli()
@@ -506,7 +506,7 @@ class TestDiffCli:
         _write_scan_file(old_path, old_results)
         _write_scan_file(new_path, new_results)
 
-        from pytvt.cli import diff_cli
+        from pytvt.tools.cli import diff_cli
 
         with (
             patch("sys.argv", ["pytvt-diff", str(old_path), str(new_path), "--json"]),
@@ -525,7 +525,7 @@ class TestDiffCli:
         _write_scan_file(old_path, old_results)
         _write_scan_file(new_path, new_results)
 
-        from pytvt.cli import diff_cli
+        from pytvt.tools.cli import diff_cli
 
         with (
             patch("sys.argv", ["pytvt-diff", str(old_path), str(new_path), "--summary"]),
@@ -540,7 +540,7 @@ class TestDiffCli:
         good_path = tmp_path / "good.json"
         _write_scan_file(good_path, [_make_result()])
 
-        from pytvt.cli import diff_cli
+        from pytvt.tools.cli import diff_cli
 
         with patch("sys.argv", ["pytvt-diff", str(bad_path), str(good_path)]):
             with pytest.raises(SystemExit) as exc_info:
@@ -553,7 +553,7 @@ class TestDiffCli:
         good_path = tmp_path / "good.json"
         _write_scan_file(good_path, [_make_result()])
 
-        from pytvt.cli import diff_cli
+        from pytvt.tools.cli import diff_cli
 
         with patch("sys.argv", ["pytvt-diff", str(bad_path), str(good_path)]):
             with pytest.raises(SystemExit) as exc_info:
