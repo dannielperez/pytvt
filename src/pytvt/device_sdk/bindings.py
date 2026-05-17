@@ -2,11 +2,11 @@
 
 Each function is declared lazily via :func:`bind` so you can import this
 module on any platform without triggering a load failure.  The actual
-``ct.CDLL`` is passed in by :class:`~pytvt.netsdk.client.NetSdkClient`.
+``ct.CDLL`` is passed in by :class:`~pytvt.device_sdk.client.NetSdkClient`.
 
 Usage (internal)::
 
-    from pytvt.netsdk import bindings as sdk
+    from pytvt.device_sdk import bindings as sdk
     lib = load_sdk()
     sdk.bind(lib)
     sdk.NET_SDK_Init()

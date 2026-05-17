@@ -6,8 +6,8 @@ from unittest.mock import patch
 
 import pytest
 
-from pytvt.netsdk.client import NetSdkCapabilityError
-from pytvt.netsdk.ip_modify import (
+from pytvt.device_sdk.client import NetSdkCapabilityError
+from pytvt.device_sdk.ip_modify import (
     MACOS_REQUEST_MODIFY_DEVICE_IP,
     MACOS_REQUEST_MODIFY_DEVICE_IP_OBSERVER,
     build_netclient_modify_ip_xml,
@@ -17,7 +17,7 @@ from pytvt.netsdk.ip_modify import (
     sdk_ip_modify_diagnostics,
     verify_device_ip_after_modify,
 )
-from pytvt.netsdk.loader import NetSdkUnavailable
+from pytvt.device_sdk.loader import NetSdkUnavailable
 
 
 class Func:
@@ -68,7 +68,7 @@ def test_normalize_mac_accepts_common_formats():
 
 
 def test_symbol_missing_raises_capability_error():
-    with patch("pytvt.netsdk.ip_modify.load_sdk", return_value=object()):
+    with patch("pytvt.device_sdk.ip_modify.load_sdk", return_value=object()):
         with pytest.raises(NetSdkCapabilityError, match="does not export"):
             modify_device_ip_by_mac(
                 "AA:BB:CC:DD:EE:FF",
@@ -80,7 +80,7 @@ def test_symbol_missing_raises_capability_error():
 
 
 def test_sdk_unavailable_is_clear():
-    with patch("pytvt.netsdk.ip_modify.load_sdk", side_effect=NetSdkUnavailable("missing sdk")):
+    with patch("pytvt.device_sdk.ip_modify.load_sdk", side_effect=NetSdkUnavailable("missing sdk")):
         with pytest.raises(NetSdkUnavailable, match="missing sdk"):
             modify_device_ip_by_mac(
                 "AA:BB:CC:DD:EE:FF",
@@ -93,7 +93,7 @@ def test_sdk_unavailable_is_clear():
 
 def test_macos_successful_modify_call_with_mocked_sdk():
     lib = FakeMacLib(ok=True)
-    with patch("pytvt.netsdk.ip_modify.load_sdk", return_value=lib):
+    with patch("pytvt.device_sdk.ip_modify.load_sdk", return_value=lib):
         result = modify_device_ip_by_mac(
             "AA:BB:CC:DD:EE:FF",
             "192.168.1.10",
@@ -112,7 +112,7 @@ def test_macos_successful_modify_call_with_mocked_sdk():
 
 def test_macos_observer_overload_supported():
     lib = FakeMacObserverOnlyLib(ok=True)
-    with patch("pytvt.netsdk.ip_modify.load_sdk", return_value=lib):
+    with patch("pytvt.device_sdk.ip_modify.load_sdk", return_value=lib):
         result = modify_device_ip_by_mac(
             "AA:BB:CC:DD:EE:FF",
             "192.168.1.10",
@@ -129,7 +129,7 @@ def test_macos_observer_overload_supported():
 
 def test_macos_first_overload_failure_falls_back_to_second():
     lib = FakeMacBothLib(first_ok=False, second_ok=True)
-    with patch("pytvt.netsdk.ip_modify.load_sdk", return_value=lib):
+    with patch("pytvt.device_sdk.ip_modify.load_sdk", return_value=lib):
         result = modify_device_ip_by_mac(
             "AA:BB:CC:DD:EE:FF",
             "192.168.1.10",
@@ -148,7 +148,7 @@ def test_macos_first_overload_failure_falls_back_to_second():
 
 def test_macos_sdk_failure_includes_error_code():
     lib = FakeMacLib(ok=False, error=1234)
-    with patch("pytvt.netsdk.ip_modify.load_sdk", return_value=lib):
+    with patch("pytvt.device_sdk.ip_modify.load_sdk", return_value=lib):
         result = modify_device_ip_by_mac(
             "AA:BB:CC:DD:EE:FF",
             "192.168.1.10",
@@ -164,7 +164,7 @@ def test_macos_sdk_failure_includes_error_code():
 
 def test_no_secret_in_result_repr_or_error():
     lib = FakeMacLib(ok=True)
-    with patch("pytvt.netsdk.ip_modify.load_sdk", return_value=lib):
+    with patch("pytvt.device_sdk.ip_modify.load_sdk", return_value=lib):
         result = modify_device_ip_by_mac(
             "AA:BB:CC:DD:EE:FF",
             None,
@@ -191,10 +191,10 @@ def test_request_xml_contains_password_only_in_native_payload():
 
 
 def test_architecture_mismatch_message_from_diagnostics():
-    with patch("pytvt.netsdk.ip_modify.resolve_sdk_library_path", return_value="/opt/tvt/libNetClientSDK.dylib"):
-        with patch("pytvt.netsdk.ip_modify.sdk_binary_arches", return_value={"x86_64"}):
+    with patch("pytvt.device_sdk.ip_modify.resolve_sdk_library_path", return_value="/opt/tvt/libNetClientSDK.dylib"):
+        with patch("pytvt.device_sdk.ip_modify.sdk_binary_arches", return_value={"x86_64"}):
             with patch(
-                "pytvt.netsdk.ip_modify.load_sdk",
+                "pytvt.device_sdk.ip_modify.load_sdk",
                 side_effect=NetSdkUnavailable("Run under Rosetta/x86_64 Python"),
             ):
                 report = sdk_ip_modify_diagnostics("/opt/tvt")
@@ -205,22 +205,22 @@ def test_architecture_mismatch_message_from_diagnostics():
 
 def test_diagnostics_include_selected_function_when_symbol_available():
     lib = FakeMacLib(ok=True)
-    with patch("pytvt.netsdk.ip_modify.resolve_sdk_library_path", return_value="/opt/tvt/libNetClientSDK.dylib"):
-        with patch("pytvt.netsdk.ip_modify.sdk_binary_arches", return_value={"x86_64"}):
-            with patch("pytvt.netsdk.ip_modify.load_sdk", return_value=lib):
+    with patch("pytvt.device_sdk.ip_modify.resolve_sdk_library_path", return_value="/opt/tvt/libNetClientSDK.dylib"):
+        with patch("pytvt.device_sdk.ip_modify.sdk_binary_arches", return_value={"x86_64"}):
+            with patch("pytvt.device_sdk.ip_modify.load_sdk", return_value=lib):
                 report = sdk_ip_modify_diagnostics("/opt/tvt")
 
     assert report["selected_sdk_function"] == "NET_CLIENT_RequestModifyDeviceIp"
 
 
 def test_scan_only_helper_never_calls_modify():
-    with patch("pytvt.netsdk.ip_modify.modify_device_ip_by_mac") as mock_modify:
+    with patch("pytvt.device_sdk.ip_modify.modify_device_ip_by_mac") as mock_modify:
         with patch(
-            "pytvt.netsdk.ip_modify._scan_match_by_mac_or_ip",
+            "pytvt.device_sdk.ip_modify._scan_match_by_mac_or_ip",
             return_value={"mac": "AA:BB:CC:DD:EE:FF", "ip": "192.168.1.10"},
         ):
             with patch(
-                "pytvt.netsdk.ip_modify.sdk_ip_modify_diagnostics",
+                "pytvt.device_sdk.ip_modify.sdk_ip_modify_diagnostics",
                 return_value={"symbols": {"NET_SDK_DiscoverDevice": True}},
             ):
                 payload = scan_device_match(mac="AA:BB:CC:DD:EE:FF", ip="192.168.1.10")
@@ -231,7 +231,7 @@ def test_scan_only_helper_never_calls_modify():
 
 def test_verify_result_contains_no_secret_text():
     with patch(
-        "pytvt.netsdk.ip_modify.sdk_ip_modify_diagnostics",
+        "pytvt.device_sdk.ip_modify.sdk_ip_modify_diagnostics",
         return_value={"symbols": {"NET_SDK_DiscoverDevice": False}},
     ):
         payload = verify_device_ip_after_modify(mac="AA:BB:CC:DD:EE:FF", new_ip="192.168.1.20")

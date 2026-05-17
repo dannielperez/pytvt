@@ -88,12 +88,12 @@ def _install_defaults() -> None:
     register(BackendFamily.PROTOCOL, None, _protocol_scan)
 
     # SDK family — compat bridge (HTTP API → SDK bridge service)
-    from .sdk_http import sdk_scan
+    from .device_sdk.sdk_http import sdk_scan
 
     register(BackendFamily.SDK, IntegrationMode.COMPAT_BRIDGE, sdk_scan)
 
     # SDK family — direct SDK (local Python ctypes → libdvrnetsdk)
-    from .sdk_local import sdk_scan_local
+    from .device_sdk.sdk_local import sdk_scan_local
 
     register(BackendFamily.SDK, IntegrationMode.DIRECT_SDK, sdk_scan_local)
 

@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from pytvt.sdk_http_client import (
+from pytvt.device_sdk.http_client import (
     CommandResult,
     DeviceInfoResult,
     DeviceTimeResult,
@@ -53,12 +53,12 @@ CREDS = ("10.0.0.1", "admin", "pass123")
 
 class TestHealth:
     def test_healthy(self, client: SdkHttpClient) -> None:
-        with patch("pytvt.sdk_http_client.urllib.request.urlopen") as mock_open:
+        with patch("pytvt.device_sdk.http_client.urllib.request.urlopen") as mock_open:
             mock_open.return_value = _mock_response({"status": "ok"})
             assert client.health() is True
 
     def test_unhealthy(self, client: SdkHttpClient) -> None:
-        with patch("pytvt.sdk_http_client.urllib.request.urlopen") as mock_open:
+        with patch("pytvt.device_sdk.http_client.urllib.request.urlopen") as mock_open:
             mock_open.side_effect = ConnectionRefusedError
             assert client.health() is False
 
@@ -86,7 +86,7 @@ class TestDeviceInfo:
             "device_type": 3,
             "error": None,
         }
-        with patch("pytvt.sdk_http_client.urllib.request.urlopen") as mock_open:
+        with patch("pytvt.device_sdk.http_client.urllib.request.urlopen") as mock_open:
             mock_open.return_value = _mock_response(resp_data)
             result = client.device_info(*CREDS)
 
@@ -100,7 +100,7 @@ class TestDeviceInfo:
     def test_connection_error(self, client: SdkHttpClient) -> None:
         import urllib.error
 
-        with patch("pytvt.sdk_http_client.urllib.request.urlopen") as mock_open:
+        with patch("pytvt.device_sdk.http_client.urllib.request.urlopen") as mock_open:
             mock_open.side_effect = urllib.error.URLError("refused")
             result = client.device_info(*CREDS)
 
@@ -108,7 +108,7 @@ class TestDeviceInfo:
         assert "Connection error" in (result.error or "")
 
     def test_timeout(self, client: SdkHttpClient) -> None:
-        with patch("pytvt.sdk_http_client.urllib.request.urlopen") as mock_open:
+        with patch("pytvt.device_sdk.http_client.urllib.request.urlopen") as mock_open:
             mock_open.side_effect = TimeoutError
             result = client.device_info(*CREDS)
 
@@ -123,7 +123,7 @@ class TestDeviceInfo:
 
 class TestDeviceTime:
     def test_get_time(self, client: SdkHttpClient) -> None:
-        with patch("pytvt.sdk_http_client.urllib.request.urlopen") as mock_open:
+        with patch("pytvt.device_sdk.http_client.urllib.request.urlopen") as mock_open:
             mock_open.return_value = _mock_response(
                 {
                     "success": True,
@@ -139,7 +139,7 @@ class TestDeviceTime:
         assert result.device_time == "2025-01-15T10:30:00"
 
     def test_set_time(self, client: SdkHttpClient) -> None:
-        with patch("pytvt.sdk_http_client.urllib.request.urlopen") as mock_open:
+        with patch("pytvt.device_sdk.http_client.urllib.request.urlopen") as mock_open:
             mock_open.return_value = _mock_response(
                 {
                     "success": True,
@@ -155,7 +155,7 @@ class TestDeviceTime:
         assert result.timestamp == 1700000000
 
     def test_set_sends_timestamp_in_payload(self, client: SdkHttpClient) -> None:
-        with patch("pytvt.sdk_http_client.urllib.request.urlopen") as mock_open:
+        with patch("pytvt.device_sdk.http_client.urllib.request.urlopen") as mock_open:
             mock_open.return_value = _mock_response({"success": True, "action": "set", "error": None})
             client.device_time(*CREDS, set_timestamp=1700000000)
 
@@ -172,7 +172,7 @@ class TestDeviceTime:
 
 class TestReboot:
     def test_success(self, client: SdkHttpClient) -> None:
-        with patch("pytvt.sdk_http_client.urllib.request.urlopen") as mock_open:
+        with patch("pytvt.device_sdk.http_client.urllib.request.urlopen") as mock_open:
             mock_open.return_value = _mock_response({"success": True, "error": None})
             result = client.reboot(*CREDS)
 
@@ -180,7 +180,7 @@ class TestReboot:
         assert result.success is True
 
     def test_failure(self, client: SdkHttpClient) -> None:
-        with patch("pytvt.sdk_http_client.urllib.request.urlopen") as mock_open:
+        with patch("pytvt.device_sdk.http_client.urllib.request.urlopen") as mock_open:
             mock_open.return_value = _mock_response({"success": False, "error": "Device busy"})
             result = client.reboot(*CREDS)
 
@@ -196,7 +196,7 @@ class TestReboot:
 class TestSnapshot:
     def test_success_returns_bytes(self, client: SdkHttpClient) -> None:
         jpeg = b"\xff\xd8\xff\xe0" + b"\x00" * 100  # fake JPEG
-        with patch("pytvt.sdk_http_client.urllib.request.urlopen") as mock_open:
+        with patch("pytvt.device_sdk.http_client.urllib.request.urlopen") as mock_open:
             mock_open.return_value = _mock_response(jpeg, content_type="image/jpeg")
             result = client.snapshot(*CREDS, channel=0)
 
@@ -205,7 +205,7 @@ class TestSnapshot:
         assert len(result) == 104
 
     def test_failure_returns_none(self, client: SdkHttpClient) -> None:
-        with patch("pytvt.sdk_http_client.urllib.request.urlopen") as mock_open:
+        with patch("pytvt.device_sdk.http_client.urllib.request.urlopen") as mock_open:
             mock_open.return_value = _mock_response(
                 {"success": False, "error": "fail"},
                 content_type="application/json",
@@ -215,7 +215,7 @@ class TestSnapshot:
         assert result is None
 
     def test_connection_error_returns_none(self, client: SdkHttpClient) -> None:
-        with patch("pytvt.sdk_http_client.urllib.request.urlopen") as mock_open:
+        with patch("pytvt.device_sdk.http_client.urllib.request.urlopen") as mock_open:
             mock_open.side_effect = ConnectionRefusedError
             result = client.snapshot(*CREDS)
 
@@ -229,7 +229,7 @@ class TestSnapshot:
 
 class TestRtspUrl:
     def test_main_stream(self, client: SdkHttpClient) -> None:
-        with patch("pytvt.sdk_http_client.urllib.request.urlopen") as mock_open:
+        with patch("pytvt.device_sdk.http_client.urllib.request.urlopen") as mock_open:
             mock_open.return_value = _mock_response(
                 {
                     "success": True,
@@ -243,7 +243,7 @@ class TestRtspUrl:
         assert result.rtsp_url == "rtsp://10.0.0.1:554/chID=0&streamType=main"
 
     def test_sub_stream(self, client: SdkHttpClient) -> None:
-        with patch("pytvt.sdk_http_client.urllib.request.urlopen") as mock_open:
+        with patch("pytvt.device_sdk.http_client.urllib.request.urlopen") as mock_open:
             mock_open.return_value = _mock_response(
                 {
                     "success": True,
@@ -264,14 +264,14 @@ class TestRtspUrl:
 
 class TestPtz:
     def test_stop(self, client: SdkHttpClient) -> None:
-        with patch("pytvt.sdk_http_client.urllib.request.urlopen") as mock_open:
+        with patch("pytvt.device_sdk.http_client.urllib.request.urlopen") as mock_open:
             mock_open.return_value = _mock_response({"success": True, "error": None})
             result = client.ptz(*CREDS, channel=0, command=0)
 
         assert result.success is True
 
     def test_sends_correct_payload(self, client: SdkHttpClient) -> None:
-        with patch("pytvt.sdk_http_client.urllib.request.urlopen") as mock_open:
+        with patch("pytvt.device_sdk.http_client.urllib.request.urlopen") as mock_open:
             mock_open.return_value = _mock_response({"success": True, "error": None})
             client.ptz(*CREDS, channel=2, command=12, speed=6)
 
@@ -289,14 +289,14 @@ class TestPtz:
 
 class TestPtzPreset:
     def test_goto(self, client: SdkHttpClient) -> None:
-        with patch("pytvt.sdk_http_client.urllib.request.urlopen") as mock_open:
+        with patch("pytvt.device_sdk.http_client.urllib.request.urlopen") as mock_open:
             mock_open.return_value = _mock_response({"success": True, "error": None})
             result = client.ptz_preset(*CREDS, channel=0, command=16, preset_index=1)
 
         assert result.success is True
 
     def test_payload(self, client: SdkHttpClient) -> None:
-        with patch("pytvt.sdk_http_client.urllib.request.urlopen") as mock_open:
+        with patch("pytvt.device_sdk.http_client.urllib.request.urlopen") as mock_open:
             mock_open.return_value = _mock_response({"success": True, "error": None})
             client.ptz_preset(*CREDS, channel=0, command=15, preset_index=5)
 
@@ -313,7 +313,7 @@ class TestPtzPreset:
 
 class TestScan:
     def test_success(self, client: SdkHttpClient) -> None:
-        with patch("pytvt.sdk_http_client.urllib.request.urlopen") as mock_open:
+        with patch("pytvt.device_sdk.http_client.urllib.request.urlopen") as mock_open:
             mock_open.return_value = _mock_response(
                 {
                     "success": True,
@@ -329,7 +329,7 @@ class TestScan:
     def test_connection_error(self, client: SdkHttpClient) -> None:
         import urllib.error
 
-        with patch("pytvt.sdk_http_client.urllib.request.urlopen") as mock_open:
+        with patch("pytvt.device_sdk.http_client.urllib.request.urlopen") as mock_open:
             mock_open.side_effect = urllib.error.URLError("refused")
             result = client.scan(*CREDS)
 

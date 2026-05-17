@@ -22,9 +22,9 @@ from pytvt.cli import (
     sdk_cli,
     scan_nvr_cli,
 )
-from pytvt.device_manager import Backend
+from pytvt.device_sdk.manager import Backend
 from pytvt.models import DeviceEntry
-from pytvt.sdk_http_client import DeviceInfoResult
+from pytvt.device_sdk.http_client import DeviceInfoResult
 
 # ── _build_parser ────────────────────────────────────────────────────
 
@@ -167,7 +167,7 @@ class TestConnectCommand:
 
     def test_sdk_cli_dry_run_success(self, capsys):
         with patch(
-            "pytvt.netsdk.ip_modify.validate_modify_ip_dry_run",
+            "pytvt.device_sdk.ip_modify.validate_modify_ip_dry_run",
             return_value={"dry_run": True, "valid_arguments": True, "target_match": {"ip": "10.1.1.10"}},
         ):
             sdk_cli(
@@ -191,10 +191,10 @@ class TestConnectCommand:
 
     def test_sdk_cli_dry_run_never_calls_modify(self, capsys):
         with patch(
-            "pytvt.netsdk.ip_modify.validate_modify_ip_dry_run",
+            "pytvt.device_sdk.ip_modify.validate_modify_ip_dry_run",
             return_value={"dry_run": True, "valid_arguments": True, "target_match": {"ip": "10.1.1.10"}},
         ):
-            with patch("pytvt.netsdk.ip_modify.modify_device_ip_by_mac") as mock_modify:
+            with patch("pytvt.device_sdk.ip_modify.modify_device_ip_by_mac") as mock_modify:
                 sdk_cli(
                     [
                         "modify-ip",
@@ -216,7 +216,7 @@ class TestConnectCommand:
 
     def test_sdk_cli_blocked_dry_run_exits_nonzero(self, capsys):
         with patch(
-            "pytvt.netsdk.ip_modify.validate_modify_ip_dry_run",
+            "pytvt.device_sdk.ip_modify.validate_modify_ip_dry_run",
             return_value={"dry_run": True, "blocked": True, "valid_arguments": True, "target_match": None},
         ):
             with pytest.raises(SystemExit, match="1"):
@@ -241,7 +241,7 @@ class TestConnectCommand:
 
     def test_sdk_cli_scan_match_success(self, capsys):
         with patch(
-            "pytvt.netsdk.ip_modify.scan_device_match",
+            "pytvt.device_sdk.ip_modify.scan_device_match",
             return_value={"scan_only": True, "matched": True, "target_match": {"ip": "10.1.1.10"}},
         ):
             sdk_cli(["scan-match", "--mac", "AA:BB:CC:DD:EE:FF", "--json"])
@@ -251,7 +251,7 @@ class TestConnectCommand:
 
     def test_sdk_cli_verify_only_failure_exits_nonzero(self, capsys):
         with patch(
-            "pytvt.netsdk.ip_modify.verify_device_ip_after_modify",
+            "pytvt.device_sdk.ip_modify.verify_device_ip_after_modify",
             return_value={"verified": False, "blocked": True, "status": "blocked", "reason": "not found"},
         ):
             with pytest.raises(SystemExit, match="1"):
@@ -278,7 +278,7 @@ class TestConnectCommand:
 
     def test_sdk_cli_modify_success_but_verification_failure_blocks(self, capsys):
         with patch(
-            "pytvt.netsdk.ip_modify.modify_device_ip_by_mac",
+            "pytvt.device_sdk.ip_modify.modify_device_ip_by_mac",
             return_value=type(
                 "ModifyResult",
                 (),
@@ -295,7 +295,7 @@ class TestConnectCommand:
             )(),
         ):
             with patch(
-                "pytvt.netsdk.ip_modify.verify_device_ip_after_modify",
+                "pytvt.device_sdk.ip_modify.verify_device_ip_after_modify",
                 return_value={"verified": False, "blocked": True, "status": "blocked", "reason": "scan did not confirm"},
             ):
                 with pytest.raises(SystemExit, match="1"):
@@ -322,7 +322,7 @@ class TestConnectCommand:
         assert payload["verified"] is False
 
     def test_connect_main_success(self, capsys):
-        with patch("pytvt.device_manager.DeviceManager") as mock_manager:
+        with patch("pytvt.device_sdk.manager.DeviceManager") as mock_manager:
             instance = mock_manager.return_value
             instance.__enter__.return_value = instance
             instance.backend = Backend.NETSDK
@@ -343,7 +343,7 @@ class TestConnectCommand:
 
     def test_scan_nvr_cli_prints_json_without_sentinels(self, capsys):
         with patch(
-            "pytvt.sdk_local.scan_nvr_payload",
+            "pytvt.device_sdk.sdk_local.scan_nvr_payload",
             return_value={"success": True, "cameras": [], "nvr_ip": "10.0.0.1", "nvr_port": 6036},
         ):
             scan_nvr_cli(["10.0.0.1", "--json"])
@@ -354,7 +354,7 @@ class TestConnectCommand:
 
     def test_scan_nvr_cli_prints_sentinels_by_default(self, capsys):
         with patch(
-            "pytvt.sdk_local.scan_nvr_payload",
+            "pytvt.device_sdk.sdk_local.scan_nvr_payload",
             return_value={"success": True, "cameras": [], "nvr_ip": "10.0.0.1", "nvr_port": 6036},
         ):
             scan_nvr_cli(["10.0.0.1"])
@@ -365,7 +365,7 @@ class TestConnectCommand:
 
     def test_scan_nvr_cli_exits_nonzero_on_failure(self):
         with patch(
-            "pytvt.sdk_local.scan_nvr_payload",
+            "pytvt.device_sdk.sdk_local.scan_nvr_payload",
             return_value={"success": False, "error": "missing SDK", "cameras": [], "nvr_ip": "10.0.0.1", "nvr_port": 6036},
         ):
             with pytest.raises(SystemExit, match="1"):
@@ -373,7 +373,7 @@ class TestConnectCommand:
 
     def test_scan_nvr_cli_passes_sdk_path(self):
         with patch(
-            "pytvt.sdk_local.scan_nvr_payload",
+            "pytvt.device_sdk.sdk_local.scan_nvr_payload",
             return_value={"success": True, "cameras": [], "nvr_ip": "10.0.0.1", "nvr_port": 6036},
         ) as mock_payload:
             scan_nvr_cli(["10.0.0.1", "6036", "admin", "secret", "--sdk-path", "/opt/tvt-sdk", "--timeout", "15"])
@@ -390,7 +390,7 @@ class TestConnectCommand:
 
     def test_scan_nvr_cli_invalid_credentials_json_output(self, capsys):
         with patch(
-            "pytvt.sdk_local.scan_nvr_payload",
+            "pytvt.device_sdk.sdk_local.scan_nvr_payload",
             return_value={
                 "success": False,
                 "error": "Login failed",
@@ -409,7 +409,7 @@ class TestConnectCommand:
 
     def test_scan_nvr_cli_unreachable_host_json_output(self, capsys):
         with patch(
-            "pytvt.sdk_local.scan_nvr_payload",
+            "pytvt.device_sdk.sdk_local.scan_nvr_payload",
             return_value={
                 "success": False,
                 "error": "Connection refused",
@@ -426,7 +426,7 @@ class TestConnectCommand:
 
     def test_scan_nvr_cli_sdk_not_loaded_json_output(self, capsys):
         with patch(
-            "pytvt.sdk_local.scan_nvr_payload",
+            "pytvt.device_sdk.sdk_local.scan_nvr_payload",
             return_value={
                 "success": False,
                 "error": "TVT SDK is not available",

@@ -1,4 +1,4 @@
-"""Tests for pytvt.netsdk.client — NetSdkClient with mocked native library."""
+"""Tests for pytvt.device_sdk.client — NetSdkClient with mocked native library."""
 
 from __future__ import annotations
 
@@ -8,8 +8,8 @@ from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
 
-from pytvt.netsdk import bindings as sdk
-from pytvt.netsdk.client import (
+from pytvt.device_sdk import bindings as sdk
+from pytvt.device_sdk.client import (
     AlarmOutStatus,
     ChannelStatus,
     DeviceInfo,
@@ -29,7 +29,7 @@ from pytvt.netsdk.client import (
     SmartSupport,
     TVTClient,
 )
-from pytvt.netsdk.constants import (
+from pytvt.device_sdk.constants import (
     ConnectType,
     DiskProperty,
     DiskStatus,
@@ -39,8 +39,8 @@ from pytvt.netsdk.constants import (
     SdkError,
     StreamType,
 )
-from pytvt.netsdk.loader import NetSdkUnavailable
-from pytvt.netsdk.types import (
+from pytvt.device_sdk.loader import NetSdkUnavailable
+from pytvt.device_sdk.types import (
     DD_TIME,
     NET_SDK_ALRAM_OUT_STATUS,
     NET_SDK_CH_DEVICE_STATUS,
@@ -80,7 +80,7 @@ def mock_lib():
 @pytest.fixture
 def client(mock_lib):
     """Create a NetSdkClient with mocked native library."""
-    with patch("pytvt.netsdk.client.load_sdk", return_value=mock_lib):
+    with patch("pytvt.device_sdk.client.load_sdk", return_value=mock_lib):
         c = NetSdkClient()
         yield c
         c.cleanup()
@@ -98,7 +98,7 @@ def session(mock_lib, client):
 
 class TestNetSdkClientInit:
     def test_init_calls_sdk(self, mock_lib):
-        with patch("pytvt.netsdk.client.load_sdk", return_value=mock_lib):
+        with patch("pytvt.device_sdk.client.load_sdk", return_value=mock_lib):
             c = NetSdkClient()
             mock_lib.NET_SDK_Init.assert_called_once()
             mock_lib.NET_SDK_SetConnectTime.assert_called_once_with(5000, 5000)
@@ -107,17 +107,17 @@ class TestNetSdkClientInit:
 
     def test_init_failure(self, mock_lib):
         mock_lib.NET_SDK_Init.return_value = False
-        with patch("pytvt.netsdk.client.load_sdk", return_value=mock_lib), pytest.raises(NetSdkError, match="Init"):
+        with patch("pytvt.device_sdk.client.load_sdk", return_value=mock_lib), pytest.raises(NetSdkError, match="Init"):
             NetSdkClient()
 
     def test_context_manager(self, mock_lib):
-        with patch("pytvt.netsdk.client.load_sdk", return_value=mock_lib):
+        with patch("pytvt.device_sdk.client.load_sdk", return_value=mock_lib):
             with NetSdkClient() as c:
                 assert c._lib is not None
             mock_lib.NET_SDK_Cleanup.assert_called()
 
     def test_custom_timeouts(self, mock_lib):
-        with patch("pytvt.netsdk.client.load_sdk", return_value=mock_lib):
+        with patch("pytvt.device_sdk.client.load_sdk", return_value=mock_lib):
             c = NetSdkClient(connect_timeout=10000, recv_timeout=8000, reconnect_interval=5000)
             mock_lib.NET_SDK_SetConnectTime.assert_called_once_with(10000, 8000)
             mock_lib.NET_SDK_SetReconnect.assert_called_once_with(5000, True)
@@ -238,7 +238,7 @@ class TestLogin:
 
 class TestNatLogin:
     def test_login_nat_success(self, client, mock_lib):
-        with patch("pytvt.netsdk.client.ensure_nat_support"):
+        with patch("pytvt.device_sdk.client.ensure_nat_support"):
             session = client.login_nat("ABC123456", "admin", "pass")
 
         assert session.handle == 2
@@ -248,7 +248,7 @@ class TestNatLogin:
         assert call_args[6] == b"ABC123456"
 
     def test_login_nat_configures_nat20_server(self, client, mock_lib):
-        with patch("pytvt.netsdk.client.ensure_nat_support"):
+        with patch("pytvt.device_sdk.client.ensure_nat_support"):
             client.login_nat(
                 "ABC123456",
                 "admin",
@@ -265,7 +265,7 @@ class TestNatLogin:
 
     def test_login_nat_missing_library(self, client):
         with (
-            patch("pytvt.netsdk.client.ensure_nat_support", side_effect=NetSdkUnavailable("missing nat lib")),
+            patch("pytvt.device_sdk.client.ensure_nat_support", side_effect=NetSdkUnavailable("missing nat lib")),
             pytest.raises(NatUnavailableError, match="missing nat lib"),
         ):
             client.login_nat("ABC123456", "admin", "pass")
@@ -273,13 +273,13 @@ class TestNatLogin:
     def test_login_nat_failure(self, client, mock_lib):
         mock_lib.NET_SDK_LoginEx.return_value = -1
         mock_lib.NET_SDK_GetLastError.return_value = 1
-        with patch("pytvt.netsdk.client.ensure_nat_support"), pytest.raises(NatLoginFailed, match="NAT login"):
+        with patch("pytvt.device_sdk.client.ensure_nat_support"), pytest.raises(NatLoginFailed, match="NAT login"):
             client.login_nat("ABC123456", "admin", "wrong")
 
     def test_login_nat_timeout(self, client, mock_lib):
         mock_lib.NET_SDK_LoginEx.return_value = -1
         mock_lib.NET_SDK_GetLastError.return_value = SdkError.NETWORK_RECV_TIMEOUT
-        with patch("pytvt.netsdk.client.ensure_nat_support"), pytest.raises(NatTimeoutError, match="NAT login"):
+        with patch("pytvt.device_sdk.client.ensure_nat_support"), pytest.raises(NatTimeoutError, match="NAT login"):
             client.login_nat("ABC123456", "admin", "pass")
 
 
@@ -315,7 +315,7 @@ class TestConnectFacade:
         mock_login.assert_called_once_with("10.0.0.1", "admin", "pass", port=9008)
 
     def test_tvtclient_inherits_connect(self, mock_lib):
-        with patch("pytvt.netsdk.client.load_sdk", return_value=mock_lib):
+        with patch("pytvt.device_sdk.client.load_sdk", return_value=mock_lib):
             client = TVTClient()
             assert isinstance(client, NetSdkClient)
             client.cleanup()

@@ -36,7 +36,7 @@ from pytvt.platform_sdk.sdk import (
     export_evidence_schema,
     inspect_sdk_library,
 )
-from pytvt.netsdk import types as netsdk_types
+from pytvt.device_sdk import types as netsdk_types
 
 
 def _resolved(
@@ -126,7 +126,7 @@ class TestSymbolRegistry:
         assert registry["login"].status == "confirmed"
         assert registry["login"].symbol_name == "NET_SDK_LoginEx"
         assert registry["login"].signature_ready is True
-        assert registry["login"].signature_source == "pytvt.netsdk.bindings.NET_SDK_LoginEx"
+        assert registry["login"].signature_source == "pytvt.device_sdk.bindings.NET_SDK_LoginEx"
 
     def test_resolves_list_devices_strongest_candidate_as_confirmed(self):
         registry = _resolve_symbol_registry({"NET_SDK_GetDeviceIPCInfo"})
@@ -432,7 +432,7 @@ class TestSDKClientLoginPath:
             "confirmed",
             "NET_SDK_LoginEx",
             signature_ready=True,
-            signature_source="pytvt.netsdk.bindings.NET_SDK_LoginEx",
+            signature_source="pytvt.device_sdk.bindings.NET_SDK_LoginEx",
         )
         client = SDKClient(
             lib,
@@ -453,7 +453,7 @@ class TestSDKClientLoginPath:
             "confirmed",
             "NET_SDK_LoginEx",
             signature_ready=True,
-            signature_source="pytvt.netsdk.bindings.NET_SDK_LoginEx",
+            signature_source="pytvt.device_sdk.bindings.NET_SDK_LoginEx",
         )
         client = SDKClient(
             lib,
@@ -476,7 +476,7 @@ class TestSDKClientLoginPath:
             "confirmed",
             "NET_SDK_LoginEx",
             signature_ready=True,
-            signature_source="pytvt.netsdk.bindings.NET_SDK_LoginEx",
+            signature_source="pytvt.device_sdk.bindings.NET_SDK_LoginEx",
         )
         client = SDKClient(
             lib,
@@ -501,7 +501,7 @@ class TestSDKClientLoginPath:
             "confirmed",
             "NET_SDK_LoginEx",
             signature_ready=True,
-            signature_source="pytvt.netsdk.bindings.NET_SDK_LoginEx",
+            signature_source="pytvt.device_sdk.bindings.NET_SDK_LoginEx",
         )
         client = SDKClient(
             lib,

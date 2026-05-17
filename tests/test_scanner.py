@@ -113,7 +113,7 @@ class TestScanSingleNvr:
         assert len(result.cameras) == 1
         mock_scan.assert_called_once()
 
-    @patch("pytvt.sdk_http.sdk_scan")
+    @patch("pytvt.device_sdk.sdk_http.sdk_scan")
     def test_sdk_backend(self, mock_sdk, sample_device, default_config):
         mock_sdk.return_value = ScanResult(success=True, backend="sdk")
         # Re-register the mock into the registry so dispatch finds it
@@ -126,11 +126,11 @@ class TestScanSingleNvr:
             assert result.backend == "sdk"
             mock_sdk.assert_called_once_with(sample_device, default_config)
         finally:
-            from pytvt.sdk_http import sdk_scan
+            from pytvt.device_sdk.sdk_http import sdk_scan
 
             _registry[(BackendFamily.SDK, IntegrationMode.COMPAT_BRIDGE)] = sdk_scan
 
-    @patch("pytvt.sdk_local.sdk_scan_local")
+    @patch("pytvt.device_sdk.sdk_local.sdk_scan_local")
     def test_sdk_local_backend(self, mock_local, sample_device, default_config):
         mock_local.return_value = ScanResult(success=True, backend="sdk-local")
         from pytvt.constants import BackendFamily, IntegrationMode
@@ -142,7 +142,7 @@ class TestScanSingleNvr:
             assert result.backend == "sdk-local"
             mock_local.assert_called_once_with(sample_device, default_config)
         finally:
-            from pytvt.sdk_local import sdk_scan_local
+            from pytvt.device_sdk.sdk_local import sdk_scan_local
 
             _registry[(BackendFamily.SDK, IntegrationMode.DIRECT_SDK)] = sdk_scan_local
 
@@ -161,7 +161,7 @@ class TestScanSingleNvr:
         result = scan_single_nvr(sample_device, default_config, "both")
         assert result.backend == "protocol"
 
-    @patch("pytvt.sdk_http.sdk_scan")
+    @patch("pytvt.device_sdk.sdk_http.sdk_scan")
     @patch("pytvt.scanner._raw_protocol_scan")
     def test_both_backend_falls_back_to_sdk(self, mock_proto, mock_sdk, sample_device, default_config):
         from pytvt.constants import BackendFamily, IntegrationMode
@@ -185,11 +185,11 @@ class TestScanSingleNvr:
             assert result.success is True
             assert result.backend == "sdk"
         finally:
-            from pytvt.sdk_http import sdk_scan
+            from pytvt.device_sdk.sdk_http import sdk_scan
 
             _registry[(BackendFamily.SDK, IntegrationMode.COMPAT_BRIDGE)] = sdk_scan
 
-    @patch("pytvt.sdk_http.sdk_scan")
+    @patch("pytvt.device_sdk.sdk_http.sdk_scan")
     @patch("pytvt.scanner._raw_protocol_scan")
     def test_both_backend_both_fail(self, mock_proto, mock_sdk, sample_device, default_config):
         from pytvt.constants import BackendFamily, IntegrationMode
@@ -214,7 +214,7 @@ class TestScanSingleNvr:
             assert "proto fail" in result.error
             assert "sdk fail" in result.error
         finally:
-            from pytvt.sdk_http import sdk_scan
+            from pytvt.device_sdk.sdk_http import sdk_scan
 
             _registry[(BackendFamily.SDK, IntegrationMode.COMPAT_BRIDGE)] = sdk_scan
 

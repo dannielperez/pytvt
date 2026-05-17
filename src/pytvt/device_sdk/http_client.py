@@ -6,7 +6,7 @@ request and returns typed dataclass results.
 
 Usage::
 
-    from pytvt.sdk_http_client import SdkHttpClient
+    from pytvt.device_sdk.http_client import SdkHttpClient
 
     client = SdkHttpClient("http://localhost:3000")
     info = client.device_info("10.0.0.1", "admin", "pass")

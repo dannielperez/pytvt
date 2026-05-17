@@ -1,4 +1,4 @@
-"""Tests for pytvt.netsdk.loader NAT companion validation."""
+"""Tests for pytvt.device_sdk.loader NAT companion validation."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from pytvt.netsdk.loader import NetSdkUnavailable, ensure_nat_support, load_sdk
+from pytvt.device_sdk.loader import NetSdkUnavailable, ensure_nat_support, load_sdk
 
 
 def _set_linux_platform(mock_platform) -> None:
@@ -17,10 +17,10 @@ def _set_linux_platform(mock_platform) -> None:
 class TestNatLoader:
     def test_load_sdk_missing_library_requires_external_sdk_installation(self) -> None:
         with (
-            patch("pytvt.netsdk.loader.platform") as mock_platform,
-            patch("pytvt.netsdk.loader._find_lib", return_value="libdvrnetsdk.so"),
-            patch("pytvt.netsdk.loader._preload_companion_libraries"),
-            patch("pytvt.netsdk.loader.ct.CDLL", side_effect=OSError("not found")),
+            patch("pytvt.device_sdk.loader.platform") as mock_platform,
+            patch("pytvt.device_sdk.loader._find_lib", return_value="libdvrnetsdk.so"),
+            patch("pytvt.device_sdk.loader._preload_companion_libraries"),
+            patch("pytvt.device_sdk.loader.ct.CDLL", side_effect=OSError("not found")),
         ):
             _set_linux_platform(mock_platform)
 
@@ -29,13 +29,13 @@ class TestNatLoader:
 
     def test_load_sdk_requires_nat_companion(self) -> None:
         with (
-            patch("pytvt.netsdk.loader.platform") as mock_platform,
-            patch("pytvt.netsdk.loader._find_lib", return_value="/opt/tvt/libdvrnetsdk.so"),
+            patch("pytvt.device_sdk.loader.platform") as mock_platform,
+            patch("pytvt.device_sdk.loader._find_lib", return_value="/opt/tvt/libdvrnetsdk.so"),
             patch(
-                "pytvt.netsdk.loader._preload_companion_libraries",
+                "pytvt.device_sdk.loader._preload_companion_libraries",
                 side_effect=NetSdkUnavailable("TVT AutoNAT requires libNatClientSDK.so"),
             ),
-            patch("pytvt.netsdk.loader.ct.CDLL", return_value=MagicMock()),
+            patch("pytvt.device_sdk.loader.ct.CDLL", return_value=MagicMock()),
         ):
             _set_linux_platform(mock_platform)
 
@@ -44,9 +44,9 @@ class TestNatLoader:
 
     def test_ensure_nat_support_preloads_nat_dependency(self) -> None:
         with (
-            patch("pytvt.netsdk.loader.platform") as mock_platform,
-            patch("pytvt.netsdk.loader._find_lib", return_value="/opt/tvt/libdvrnetsdk.so"),
-            patch("pytvt.netsdk.loader._preload_companion_libraries") as mock_preload,
+            patch("pytvt.device_sdk.loader.platform") as mock_platform,
+            patch("pytvt.device_sdk.loader._find_lib", return_value="/opt/tvt/libdvrnetsdk.so"),
+            patch("pytvt.device_sdk.loader._preload_companion_libraries") as mock_preload,
         ):
             _set_linux_platform(mock_platform)
 

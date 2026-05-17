@@ -148,11 +148,11 @@ def capabilities_for_namespace(ns: SdkNamespace) -> dict[str, str]:
 # ---------------------------------------------------------------------------
 # ctypes argtypes / restype tables
 # ---------------------------------------------------------------------------
-# Import netsdk types lazily so this module stays importable even when pytvt.netsdk
+# Import netsdk types lazily so this module stays importable even when pytvt.device_sdk
 # is not yet installed; the bindings are only applied when the library is loaded.
 
 def _netsdk_types() -> Any:
-    from pytvt.netsdk import types as _t  # noqa: PLC0415
+    from pytvt.device_sdk import types as _t  # noqa: PLC0415
     return _t
 
 
