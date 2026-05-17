@@ -6,7 +6,7 @@ Public API:
     Models:    ScannerConfig, DeviceEntry, CameraInfo, ScanResult, NvrApiError
     NVR API:   NvrClient, Channel, NvrLanFreeDevice, LanFreeDevice, RtspServerConfig, ApiServerConfig, PortConfig
     Web API:   WebApiClient (TVT HTTP API / LAPI)
-    Net SDK:   pytvt.netsdk — ctypes bindings for libdvrnetsdk.so (Linux only;
+    Net SDK:   pytvt.device_sdk — ctypes bindings for libdvrnetsdk.so (Linux only;
                requires a vendor-supplied shared library — NOT included in this package)
     SDK HTTP:  SdkHttpClient — typed client for a compatible SDK bridge service
     Unified:   DeviceManager — auto-selects netsdk or sdk_http backend
@@ -34,7 +34,7 @@ __version__ = "0.8.0"
 from .config import load_config
 from .connection_pool import ConnectionPool, PoolStats, SessionMetrics, SessionResult, connect_many
 from .constants import BackendFamily, CompositeStrategy, ExecutionPlan, IntegrationMode, resolve_backend
-from .device_manager import Backend, DeviceManager, NoBackendAvailable, available_backends
+from .device_sdk.manager import Backend, DeviceManager, NoBackendAvailable, available_backends
 from .diff import DeviceDiff, ScanDiff, diff_scans, load_scan_file
 from .exceptions import BackendError, PytvtError, RegistryError
 from .models import (
@@ -58,7 +58,7 @@ from .xml_api import NvrClient
 from .output import save_csv, save_failed_devices, save_json, save_xlsx_per_site
 from .registry import resolve_execution_plan
 from .scanner import filter_tvt_devices, load_devices, scan_single_nvr
-from .sdk_http_client import CommandResult, DeviceInfoResult, DeviceTimeResult, RtspUrlResult, SdkHttpClient
+from .device_sdk.http_client import CommandResult, DeviceInfoResult, DeviceTimeResult, RtspUrlResult, SdkHttpClient
 from .web_api import WebApiClient
 from . import workflows  # Provisional — technician-facing workflow orchestrations.
 

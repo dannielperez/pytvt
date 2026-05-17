@@ -1,4 +1,4 @@
-"""Tests for pytvt.netsdk.types — ctypes struct correctness."""
+"""Tests for pytvt.device_sdk.types — ctypes struct correctness."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from datetime import datetime
 
 import pytest
 
-from pytvt.netsdk.types import (
+from pytvt.device_sdk.types import (
     DD_TIME,
     DD_TIME_EX,
     NET_SDK_ALARMINFO,

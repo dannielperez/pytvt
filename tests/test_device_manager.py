@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from pytvt.device_manager import (
+from pytvt.device_sdk.manager import (
     Backend,
     DeviceManager,
     NoBackendAvailable,
@@ -17,7 +17,7 @@ from pytvt.device_manager import (
     available_backends,
 )
 from pytvt.models import DeviceEntry
-from pytvt.sdk_http_client import (
+from pytvt.device_sdk.http_client import (
     CommandResult,
     DeviceInfoResult,
     DeviceTimeResult,
@@ -33,17 +33,17 @@ CREDS = dict(ip="10.0.0.1", username="admin", password="pass123")
 class TestNativeDetection:
     def test_netsdk_not_available_on_non_linux_non_darwin(self) -> None:
         """NetSDK should be unavailable on platforms other than Linux and macOS."""
-        with patch("pytvt.netsdk.loader.platform") as mock_plat:
+        with patch("pytvt.device_sdk.loader.platform") as mock_plat:
             mock_plat.system.return_value = "Windows"
-            from pytvt.netsdk.loader import is_netsdk_available
+            from pytvt.device_sdk.loader import is_netsdk_available
 
             assert is_netsdk_available() is False
 
     def test_netsdk_available_on_darwin(self) -> None:
         """NetSDK should be detectable on macOS (Darwin) with proper SDK path."""
-        with patch("pytvt.netsdk.loader.platform") as mock_plat, \
-             patch("pytvt.netsdk.loader._autodetect_macos_sdk_path") as mock_detect, \
-             patch("pytvt.netsdk.loader.Path") as mock_path:
+        with patch("pytvt.device_sdk.loader.platform") as mock_plat, \
+             patch("pytvt.device_sdk.loader._autodetect_macos_sdk_path") as mock_detect, \
+             patch("pytvt.device_sdk.loader.Path") as mock_path:
             mock_plat.system.return_value = "Darwin"
             mock_detect.return_value = "/path/to/sdk"
 
@@ -51,12 +51,12 @@ class TestNativeDetection:
             mock_path_inst.exists.return_value = True
             mock_path.return_value = mock_path_inst
 
-            from pytvt.netsdk.loader import is_netsdk_available
+            from pytvt.device_sdk.loader import is_netsdk_available
             # When SDK is detected and exists, it should be available
             assert is_netsdk_available() is True
 
     def test_netsdk_available_checks_file(self) -> None:
-        with patch("pytvt.netsdk.loader.platform") as mock_plat, patch("pytvt.netsdk.loader.Path") as mock_path:
+        with patch("pytvt.device_sdk.loader.platform") as mock_plat, patch("pytvt.device_sdk.loader.Path") as mock_path:
             mock_plat.system.return_value = "Linux"
             mock_plat.machine.return_value = "x86_64"
             # Make _find_lib return a path that "exists"
@@ -67,8 +67,8 @@ class TestNativeDetection:
             # But the explicit test path avoids system lookup,
             # so _find_lib returns "libdvrnetsdk.so" (bare)
             # We need to mock _find_lib directly for a clean test
-            with patch("pytvt.netsdk.loader._find_lib", return_value="/fake/libdvrnetsdk.so"):
-                from pytvt.netsdk.loader import is_netsdk_available
+            with patch("pytvt.device_sdk.loader._find_lib", return_value="/fake/libdvrnetsdk.so"):
+                from pytvt.device_sdk.loader import is_netsdk_available
 
                 # Path("/fake/libdvrnetsdk.so").is_absolute() and .exists()
                 mock_path.reset_mock()
@@ -81,28 +81,28 @@ class TestNativeDetection:
 
 class TestDockerDetection:
     def test_tvt_api_reachable(self) -> None:
-        with patch("pytvt.device_manager.SdkHttpClient") as mock_cls:
+        with patch("pytvt.device_sdk.manager.SdkHttpClient") as mock_cls:
             mock_cls.return_value.health.return_value = True
             assert _docker_tvt_api_available("http://test:3000") is True
 
     def test_tvt_api_unreachable(self) -> None:
-        with patch("pytvt.device_manager.SdkHttpClient") as mock_cls:
+        with patch("pytvt.device_sdk.manager.SdkHttpClient") as mock_cls:
             mock_cls.return_value.health.return_value = False
             assert _docker_tvt_api_available("http://test:3000") is False
 
     def test_tvt_api_exception(self) -> None:
-        with patch("pytvt.device_manager.SdkHttpClient") as mock_cls:
+        with patch("pytvt.device_sdk.manager.SdkHttpClient") as mock_cls:
             mock_cls.return_value.health.side_effect = ConnectionRefusedError
             assert _docker_tvt_api_available("http://test:3000") is False
 
     def test_docker_running_no_docker_binary(self) -> None:
-        with patch("pytvt.device_manager.shutil.which", return_value=None):
+        with patch("pytvt.device_sdk.manager.shutil.which", return_value=None):
             assert _docker_running() is False
 
     def test_docker_running_daemon_ok(self) -> None:
         with (
-            patch("pytvt.device_manager.shutil.which", return_value="/usr/bin/docker"),
-            patch("pytvt.device_manager.subprocess.run") as mock_run,
+            patch("pytvt.device_sdk.manager.shutil.which", return_value="/usr/bin/docker"),
+            patch("pytvt.device_sdk.manager.subprocess.run") as mock_run,
         ):
             mock_run.return_value.returncode = 0
             assert _docker_running() is True
@@ -111,16 +111,16 @@ class TestDockerDetection:
 class TestAvailableBackends:
     def test_both_available(self) -> None:
         with (
-            patch("pytvt.device_manager._netsdk_available", return_value=True),
-            patch("pytvt.device_manager._docker_tvt_api_available", return_value=True),
+            patch("pytvt.device_sdk.manager._netsdk_available", return_value=True),
+            patch("pytvt.device_sdk.manager._docker_tvt_api_available", return_value=True),
         ):
             result = available_backends()
             assert result == [Backend.NETSDK, Backend.SDK_HTTP]
 
     def test_sdk_path_passed_to_native_probe(self) -> None:
         with (
-            patch("pytvt.device_manager._netsdk_available", return_value=True) as mock_native,
-            patch("pytvt.device_manager._docker_tvt_api_available", return_value=False),
+            patch("pytvt.device_sdk.manager._netsdk_available", return_value=True) as mock_native,
+            patch("pytvt.device_sdk.manager._docker_tvt_api_available", return_value=False),
         ):
             result = available_backends(sdk_path="/opt/tvt-sdk")
             assert result == [Backend.NETSDK]
@@ -128,16 +128,16 @@ class TestAvailableBackends:
 
     def test_only_http(self) -> None:
         with (
-            patch("pytvt.device_manager._netsdk_available", return_value=False),
-            patch("pytvt.device_manager._docker_tvt_api_available", return_value=True),
+            patch("pytvt.device_sdk.manager._netsdk_available", return_value=False),
+            patch("pytvt.device_sdk.manager._docker_tvt_api_available", return_value=True),
         ):
             result = available_backends()
             assert result == [Backend.SDK_HTTP]
 
     def test_none_available(self) -> None:
         with (
-            patch("pytvt.device_manager._netsdk_available", return_value=False),
-            patch("pytvt.device_manager._docker_tvt_api_available", return_value=False),
+            patch("pytvt.device_sdk.manager._netsdk_available", return_value=False),
+            patch("pytvt.device_sdk.manager._docker_tvt_api_available", return_value=False),
         ):
             result = available_backends()
             assert result == []
@@ -148,20 +148,20 @@ class TestAvailableBackends:
 
 class TestDeviceManagerInit:
     def test_auto_detect_netsdk(self) -> None:
-        with patch("pytvt.device_manager._netsdk_available", return_value=True):
+        with patch("pytvt.device_sdk.manager._netsdk_available", return_value=True):
             mgr = DeviceManager(**CREDS)
             assert mgr.backend == Backend.NETSDK
             mgr.close()
 
     def test_auto_detect_netsdk_with_sdk_path(self) -> None:
-        with patch("pytvt.device_manager._netsdk_available", return_value=True) as mock_native:
+        with patch("pytvt.device_sdk.manager._netsdk_available", return_value=True) as mock_native:
             mgr = DeviceManager(**CREDS, sdk_path="/opt/tvt-sdk")
             assert mgr.backend == Backend.NETSDK
             mock_native.assert_called_once_with("/opt/tvt-sdk")
             mgr.close()
 
     def test_auto_detect_nat_requires_native_nat_support(self) -> None:
-        with patch("pytvt.device_manager._netsdk_available", return_value=True) as mock_native:
+        with patch("pytvt.device_sdk.manager._netsdk_available", return_value=True) as mock_native:
             mgr = DeviceManager(None, "admin", "pass123", identifier="ABC123456")
             assert mgr.backend == Backend.NETSDK
             mock_native.assert_called_once_with(None, require_nat=True)
@@ -169,15 +169,15 @@ class TestDeviceManagerInit:
 
     def test_auto_detect_nat_without_sdk_raises(self) -> None:
         with (
-            patch("pytvt.device_manager._netsdk_available", return_value=False),
+            patch("pytvt.device_sdk.manager._netsdk_available", return_value=False),
             pytest.raises(NoBackendAvailable, match="NAT-capable backend"),
         ):
             DeviceManager(None, "admin", "pass123", identifier="ABC123456")
 
     def test_auto_detect_http_fallback(self) -> None:
         with (
-            patch("pytvt.device_manager._netsdk_available", return_value=False),
-            patch("pytvt.device_manager._docker_tvt_api_available", return_value=True),
+            patch("pytvt.device_sdk.manager._netsdk_available", return_value=False),
+            patch("pytvt.device_sdk.manager._docker_tvt_api_available", return_value=True),
         ):
             mgr = DeviceManager(**CREDS)
             assert mgr.backend == Backend.SDK_HTTP
@@ -185,8 +185,8 @@ class TestDeviceManagerInit:
 
     def test_auto_detect_none_raises(self) -> None:
         with (
-            patch("pytvt.device_manager._netsdk_available", return_value=False),
-            patch("pytvt.device_manager._docker_tvt_api_available", return_value=False),
+            patch("pytvt.device_sdk.manager._netsdk_available", return_value=False),
+            patch("pytvt.device_sdk.manager._docker_tvt_api_available", return_value=False),
             pytest.raises(NoBackendAvailable),
         ):
             DeviceManager(**CREDS)
@@ -326,7 +326,7 @@ class TestNetsdkDispatch:
     def test_nat_session_uses_connect(self) -> None:
         mgr = DeviceManager("10.0.0.1", "admin", "pass123", identifier="ABC123456", backend=Backend.NETSDK)
         mock_session = MagicMock()
-        with patch("pytvt.netsdk.client.NetSdkClient") as mock_cls:
+        with patch("pytvt.device_sdk.client.NetSdkClient") as mock_cls:
             mock_cls.return_value.connect.return_value = mock_session
             session = mgr._get_netsdk_session()
 
@@ -425,7 +425,7 @@ class TestNetsdkDispatch:
 
     def test_netsdk_client_receives_sdk_path(self) -> None:
         mgr = DeviceManager(**CREDS, backend=Backend.NETSDK, sdk_path="/opt/tvt-sdk")
-        with patch("pytvt.netsdk.client.NetSdkClient") as mock_cls:
+        with patch("pytvt.device_sdk.client.NetSdkClient") as mock_cls:
             mock_session = MagicMock()
             mock_cls.return_value.connect.return_value = mock_session
             session = mgr._get_netsdk_session()
@@ -455,16 +455,16 @@ class TestBackendEnum:
 
 class TestLoaderUpdates:
     def test_arch_dir_x86(self) -> None:
-        with patch("pytvt.netsdk.loader.platform") as mock_plat:
+        with patch("pytvt.device_sdk.loader.platform") as mock_plat:
             mock_plat.machine.return_value = "x86_64"
-            from pytvt.netsdk.loader import _arch_dir
+            from pytvt.device_sdk.loader import _arch_dir
 
             assert _arch_dir() == "linux"
 
     def test_arch_dir_arm64(self) -> None:
-        with patch("pytvt.netsdk.loader.platform") as mock_plat:
+        with patch("pytvt.device_sdk.loader.platform") as mock_plat:
             mock_plat.machine.return_value = "aarch64"
-            from pytvt.netsdk.loader import _arch_dir
+            from pytvt.device_sdk.loader import _arch_dir
 
             assert _arch_dir() == "linux-arm64"
 
@@ -473,7 +473,7 @@ class TestLoaderUpdates:
         lib_path.write_text("", encoding="utf-8")
 
         with patch.dict("os.environ", {"TVT_SDK_PATH": str(lib_path)}):
-            from pytvt.netsdk.loader import _find_lib
+            from pytvt.device_sdk.loader import _find_lib
 
             assert _find_lib() == str(lib_path)
 
@@ -482,7 +482,7 @@ class TestLoaderUpdates:
         lib_path.write_text("", encoding="utf-8")
 
         with patch.dict("os.environ", {"PYTVT_NETSDK_LIB": str(lib_path)}, clear=True):
-            from pytvt.netsdk.loader import _find_lib
+            from pytvt.device_sdk.loader import _find_lib
 
             assert _find_lib() == str(lib_path)
 
@@ -492,7 +492,7 @@ class TestLoaderUpdates:
         lib_path.parent.mkdir(parents=True)
         lib_path.write_text("", encoding="utf-8")
 
-        from pytvt.netsdk.loader import _find_lib
+        from pytvt.device_sdk.loader import _find_lib
 
         assert _find_lib(str(sdk_root)) == str(lib_path)
     def test_find_lib_sdk_root_directory(self, tmp_path) -> None:
@@ -511,6 +511,6 @@ class TestLoaderUpdates:
         lib_path.parent.mkdir(parents=True)
         lib_path.write_text("", encoding="utf-8")
 
-        from pytvt.netsdk.loader import _find_lib
+        from pytvt.device_sdk.loader import _find_lib
 
         assert _find_lib(str(sdk_root)) == str(lib_path)

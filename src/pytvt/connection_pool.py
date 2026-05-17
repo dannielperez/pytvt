@@ -320,7 +320,7 @@ class ConnectionPool:
         nat_type: str | int,
     ) -> tuple[object, object, SessionMetrics]:
         """Create a new SDK session.  Returns (session, client, metrics)."""
-        from .netsdk.client import NetSdkClient
+        from .device_sdk.client import NetSdkClient
 
         client = NetSdkClient(sdk_path=self._sdk_path)
         try:

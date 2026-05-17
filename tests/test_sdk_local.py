@@ -1,4 +1,4 @@
-"""Tests for pytvt.sdk_local — direct Python SDK backend."""
+"""Tests for pytvt.device_sdk.sdk_local — direct Python SDK backend."""
 
 from __future__ import annotations
 
@@ -9,9 +9,9 @@ from unittest.mock import MagicMock, patch
 from pathlib import Path
 
 from pytvt.models import ScannerConfig
-from pytvt.netsdk.client import DeviceInfo, NetSdkError
-from pytvt.netsdk.loader import NetSdkUnavailable
-from pytvt.sdk_local import scan_nvr_payload, sdk_scan_local
+from pytvt.device_sdk.client import DeviceInfo, NetSdkError
+from pytvt.device_sdk.loader import NetSdkUnavailable
+from pytvt.device_sdk.sdk_local import scan_nvr_payload, sdk_scan_local
 
 
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
@@ -61,7 +61,7 @@ class TestScanNvrPayload:
         client.__exit__.return_value = None
         client.login.return_value = login_context
 
-        with patch("pytvt.sdk_local.NetSdkClient", return_value=client) as mock_client:
+        with patch("pytvt.device_sdk.sdk_local.NetSdkClient", return_value=client) as mock_client:
             result = scan_nvr_payload(
                 "10.0.0.1",
                 port=6036,
@@ -121,7 +121,7 @@ class TestScanNvrPayload:
         client.__enter__.return_value = client
         client.login.return_value = login_context
 
-        with patch("pytvt.sdk_local.NetSdkClient", return_value=client):
+        with patch("pytvt.device_sdk.sdk_local.NetSdkClient", return_value=client):
             result = scan_nvr_payload("10.0.0.1", password="secret")
 
         assert result["success"] is True
@@ -129,7 +129,7 @@ class TestScanNvrPayload:
         assert "Could not retrieve IPC info" in (result["error"] or "")
 
     def test_sdk_unavailable_returns_error(self):
-        with patch("pytvt.sdk_local.NetSdkClient", side_effect=NetSdkUnavailable("missing SDK")):
+        with patch("pytvt.device_sdk.sdk_local.NetSdkClient", side_effect=NetSdkUnavailable("missing SDK")):
             result = scan_nvr_payload("10.0.0.1")
 
         assert result["success"] is False
@@ -141,14 +141,14 @@ class TestScanNvrPayload:
         client.__exit__.return_value = None
         client.login.side_effect = NetSdkError("Login failed")
 
-        with patch("pytvt.sdk_local.NetSdkClient", return_value=client):
+        with patch("pytvt.device_sdk.sdk_local.NetSdkClient", return_value=client):
             result = scan_nvr_payload("10.0.0.1", username="admin", password="wrong")
 
         assert result["success"] is False
         assert result["error"] == "Login failed"
 
     def test_invalid_argument_error_returns_failure(self):
-        with patch("pytvt.sdk_local.NetSdkClient", side_effect=ValueError("bad sdk path")):
+        with patch("pytvt.device_sdk.sdk_local.NetSdkClient", side_effect=ValueError("bad sdk path")):
             result = scan_nvr_payload("10.0.0.1", sdk_path="/bad/path")
 
         assert result["success"] is False
@@ -199,7 +199,7 @@ class TestScanNvrPayload:
         client.__exit__.return_value = None
         client.login.return_value = login_context
 
-        with patch("pytvt.sdk_local.NetSdkClient", return_value=client):
+        with patch("pytvt.device_sdk.sdk_local.NetSdkClient", return_value=client):
             payload = scan_nvr_payload("10.0.0.1", password="secret")
 
         assert list(payload.keys()) == list(fixture_payload.keys())
@@ -213,7 +213,7 @@ class TestSdkScanLocal:
         cfg = ScannerConfig(username="admin", password="test123", sdk_path="/opt/tvt-sdk")
 
         with patch(
-            "pytvt.sdk_local.scan_nvr_payload",
+            "pytvt.device_sdk.sdk_local.scan_nvr_payload",
             return_value={
                 "success": True,
                 "device_name": "NVR-01",
