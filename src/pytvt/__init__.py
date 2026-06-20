@@ -29,7 +29,7 @@ native SDK bindings. It still requires a local vendor SDK installation, but it
 no longer depends on Node.js or any bridge scripts.
 """
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 from .config import load_config
 from .connection_pool import ConnectionPool, PoolStats, SessionMetrics, SessionResult, connect_many
@@ -45,6 +45,7 @@ from .models import (
     LanFreeDevice,
     NvrLanFreeDevice,
     NvrApiError,
+    NvrApiResponseShapeError,
     PlatformAccessConfig,
     PlatformAccessDisabledError,
     PortConfig,
@@ -92,6 +93,7 @@ __all__ = [
     "NvrLanFreeDevice",
     "LanFreeDevice",
     "NvrApiError",
+    "NvrApiResponseShapeError",
     "PlatformAccessDisabledError",
     "PortConfig",
     "RtspServerConfig",
