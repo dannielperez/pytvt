@@ -123,6 +123,7 @@ from .models import (
     Channel,
     NvrLanFreeDevice,
     NvrApiError,
+    NvrApiResponseShapeError,
     PasswordSecurity,
     PlatformAccessConfig,
     PlatformAccessDisabledError,
@@ -445,13 +446,35 @@ class NvrClient:
         dev_data = self._post("queryDevList", self._build_request())
         self._check_response(dev_data, "queryDevList")
 
+        channels: list[Channel] = []
+        n_parsed = len(re.findall(r'<item\s+id="([^"]+)">', dev_data))
+        # #512-class robustness (T-0340, CLAUDE.md §4): a success status with an
+        # unrecognized payload shape must NOT silently look like a genuine-empty
+        # channel list. A recognized queryDevList response always wraps results
+        # in a <content ...> container; when present it carries total="N". Signal
+        # shape drift (no container, or total>0 yet 0 items parsed) so the caller
+        # can tell "fetch failed / shape changed" from "really has no channels".
+        content = re.search(r'<content\b[^>]*>', dev_data)
+        if content is None:
+            raise NvrApiResponseShapeError(
+                "queryDevList returned success but no <content> container — "
+                "unrecognized response shape (possible firmware drift)"
+            )
+        total_m = re.search(r'\btotal="(\d+)"', content.group(0))
+        if total_m is not None:
+            total = int(total_m.group(1))
+            if total > 0 and n_parsed == 0:
+                raise NvrApiResponseShapeError(
+                    f"queryDevList declared total={total} but parsed 0 channel "
+                    "items — unrecognized item shape (possible firmware drift)"
+                )
+
         # Get online channel IDs
         online_data = self._post("queryOnlineChlList", self._build_request())
         online_ids: set[str] = set()
         if "<status>success</status>" in online_data:
             online_ids = set(re.findall(r'<item\s+id="([^"]+)"', online_data))
 
-        channels: list[Channel] = []
         for m in re.finditer(r'<item\s+id="([^"]+)">(.*?)</item>', dev_data, re.DOTALL):
             dev_id = m.group(1)
             block = m.group(2)
