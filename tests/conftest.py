@@ -6,7 +6,6 @@ import pytest
 
 from pytvt.models import CameraInfo, DeviceEntry, ScannerConfig, ScanResult
 
-
 _ISOLATED_ENV_KEYS = (
     "TVT_USERNAME",
     "TVT_PASSWORD",

@@ -12,6 +12,7 @@ No SDK binaries or headers are bundled by pytvt.
 
 from __future__ import annotations
 
+import contextlib
 import ctypes as ct
 import ipaddress
 import os
@@ -51,7 +52,7 @@ def _sdk_call_with_watchdog(label: str, timeout: float, fn, *args):
     def runner():
         try:
             result["value"] = fn(*args)
-        except BaseException as exc:  # noqa: BLE001
+        except BaseException as exc:
             result["error"] = exc
 
     thread = threading.Thread(target=runner, name=f"sdk-watchdog:{label}", daemon=True)
@@ -62,6 +63,7 @@ def _sdk_call_with_watchdog(label: str, timeout: float, fn, *args):
     if "error" in result:
         raise result["error"]
     return result.get("value")
+
 
 # macOS exports C++ symbols with one leading underscore in dlsym/ctypes lookups.
 # `nm` shows an extra underscore in output formatting, so do not mirror that here.
@@ -226,10 +228,19 @@ def _netclient_lifecycle_start(lib: object, watchdog: float = 10.0) -> tuple[boo
     # Safe defaults: 8 worker threads, no Interlocked object, work/log dir unset,
     # 10 MB log size, log level 0. IPTool.app uses similar values.
     try:
-        ok_init = bool(_sdk_call_with_watchdog(
-            "NET_CLIENT_Initial", watchdog,
-            initial, 8, None, b"", b"", 10 * 1024 * 1024, 0,
-        ))
+        ok_init = bool(
+            _sdk_call_with_watchdog(
+                "NET_CLIENT_Initial",
+                watchdog,
+                initial,
+                8,
+                None,
+                b"",
+                b"",
+                10 * 1024 * 1024,
+                0,
+            )
+        )
     except SdkStepTimeout as exc:
         return False, str(exc)
     except OSError as exc:
@@ -238,9 +249,13 @@ def _netclient_lifecycle_start(lib: object, watchdog: float = 10.0) -> tuple[boo
         return False, "NET_CLIENT_Initial returned false"
 
     try:
-        ok_start = bool(_sdk_call_with_watchdog(
-            "NET_CLIENT_Start", watchdog, start,
-        ))
+        ok_start = bool(
+            _sdk_call_with_watchdog(
+                "NET_CLIENT_Start",
+                watchdog,
+                start,
+            )
+        )
     except SdkStepTimeout as exc:
         return False, str(exc)
     except OSError as exc:
@@ -260,10 +275,8 @@ def _netclient_lifecycle_stop(lib: object, watchdog: float = 5.0) -> None:
         fn = _netclient_mangled_nullary(lib, mangled, plain)
         if fn is None:
             continue
-        try:
+        with contextlib.suppress(OSError, SdkStepTimeout):
             _sdk_call_with_watchdog(plain, watchdog, fn)
-        except (OSError, SdkStepTimeout):
-            pass
 
 
 def _invoke_netclient_modify(
@@ -287,24 +300,27 @@ def _invoke_netclient_modify(
     # clear diagnostic pointing to the supported Linux-SDK path (the
     # ``data/sdk_change_ip.py`` Docker harness), which is hang-proof.
     lifecycle_ok = False
-    if (
-        getattr(lib, MACOS_NET_CLIENT_START, None) is not None
-        or getattr(lib, "NET_CLIENT_Start", None) is not None
-    ):
-        if platform.system() == "Darwin" and os.environ.get(
-            "PYTVT_ENABLE_MACOS_NETCLIENT_MODIFY", "0"
-        ) != "1":
-            return False, "NET_CLIENT_RequestModifyDeviceIp", None, (
-                "macOS NET_CLIENT runtime is disabled because NET_CLIENT_Initial/Start "
-                "is known to hang under Rosetta and cannot be interrupted from Python. "
-                "Use the Linux SDK via Docker instead (see data/sdk_change_ip.py), or "
-                "set PYTVT_ENABLE_MACOS_NETCLIENT_MODIFY=1 to attempt the macOS path "
-                "at your own risk."
+    if getattr(lib, MACOS_NET_CLIENT_START, None) is not None or getattr(lib, "NET_CLIENT_Start", None) is not None:
+        if platform.system() == "Darwin" and os.environ.get("PYTVT_ENABLE_MACOS_NETCLIENT_MODIFY", "0") != "1":
+            return (
+                False,
+                "NET_CLIENT_RequestModifyDeviceIp",
+                None,
+                (
+                    "macOS NET_CLIENT runtime is disabled because NET_CLIENT_Initial/Start "
+                    "is known to hang under Rosetta and cannot be interrupted from Python. "
+                    "Use the Linux SDK via Docker instead (see data/sdk_change_ip.py), or "
+                    "set PYTVT_ENABLE_MACOS_NETCLIENT_MODIFY=1 to attempt the macOS path "
+                    "at your own risk."
+                ),
             )
         lifecycle_ok, lifecycle_error = _netclient_lifecycle_start(lib)
         if not lifecycle_ok:
-            return False, "NET_CLIENT_RequestModifyDeviceIp", None, (
-                f"NET_CLIENT runtime bootstrap failed: {lifecycle_error}"
+            return (
+                False,
+                "NET_CLIENT_RequestModifyDeviceIp",
+                None,
+                (f"NET_CLIENT runtime bootstrap failed: {lifecycle_error}"),
             )
 
     try:
@@ -314,11 +330,17 @@ def _invoke_netclient_modify(
             buffer_data.argtypes = [ct.c_uint, ct.c_char_p, ct.c_uint, ct.POINTER(ct.c_void_p)]
             response = ct.c_void_p()
             try:
-                called_ok = bool(_sdk_call_with_watchdog(
-                    "NET_CLIENT_RequestModifyDeviceIp(CBufferData)",
-                    max(2.0, timeout_ms / 1000 + 5),
-                    buffer_data, 0, request, timeout_ms, ct.byref(response),
-                ))
+                called_ok = bool(
+                    _sdk_call_with_watchdog(
+                        "NET_CLIENT_RequestModifyDeviceIp(CBufferData)",
+                        max(2.0, timeout_ms / 1000 + 5),
+                        buffer_data,
+                        0,
+                        request,
+                        timeout_ms,
+                        ct.byref(response),
+                    )
+                )
             except SdkStepTimeout as exc:
                 return False, "NET_CLIENT_RequestModifyDeviceIp", None, str(exc)
             if called_ok:
@@ -332,27 +354,45 @@ def _invoke_netclient_modify(
             observer.restype = ct.c_bool
             observer.argtypes = [ct.c_uint, ct.c_char_p, ct.c_uint, ct.c_void_p, ct.c_void_p]
             try:
-                called_ok = bool(_sdk_call_with_watchdog(
-                    "NET_CLIENT_RequestModifyDeviceIp(CWaitObserver)",
-                    max(2.0, timeout_ms / 1000 + 5),
-                    observer, 0, request, timeout_ms, None, None,
-                ))
+                called_ok = bool(
+                    _sdk_call_with_watchdog(
+                        "NET_CLIENT_RequestModifyDeviceIp(CWaitObserver)",
+                        max(2.0, timeout_ms / 1000 + 5),
+                        observer,
+                        0,
+                        request,
+                        timeout_ms,
+                        None,
+                        None,
+                    )
+                )
             except SdkStepTimeout as exc:
                 return False, "NET_CLIENT_RequestModifyDeviceIp", None, str(exc)
             if called_ok:
                 return True, "NET_CLIENT_RequestModifyDeviceIp", None, None
             second_error = _last_error(lib)
             if buffer_data is not None:
-                return False, "NET_CLIENT_RequestModifyDeviceIp", second_error, (
-                    "NET_CLIENT_RequestModifyDeviceIp failed via CBufferData and CWaitObserver overloads "
-                    f"(first_error={first_error}, second_error={second_error})"
+                return (
+                    False,
+                    "NET_CLIENT_RequestModifyDeviceIp",
+                    second_error,
+                    (
+                        "NET_CLIENT_RequestModifyDeviceIp failed via CBufferData and CWaitObserver overloads "
+                        f"(first_error={first_error}, second_error={second_error})"
+                    ),
                 )
-            return False, "NET_CLIENT_RequestModifyDeviceIp", second_error, (
-                f"NET_CLIENT_RequestModifyDeviceIp failed via CWaitObserver overload (error={second_error})"
+            return (
+                False,
+                "NET_CLIENT_RequestModifyDeviceIp",
+                second_error,
+                (f"NET_CLIENT_RequestModifyDeviceIp failed via CWaitObserver overload (error={second_error})"),
             )
 
-        return False, "NET_CLIENT_RequestModifyDeviceIp", first_error, (
-            f"NET_CLIENT_RequestModifyDeviceIp failed via CBufferData overload (error={first_error})"
+        return (
+            False,
+            "NET_CLIENT_RequestModifyDeviceIp",
+            first_error,
+            (f"NET_CLIENT_RequestModifyDeviceIp failed via CBufferData overload (error={first_error})"),
         )
     finally:
         if lifecycle_ok:
@@ -499,7 +539,9 @@ def modify_device_ip_by_mac(
     if hasattr(lib, "NET_SDK_Init"):
         function_used = "NET_SDK_SetDeviceIP" if hasattr(lib, "NET_SDK_SetDeviceIP") else "NET_SDK_ModifyDeviceNetInfo"
         try:
-            with NetSdkClient(sdk_path=sdk_path, connect_timeout=int(timeout * 1000), recv_timeout=int(timeout * 1000)) as sdk:
+            with NetSdkClient(
+                sdk_path=sdk_path, connect_timeout=int(timeout * 1000), recv_timeout=int(timeout * 1000)
+            ) as sdk:
                 sdk.set_device_ip_by_mac(
                     norm_mac,
                     password or "",
@@ -571,10 +613,10 @@ def modify_device_ip_by_ip(
     norm_mask = _valid_ip(subnet_mask, "subnet_mask")
     norm_gateway = _valid_ip(gateway, "gateway")
     started = time.perf_counter()
-    
+
     lib, _, bound_symbol = _load_modify_capability(sdk_path)
     human_symbol = _human_sdk_function(bound_symbol)
-    
+
     request = build_netclient_modify_ip_xml(
         mac=None,
         old_ip=norm_old_ip,

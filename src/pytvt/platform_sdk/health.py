@@ -8,17 +8,13 @@ deterministic and fully unit-testable.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from dataclasses import field
-from typing import Any
-from typing import Iterable
-from typing import Literal
+from collections.abc import Iterable
+from dataclasses import dataclass, field
+from typing import Any, Literal
 
 from .platform_constants import NODETYPE_CHANNEL
-from .platform_models import PlatformResource
-from .platform_models import PlatformServer
-from .topology import PlatformSite
-from .topology import build_site_topology
+from .platform_models import PlatformResource, PlatformServer
+from .topology import PlatformSite, build_site_topology
 
 __all__ = ["PlatformDeviceHealth", "compute_device_health"]
 
@@ -99,11 +95,7 @@ def compute_device_health(
             events_by_device.setdefault(guid.lower(), []).append(evt)
 
     # Offline servers flag to add as an issue when detectable.
-    offline_server_guids = {
-        s.guid.lower()
-        for s in servers_list
-        if s.online is False and s.guid
-    }
+    offline_server_guids = {s.guid.lower() for s in servers_list if s.online is False and s.guid}
 
     devices = [r for r in resources_list if r.node_type == 2]  # NODETYPE_DEVICE
     health: list[PlatformDeviceHealth] = []
@@ -131,9 +123,7 @@ def compute_device_health(
             status: HealthStatus = "OFFLINE"
         elif total > 0 and online_channels == 0:
             status = "OFFLINE"
-        elif total > 0 and online_channels < total:
-            status = "DEGRADED"
-        elif dev_events:
+        elif (total > 0 and online_channels < total) or dev_events:
             status = "DEGRADED"
         else:
             status = "ONLINE"
@@ -159,7 +149,7 @@ def compute_device_health(
 
 def _event_device_guid(event: Any) -> str:
     if hasattr(event, "device_guid"):
-        return str(getattr(event, "device_guid") or "")
+        return str(event.device_guid or "")
     if isinstance(event, dict):
         for key in ("device_guid", "deviceGuid", "guidNodeID", "guid"):
             value = event.get(key)
@@ -170,7 +160,7 @@ def _event_device_guid(event: Any) -> str:
 
 def _event_timestamp_str(event: Any) -> str | None:
     if hasattr(event, "timestamp"):
-        ts = getattr(event, "timestamp")
+        ts = event.timestamp
         return str(ts) if ts is not None else None
     if isinstance(event, dict):
         for key in ("timestamp", "time", "ts"):

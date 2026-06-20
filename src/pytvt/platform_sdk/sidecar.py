@@ -17,10 +17,7 @@ import subprocess
 from typing import Any
 
 from .base import BaseManagementBackend
-from .context import CapabilityMap
-from .context import PlatformIdentity
-from .context import SDKContext
-from .context import SDKIdentity
+from .context import CapabilityMap, PlatformIdentity, SDKContext, SDKIdentity
 from .exceptions import CapabilityNotAvailable, ExperimentalOperationError, ManagementAuthError
 from .models import AlarmSubscription, DeviceStatus, ManagedChannel, ManagedDevice, ServerInfo
 
@@ -119,9 +116,7 @@ class SidecarManagementBackend(BaseManagementBackend):
 
     def _run_bridge(self, command: str, extra_args: list[str] | None = None) -> dict[str, Any]:
         if not self.bridge_command:
-            raise CapabilityNotAvailable(
-                "Sidecar backend selected but PYTVT_MGMT_SIDECAR_CMD is not configured."
-            )
+            raise CapabilityNotAvailable("Sidecar backend selected but PYTVT_MGMT_SIDECAR_CMD is not configured.")
 
         args = extra_args or []
         cmd = f"{self.bridge_command} {command} {' '.join(shlex.quote(item) for item in args)}".strip()
