@@ -73,9 +73,7 @@ def main() -> None:
         _connect_main(sys.argv[2:])
         return
 
-    if len(sys.argv) > 1 and sys.argv[1] == "connect-many" and (
-        len(sys.argv) == 2 or sys.argv[2].startswith("-")
-    ):
+    if len(sys.argv) > 1 and sys.argv[1] == "connect-many" and (len(sys.argv) == 2 or sys.argv[2].startswith("-")):
         _connect_many_main(sys.argv[2:])
         return
 
@@ -288,7 +286,9 @@ def _build_sdk_parser() -> argparse.ArgumentParser:
     modify.add_argument("--password", help="Device password, if required by the SDK/device")
     modify.add_argument("--sdk-path", help="Path to vendor SDK library or root")
     modify.add_argument("--timeout", type=float, default=5.0, help="SDK operation timeout in seconds")
-    modify.add_argument("--verify-timeout-ms", type=int, default=3000, help="Post-change verification timeout in milliseconds")
+    modify.add_argument(
+        "--verify-timeout-ms", type=int, default=3000, help="Post-change verification timeout in milliseconds"
+    )
     modify.add_argument("--dry-run", action="store_true", help="Validate SDK, symbols, arguments, and target scan only")
     modify.add_argument("--yes", action="store_true", help="Required for real IP modification")
     modify.add_argument("--json", action="store_true", help="Print machine-readable JSON")
@@ -768,7 +768,7 @@ def _print_scan_header(
     from ..registry import resolve_execution_plan
 
     plan = resolve_execution_plan(backend)
-    print(f"\nTVT NVR Camera Scanner")
+    print("\nTVT NVR Camera Scanner")
     print(f"Found {len(devices)} unique TVT NVR(s) to scan")
     print(f"Backend: {plan.label}")
     print(f"Credentials: {config.username} / {'*' * len(config.password)}")

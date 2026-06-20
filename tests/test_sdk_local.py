@@ -3,16 +3,14 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from pathlib import Path
-
-from pytvt.models import ScannerConfig
 from pytvt.device_sdk.client import DeviceInfo, NetSdkError
 from pytvt.device_sdk.loader import NetSdkUnavailable
 from pytvt.device_sdk.sdk_local import scan_nvr_payload, sdk_scan_local
-
+from pytvt.models import ScannerConfig
 
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 

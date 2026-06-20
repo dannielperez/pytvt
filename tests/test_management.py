@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from pytvt.device_sdk import types as netsdk_types
 from pytvt.platform_sdk import (
     CapabilityNotAvailable,
     ManagementClient,
@@ -25,18 +26,17 @@ from pytvt.platform_sdk.exceptions import (
 from pytvt.platform_sdk.native import NativeManagementBackend
 from pytvt.platform_sdk.sdk import (
     EvidenceRecord,
-    SDKClient,
     ResolvedSymbol,
-    SdkManagementBackend,
+    SDKClient,
     SdkDiagnostics,
-    _SDKLoadError,
+    SdkManagementBackend,
     _load_library,
     _resolve_symbol_registry,
+    _SDKLoadError,
     export_evidence_records,
     export_evidence_schema,
     inspect_sdk_library,
 )
-from pytvt.device_sdk import types as netsdk_types
 
 
 def _resolved(
@@ -67,11 +67,27 @@ def _login_ready_diagnostics(path: str = "/fake/libdvrnetsdk.so") -> SdkDiagnost
         "init": _resolved("init", "confirmed", "NET_SDK_Init", signature_ready=True, signature_source="test"),
         "login": _resolved("login", "confirmed", "NET_SDK_Login", signature_ready=True, signature_source="test"),
         "logout": _resolved("logout", "confirmed", "NET_SDK_Logout", signature_ready=True, signature_source="test"),
-        "server_info": _resolved("server_info", "confirmed", "NET_SDK_GetDeviceInfo", signature_ready=True, signature_source="test"),
+        "server_info": _resolved(
+            "server_info", "confirmed", "NET_SDK_GetDeviceInfo", signature_ready=True, signature_source="test"
+        ),
         "device_enumeration": _resolved("device_enumeration", "missing", None, semantics="configured_inventory"),
         "status_query": _resolved("status_query", "candidate", "NET_SDK_GetAlarmStatus", semantics="channel_status"),
-        "alarm_subscription": _resolved("alarm_subscription", "confirmed", "NET_SDK_SetupAlarmChan", signature_ready=True, signature_source="test", semantics="alarm_channel_registration"),
-        "alarm_unsubscribe": _resolved("alarm_unsubscribe", "confirmed", "NET_SDK_CloseAlarmChan", signature_ready=True, signature_source="test", semantics="alarm_channel_registration"),
+        "alarm_subscription": _resolved(
+            "alarm_subscription",
+            "confirmed",
+            "NET_SDK_SetupAlarmChan",
+            signature_ready=True,
+            signature_source="test",
+            semantics="alarm_channel_registration",
+        ),
+        "alarm_unsubscribe": _resolved(
+            "alarm_unsubscribe",
+            "confirmed",
+            "NET_SDK_CloseAlarmChan",
+            signature_ready=True,
+            signature_source="test",
+            semantics="alarm_channel_registration",
+        ),
     }
     return SdkDiagnostics(
         sdk_path=path,
@@ -175,12 +191,14 @@ class TestInspectSdkLibrary:
     def test_loaded_but_no_required_symbols_reports_not_ready(self, tmp_path):
         fake = tmp_path / "libtvt.so"
         fake.write_bytes(b"mock")
-        with patch("pytvt.platform_sdk.sdk._load_library", return_value=MagicMock()):
-            with patch(
+        with (
+            patch("pytvt.platform_sdk.sdk._load_library", return_value=MagicMock()),
+            patch(
                 "pytvt.platform_sdk.sdk.list_exported_symbols",
                 return_value=({"OTHER_SYMBOL"}, {"source": "mock", "error": None}),
-            ):
-                diagnostics = inspect_sdk_library(str(fake))
+            ),
+        ):
+            diagnostics = inspect_sdk_library(str(fake))
         assert diagnostics.load_success is True
         assert diagnostics.symbol_scan_success is True
         assert diagnostics.login_path_ready is False
@@ -189,45 +207,51 @@ class TestInspectSdkLibrary:
     def test_candidate_symbols_only_reports_not_ready(self, tmp_path):
         fake = tmp_path / "libtvt.so"
         fake.write_bytes(b"mock")
-        with patch("pytvt.platform_sdk.sdk._load_library", return_value=MagicMock()):
-            with patch(
+        with (
+            patch("pytvt.platform_sdk.sdk._load_library", return_value=MagicMock()),
+            patch(
                 "pytvt.platform_sdk.sdk.list_exported_symbols",
                 return_value=(
                     {"NET_SDK_LoginEx", "NET_SDK_Logout", "NET_SDK_Init"},
                     {"source": "mock", "error": None},
                 ),
-            ):
-                diagnostics = inspect_sdk_library(str(fake))
+            ),
+        ):
+            diagnostics = inspect_sdk_library(str(fake))
         assert diagnostics.login_path_ready is False
         assert diagnostics.symbols["login"].status == "candidate"
 
     def test_confirmed_login_symbols_reports_ready(self, tmp_path):
         fake = tmp_path / "libtvt.so"
         fake.write_bytes(b"mock")
-        with patch("pytvt.platform_sdk.sdk._load_library", return_value=MagicMock()):
-            with patch(
+        with (
+            patch("pytvt.platform_sdk.sdk._load_library", return_value=MagicMock()),
+            patch(
                 "pytvt.platform_sdk.sdk.list_exported_symbols",
                 return_value=(
                     {"NET_SDK_Init", "NET_SDK_Login", "NET_SDK_Logout"},
                     {"source": "mock", "error": None},
                 ),
-            ):
-                diagnostics = inspect_sdk_library(str(fake))
+            ),
+        ):
+            diagnostics = inspect_sdk_library(str(fake))
         assert diagnostics.login_path_ready is True
         assert diagnostics.discovered_symbol_count == 3
 
     def test_confirmed_loginex_symbols_report_ready_for_loginex_mode(self, tmp_path):
         fake = tmp_path / "libtvt.so"
         fake.write_bytes(b"mock")
-        with patch("pytvt.platform_sdk.sdk._load_library", return_value=MagicMock()):
-            with patch(
+        with (
+            patch("pytvt.platform_sdk.sdk._load_library", return_value=MagicMock()),
+            patch(
                 "pytvt.platform_sdk.sdk.list_exported_symbols",
                 return_value=(
                     {"NET_SDK_Init", "NET_SDK_LoginEx", "NET_SDK_Logout"},
                     {"source": "mock", "error": None},
                 ),
-            ):
-                diagnostics = inspect_sdk_library(str(fake), login_mode="login_ex")
+            ),
+        ):
+            diagnostics = inspect_sdk_library(str(fake), login_mode="login_ex")
         assert diagnostics.login_path_ready is True
         assert diagnostics.login_mode == "login_ex"
         payload = diagnostics.as_dict()
@@ -239,15 +263,17 @@ class TestInspectSdkLibrary:
     def test_diagnostics_include_evidence_count(self, tmp_path):
         fake = tmp_path / "libtvt.so"
         fake.write_bytes(b"mock")
-        with patch("pytvt.platform_sdk.sdk._load_library", return_value=MagicMock()):
-            with patch(
+        with (
+            patch("pytvt.platform_sdk.sdk._load_library", return_value=MagicMock()),
+            patch(
                 "pytvt.platform_sdk.sdk.list_exported_symbols",
                 return_value=(
                     {"NET_SDK_Init", "NET_SDK_Login", "NET_SDK_Logout"},
                     {"source": "mock", "error": None},
                 ),
-            ):
-                diagnostics = inspect_sdk_library(str(fake))
+            ),
+        ):
+            diagnostics = inspect_sdk_library(str(fake))
         assert diagnostics.evidence_record_count > 0
 
     def test_architecture_mismatch_is_reported_as_explicit_blocker(self, tmp_path):
@@ -255,7 +281,10 @@ class TestInspectSdkLibrary:
         fake.write_bytes(b"mock")
         with patch("pytvt.platform_sdk.sdk._detect_sdk_machine", return_value="x86_64"):
             with patch("pytvt.platform_sdk.sdk.platform.machine", return_value="aarch64"):
-                with patch("pytvt.platform_sdk.sdk._load_library", side_effect=_SDKLoadError("ctypes could not load SDK: bad arch")):
+                with patch(
+                    "pytvt.platform_sdk.sdk._load_library",
+                    side_effect=_SDKLoadError("ctypes could not load SDK: bad arch"),
+                ):
                     diagnostics = inspect_sdk_library(str(fake))
 
         payload = diagnostics.as_dict()
@@ -267,15 +296,17 @@ class TestInspectSdkLibrary:
         fake = tmp_path / "libtvt.so"
         fake.write_bytes(b"mock")
 
-        with patch("pytvt.platform_sdk.sdk._load_library", return_value=MagicMock()):
-            with patch(
+        with (
+            patch("pytvt.platform_sdk.sdk._load_library", return_value=MagicMock()),
+            patch(
                 "pytvt.platform_sdk.sdk.list_exported_symbols",
                 return_value=(
                     {"NET_SDK_Init", "NET_SDK_LoginEx", "NET_SDK_Logout"},
                     {"source": "mock", "error": None},
                 ),
-            ):
-                diagnostics = inspect_sdk_library(str(fake))
+            ),
+        ):
+            diagnostics = inspect_sdk_library(str(fake))
 
         payload = diagnostics.as_dict()
         blockers = payload["sdk_not_ready_blockers"]
@@ -671,7 +702,9 @@ class TestSDKClientServerInfo:
             with patch("pytvt.platform_sdk.sdk._load_library", return_value=MagicMock(spec=ctypes.CDLL)):
                 backend = SdkManagementBackend("192.168.1.1", sdk_path="/fake/libdvrnetsdk.so")
 
-        expected_exc = SessionExpired if backend.get_context().platform.os_family == "linux" else UnsupportedOnPlatformError
+        expected_exc = (
+            SessionExpired if backend.get_context().platform.os_family == "linux" else UnsupportedOnPlatformError
+        )
         with pytest.raises(expected_exc):
             backend.get_server_info()
 
@@ -796,7 +829,9 @@ class TestSDKClientListDevices:
             with patch("pytvt.platform_sdk.sdk._load_library", return_value=MagicMock(spec=ctypes.CDLL)):
                 backend = SdkManagementBackend("192.168.1.1", sdk_path="/fake/libdvrnetsdk.so")
 
-        expected_exc = SessionExpired if backend.get_context().platform.os_family == "linux" else UnsupportedOnPlatformError
+        expected_exc = (
+            SessionExpired if backend.get_context().platform.os_family == "linux" else UnsupportedOnPlatformError
+        )
         with pytest.raises(expected_exc):
             backend.list_devices()
 
@@ -914,7 +949,9 @@ class TestSDKClientDeviceStatuses:
             with patch("pytvt.platform_sdk.sdk._load_library", return_value=MagicMock(spec=ctypes.CDLL)):
                 backend = SdkManagementBackend("192.168.1.1", sdk_path="/fake/libdvrnetsdk.so")
 
-        expected_exc = SessionExpired if backend.get_context().platform.os_family == "linux" else UnsupportedOnPlatformError
+        expected_exc = (
+            SessionExpired if backend.get_context().platform.os_family == "linux" else UnsupportedOnPlatformError
+        )
         with pytest.raises(expected_exc):
             backend.get_device_statuses()
 
@@ -979,10 +1016,10 @@ class TestSDKClientSubscribeAlarms:
 
         sub = client.subscribe_alarms()
         assert sub.handle == "alarm-channel:17"
-        assert getattr(sub, "is_active") is True
+        assert sub.is_active is True
 
         sub.close()
-        assert getattr(sub, "is_active") is False
+        assert sub.is_active is False
         lib.NET_SDK_CloseAlarmChan.assert_called_once_with(17)
 
     def test_subscribe_alarms_preserves_subscription_metadata_in_raw_data(self):
@@ -1020,7 +1057,9 @@ class TestSDKClientSubscribeAlarms:
             with patch("pytvt.platform_sdk.sdk._load_library", return_value=MagicMock(spec=ctypes.CDLL)):
                 backend = SdkManagementBackend("192.168.1.1", sdk_path="/fake/libdvrnetsdk.so")
 
-        expected_exc = SessionExpired if backend.get_context().platform.os_family == "linux" else UnsupportedOnPlatformError
+        expected_exc = (
+            SessionExpired if backend.get_context().platform.os_family == "linux" else UnsupportedOnPlatformError
+        )
         with pytest.raises(expected_exc):
             backend.subscribe_alarms()
 

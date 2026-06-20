@@ -114,16 +114,15 @@ import http.client
 import re
 import subprocess
 import sys
-from dataclasses import dataclass, field
 from xml.sax.saxutils import escape
 
 from ._crypto import aes_ecb_zeropad
 from .models import (
     ApiServerConfig,
     Channel,
-    NvrLanFreeDevice,
     NvrApiError,
     NvrApiResponseShapeError,
+    NvrLanFreeDevice,
     PasswordSecurity,
     PlatformAccessConfig,
     PlatformAccessDisabledError,
@@ -221,7 +220,7 @@ class NvrClient:
         if not status or status.group(1) != "success":
             error_code = re.search(r"<errorCode>(.*?)</errorCode>", xml)
             code = error_code.group(1) if error_code else None
-            msg = f"NVR API error"
+            msg = "NVR API error"
             if context:
                 msg += f" ({context})"
             if code:
@@ -327,9 +326,7 @@ class NvrClient:
         self._check_response(data, "doLogin")
 
         # Legacy firmware uses HTTP Basic auth for subsequent requests
-        creds = base64.b64encode(
-            f"{self.username}:{self.password}".encode("utf-8")
-        ).decode("ascii")
+        creds = base64.b64encode(f"{self.username}:{self.password}".encode()).decode("ascii")
         self._legacy_auth = f"Basic {creds}"
 
         self._logged_in = True
@@ -454,7 +451,7 @@ class NvrClient:
         # in a <content ...> container; when present it carries total="N". Signal
         # shape drift (no container, or total>0 yet 0 items parsed) so the caller
         # can tell "fetch failed / shape changed" from "really has no channels".
-        content = re.search(r'<content\b[^>]*>', dev_data)
+        content = re.search(r"<content\b[^>]*>", dev_data)
         if content is None:
             raise NvrApiResponseShapeError(
                 "queryDevList returned success but no <content> container — "
@@ -529,11 +526,7 @@ class NvrClient:
                     sub_ip=self._parse_xml_field(block, "subIp") or "",
                     sub_ip_netmask=self._parse_xml_field(block, "subIpNetMask") or "",
                     activated=(
-                        True
-                        if activate_status == "ACTIVATED"
-                        else False
-                        if activate_status == "UNACTIVATED"
-                        else None
+                        True if activate_status == "ACTIVATED" else False if activate_status == "UNACTIVATED" else None
                     ),
                     activate_status=activate_status,
                     industry_product_type=self._parse_xml_field(block, "industryProductType") or "",
@@ -563,17 +556,15 @@ class NvrClient:
 
         attrs = f' securityVer="{self._security_ver}"' if self._security_ver else ""
         encrypted_password = self._encrypt_for_session(password, self._session_key)
-        body = (
-            self._build_request_with_content(
-                "<content><device><item id='1'>"
-                f"<oldIP>{old_ip}</oldIP>"
-                f"<newIP>{new_ip}</newIP>"
-                f"<netmask>{netmask}</netmask>"
-                f"<gateway>{gateway}</gateway>"
-                f"<username>{username}</username>"
-                f"<password{attrs}><![CDATA[{encrypted_password}]]></password>"
-                "</item></device></content>"
-            )
+        body = self._build_request_with_content(
+            "<content><device><item id='1'>"
+            f"<oldIP>{old_ip}</oldIP>"
+            f"<newIP>{new_ip}</newIP>"
+            f"<netmask>{netmask}</netmask>"
+            f"<gateway>{gateway}</gateway>"
+            f"<username>{username}</username>"
+            f"<password{attrs}><![CDATA[{encrypted_password}]]></password>"
+            "</item></device></content>"
         )
         data = self._post("editDevNetworkList", body)
         self._check_response(data, "editDevNetworkList")
@@ -603,9 +594,7 @@ class NvrClient:
             item += "</item>"
             items.append(item)
 
-        body = self._build_request_with_content(
-            f'<condition><devIds type="list">{"".join(items)}</devIds></condition>'
-        )
+        body = self._build_request_with_content(f'<condition><devIds type="list">{"".join(items)}</devIds></condition>')
         data = self._post("delDevList", body)
         self._check_response(data, "delDevList")
         return len(dev_ids)
@@ -640,9 +629,7 @@ class NvrClient:
                 failures.append(channel_id)
 
         if failures:
-            raise NvrApiError(
-                f"Failed to change IPC password for {len(failures)} channel(s): {', '.join(failures)}"
-            )
+            raise NvrApiError(f"Failed to change IPC password for {len(failures)} channel(s): {', '.join(failures)}")
         return updated
 
     def get_rtsp_url(self, channel: int, stream_type: str = "main") -> str:
@@ -849,7 +836,7 @@ class NvrClient:
                     "<content>"
                     f"<userId>{escape(user.user_id)}</userId>"
                     f"<userName><![CDATA[{user.username}]]></userName>"
-                    f"<authGroup id =\"{escape(auth_group_id)}\" ></authGroup>"
+                    f'<authGroup id ="{escape(auth_group_id)}" ></authGroup>'
                     f"<bindMacSwitch>{'true' if user.bind_mac else 'false'}</bindMacSwitch>"
                     "<modifyPassword>false</modifyPassword>"
                     f"<mac><![CDATA[{escape(user.mac or '00:00:00:00:00:00')}]]></mac>"
@@ -1092,8 +1079,7 @@ class NvrClient:
             updated = self.query_secure_email()
             if updated["email"].strip() != target_email or updated["enabled"] != enabled:
                 raise NvrApiError(
-                    f"set_secure_email verify failed: got email={updated['email']!r} "
-                    f"enabled={updated['enabled']}"
+                    f"set_secure_email verify failed: got email={updated['email']!r} enabled={updated['enabled']}"
                 )
 
         return {
@@ -1392,7 +1378,7 @@ def main():
 
         elif args.command == "change-password":
             nvr.change_own_password(args.password, args.new_password)
-            print(f"Password changed. Re-logging in ...")
+            print("Password changed. Re-logging in ...")
             nvr.password = args.new_password
             nvr.login()
             print("OK - logged in with new password.")
@@ -1419,7 +1405,7 @@ def main():
         elif args.command == "change-admin-and-sync":
             result = nvr.change_admin_password_and_sync(args.password, args.new_password)
             print(f"Password changed. Updated {result['devices_updated']} device credentials.")
-            print(f"Re-login OK. New password is active.")
+            print("Re-login OK. New password is active.")
 
 
 if __name__ == "__main__":
