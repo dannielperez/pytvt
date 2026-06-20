@@ -11,8 +11,8 @@ The probe is read-only and safe to call on a live session.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
-from typing import Callable
 
 from .exceptions import CapabilityNotAvailable
 

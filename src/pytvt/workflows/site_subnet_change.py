@@ -29,8 +29,8 @@ from __future__ import annotations
 
 import ipaddress
 import time
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
-from typing import Sequence
 
 from pytvt.models import NvrApiError
 from pytvt.xml_api import Channel, NvrClient, NvrLanFreeDevice
@@ -41,7 +41,6 @@ from .password_rotate import (
     rotate_nvr_channel_passwords,
 )
 from .progress import NullProgressSink, ProgressEvent, ProgressSink
-
 
 _DEFAULT_SETTLE_SECONDS = 8
 """Delay after ``editDevNetworkList`` before polling for channel online.
@@ -116,9 +115,7 @@ class SiteSubnetChangeResult:
             return False
         if self.cameras_failed:
             return False
-        if self.password_rotation is not None and not self.password_rotation.success:
-            return False
-        return True
+        return not (self.password_rotation is not None and not self.password_rotation.success)
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -140,8 +137,7 @@ def _mapped_ip(
     """
     if old_net.prefixlen != new_net.prefixlen:
         raise ValueError(
-            f"old and new subnets must have matching prefix length "
-            f"({old_net.prefixlen} vs {new_net.prefixlen})"
+            f"old and new subnets must have matching prefix length ({old_net.prefixlen} vs {new_net.prefixlen})"
         )
     old = ipaddress.ip_address(old_ip)
     if old not in old_net:
@@ -234,11 +230,7 @@ def _edit_channel_ip(client: NvrClient, *, dev_id: str, new_ip: str) -> None:
     Uses pytvt's internal ``_post``/``_build_request_with_content``
     helpers; there is no public wrapper for this exact operation yet.
     """
-    content = (
-        '<content type="list">'
-        f'<item id="{dev_id}"><ip>{new_ip}</ip></item>'
-        "</content>"
-    )
+    content = f'<content type="list"><item id="{dev_id}"><ip>{new_ip}</ip></item></content>'
     data = client._post("editDevList", client._build_request_with_content(content))
     client._check_response(data, "editDevList")
 
@@ -300,13 +292,9 @@ def change_site_subnet_via_nvr(
     if not camera_password:
         raise WorkflowPrecheckError("camera_password is required")
     if rotate_passwords and not new_camera_password:
-        raise WorkflowPrecheckError(
-            "new_camera_password is required when rotate_passwords=True"
-        )
+        raise WorkflowPrecheckError("new_camera_password is required when rotate_passwords=True")
     if rotate_passwords and new_camera_password == camera_password:
-        raise WorkflowPrecheckError(
-            "new_camera_password equals camera_password (no-op rotation)"
-        )
+        raise WorkflowPrecheckError("new_camera_password equals camera_password (no-op rotation)")
 
     try:
         old_net = ipaddress.ip_network(old_subnet, strict=False)
@@ -315,13 +303,9 @@ def change_site_subnet_via_nvr(
         raise WorkflowPrecheckError(f"invalid subnet: {exc}") from exc
 
     if old_net.prefixlen != new_net.prefixlen:
-        raise WorkflowPrecheckError(
-            "old_subnet and new_subnet must have the same prefix length"
-        )
+        raise WorkflowPrecheckError("old_subnet and new_subnet must have the same prefix length")
     if old_net.overlaps(new_net):
-        raise WorkflowPrecheckError(
-            f"old_subnet {old_net} overlaps new_subnet {new_net}"
-        )
+        raise WorkflowPrecheckError(f"old_subnet {old_net} overlaps new_subnet {new_net}")
 
     host = getattr(client, "host", "?")
 
@@ -447,7 +431,8 @@ def change_site_subnet_via_nvr(
             readdressed_new_ips.append(p.new_ip)
             sink.emit(
                 ProgressEvent(
-                    "success", "camera.readdressed",
+                    "success",
+                    "camera.readdressed",
                     f"{p.old_ip} -> {p.new_ip}",
                     context={"old_ip": p.old_ip, "new_ip": p.new_ip, "mac": p.mac},
                 )
@@ -464,12 +449,13 @@ def change_site_subnet_via_nvr(
             )
             sink.emit(
                 ProgressEvent(
-                    "error", "camera.readdress_failed",
+                    "error",
+                    "camera.readdress_failed",
                     f"{p.old_ip}: {exc}",
                     context={"old_ip": p.old_ip},
                 )
             )
-        except Exception as exc:  # noqa: BLE001 — surface any transport error
+        except Exception as exc:
             results.append(
                 CameraReaddressResult(
                     old_ip=p.old_ip,
@@ -481,7 +467,8 @@ def change_site_subnet_via_nvr(
             )
             sink.emit(
                 ProgressEvent(
-                    "error", "camera.readdress_error",
+                    "error",
+                    "camera.readdress_error",
                     f"{p.old_ip}: {exc}",
                 )
             )
@@ -499,9 +486,7 @@ def change_site_subnet_via_nvr(
 
     channels_ip_updated = 0
     # Only update channels whose camera's readdress step reported success.
-    successful_new_ips = {
-        r.new_ip for r in results if r.status == "readdressed"
-    }
+    successful_new_ips = {r.new_ip for r in results if r.status == "readdressed"}
     for dev_id, new_ip in channel_new_ip_by_dev.items():
         if new_ip not in successful_new_ips:
             continue
@@ -510,15 +495,17 @@ def change_site_subnet_via_nvr(
             channels_ip_updated += 1
             sink.emit(
                 ProgressEvent(
-                    "success", "channel.ip_updated",
+                    "success",
+                    "channel.ip_updated",
                     f"NVR channel {dev_id} -> {new_ip}",
                     context={"dev_id": dev_id, "new_ip": new_ip},
                 )
             )
-        except Exception as exc:  # noqa: BLE001 — record and keep going
+        except Exception as exc:
             sink.emit(
                 ProgressEvent(
-                    "warning", "channel.ip_update_failed",
+                    "warning",
+                    "channel.ip_update_failed",
                     f"editDevList for {dev_id}: {exc}",
                     context={"dev_id": dev_id, "new_ip": new_ip},
                 )
@@ -558,26 +545,20 @@ def change_site_subnet_via_nvr(
         except WorkflowError as exc:
             sink.emit(
                 ProgressEvent(
-                    "error", "password_rotate.failed",
+                    "error",
+                    "password_rotate.failed",
                     f"password rotation failed: {exc}",
                 )
             )
 
     failed = sum(1 for r in results if r.status == "failed")
-    readdressed = sum(
-        1 for r in results
-        if r.status in {"readdressed", "channel-updated"}
-    )
+    readdressed = sum(1 for r in results if r.status in {"readdressed", "channel-updated"})
 
     sink.emit(
         ProgressEvent(
             "success" if failed == 0 else "warning",
             "workflow.done",
-            (
-                f"Done: readdressed={readdressed} "
-                f"channel_ip_updated={channels_ip_updated} "
-                f"failed={failed}"
-            ),
+            (f"Done: readdressed={readdressed} channel_ip_updated={channels_ip_updated} failed={failed}"),
             context={
                 "readdressed": readdressed,
                 "channel_ip_updated": channels_ip_updated,

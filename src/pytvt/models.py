@@ -93,14 +93,7 @@ class DeviceEntry:
     @classmethod
     def from_dict(cls, d: dict) -> DeviceEntry:
         """Construct from a raw JSON dict, ignoring unknown keys."""
-        identifier = str(
-            d.get("identifier")
-            or d.get("id")
-            or d.get("uid")
-            or d.get("serial")
-            or d.get("sn")
-            or ""
-        )
+        identifier = str(d.get("identifier") or d.get("id") or d.get("uid") or d.get("serial") or d.get("sn") or "")
         return cls(
             ip=d.get("ip", ""),
             site=d.get("site", ""),

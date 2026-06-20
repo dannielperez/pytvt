@@ -414,8 +414,10 @@ class TestImportBoundary:
                     if keyword in stripped and ("import" in stripped or "open(" in stripped):
                         violations.append(f"{py_file.name}:{lineno}: {stripped}")
                 # bare "tools." (no leading "pytvt.") flags the old repo-root scripts.
-                if "tools." in stripped and "pytvt.tools." not in stripped and (
-                    "import" in stripped or "open(" in stripped
+                if (
+                    "tools." in stripped
+                    and "pytvt.tools." not in stripped
+                    and ("import" in stripped or "open(" in stripped)
                 ):
                     violations.append(f"{py_file.name}:{lineno}: {stripped}")
 

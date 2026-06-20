@@ -57,10 +57,10 @@ class PlatformServer:
 
     guid: str
     name: str
-    kind: str                   # transfer|storage|ai|alarm_host|tv_wall|management|unknown
-    server_type: int            # raw nServerType for SERVER_CONNECT_NTF, -1 otherwise
+    kind: str  # transfer|storage|ai|alarm_host|tv_wall|management|unknown
+    server_type: int  # raw nServerType for SERVER_CONNECT_NTF, -1 otherwise
     server_type_name: str
-    connect_state: int          # raw enPlat_ConnectState, -1 if unknown
+    connect_state: int  # raw enPlat_ConnectState, -1 if unknown
     connect_state_name: str
     online: bool | None
     ip: str = ""

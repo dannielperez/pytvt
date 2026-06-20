@@ -36,13 +36,13 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from . import platform_constants as pc
 from .base import BaseManagementBackend
 from .context import CapabilityMap, PlatformIdentity, SDKContext, SDKIdentity
 from .exceptions import (
     CapabilityNotAvailable,
     ManagementAuthError,
     ManagementNotAuthenticatedError,
-    ProtocolError,
     SessionExpired,
     TransportError,
     UnsupportedOnPlatformError,
@@ -54,7 +54,6 @@ from .models import (
     ManagedDevice,
     ServerInfo,
 )
-from . import platform_constants as pc
 from .platform_models import (
     PlatformAlarmZone,
     PlatformResource,
@@ -104,8 +103,10 @@ _LOGIN_TIMEOUT = 15.0
 # ctypes struct definitions (from SDKDefs.h)
 # ---------------------------------------------------------------------------
 
+
 class _GUID_ST(ct.Structure):
     """GUID_ST from SDKDefs.h — 16 bytes total."""
+
     _fields_ = [
         ("Data1", ct.c_uint),
         ("Data2", ct.c_ushort),
@@ -116,6 +117,7 @@ class _GUID_ST(ct.Structure):
 
 class _Login_MsgResult(ct.Structure):
     """stLogin_MsgResult from SDKDefs.h."""
+
     _fields_ = [
         ("nLoginID", ct.c_int),
         ("nConnectState", ct.c_int),
@@ -135,6 +137,7 @@ class _Server_Connect_MsgResult(ct.Structure):
 
 class _Plat_ResNodeInfo(ct.Structure):
     """stPlat_ResNodeInfo from SDKDefs.h — device/channel node descriptor."""
+
     _fields_ = [
         ("ulNodeID", ct.c_uint),
         ("guidNodeID", _GUID_ST),
@@ -156,6 +159,7 @@ class _Plat_ResNodeInfo(ct.Structure):
 
 class _Plat_ResListMsg(ct.Structure):
     """stPlat_ResListMsg from SDKDefs.h — async resource list message."""
+
     _fields_ = [
         ("nStructSize", ct.c_int),
         ("nOptType", ct.c_int),
@@ -181,6 +185,7 @@ class _Plat_AnsiServerInfo(ct.Structure):
 
 class _Plat_AnsiServerListMsg(ct.Structure):
     """stPlat_AnsiServerListMsg from SDKDefs.h."""
+
     _pack_ = 4
     _fields_ = [
         ("nStructSize", ct.c_int),
@@ -206,6 +211,7 @@ class _Plat_StorageServerInfo(ct.Structure):
 
 class _Plat_StorageServerListMsg(ct.Structure):
     """stPlat_StorageServerListMsg from SDKDefs.h."""
+
     _pack_ = 4
     _fields_ = [
         ("nStructSize", ct.c_int),
@@ -237,6 +243,7 @@ class _Plat_AlarmHostInfo(ct.Structure):
 
 class _Plat_AlarmHostListMsg(ct.Structure):
     """stPlat_AlarmHostListMsg from SDKDefs.h."""
+
     _pack_ = 4
     _fields_ = [
         ("nStructSize", ct.c_int),
@@ -263,6 +270,7 @@ class _Plat_AlarmZoneInfo(ct.Structure):
 
 class _Plat_AlarmZoneListMsg(ct.Structure):
     """stPlat_AlarmZoneListMsg from SDKDefs.h."""
+
     _pack_ = 4
     _fields_ = [
         ("nStructSize", ct.c_int),
@@ -283,18 +291,19 @@ class _Plat_AlarmZoneListMsg(ct.Structure):
 # void (PLAT_CALL *fMessageCallback)(int lLoginID, int lMsgType,
 #                                    unsigned char *szBuf, int nLen, void *pUser)
 _fMessageCallback = ct.CFUNCTYPE(
-    None,           # return void
-    ct.c_int,       # lLoginID
-    ct.c_int,       # lMsgType
+    None,  # return void
+    ct.c_int,  # lLoginID
+    ct.c_int,  # lMsgType
     ct.POINTER(ct.c_ubyte),  # szBuf
-    ct.c_int,       # nLen
-    ct.c_void_p,    # pUser
+    ct.c_int,  # nLen
+    ct.c_void_p,  # pUser
 )
 
 
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
 
 class _SDKLoadError(Exception):
     """Internal — library failed to load."""
@@ -322,10 +331,7 @@ def _detect_sdk_machine(sdk_path: str) -> str | None:
     if len(header) < 20 or header[:4] != b"\x7fELF":
         return None
     e_machine = int.from_bytes(header[18:20], byteorder="little", signed=False)
-    return {0x03: "x86", 0x3E: "x86_64", 0x28: "arm", 0xB7: "aarch64"}.get(
-        e_machine, f"elf_machine_{e_machine}"
-    )
-
+    return {0x03: "x86", 0x3E: "x86_64", 0x28: "arm", 0xB7: "aarch64"}.get(e_machine, f"elf_machine_{e_machine}")
 
 
 def _normalize_os_family() -> str:
@@ -370,7 +376,7 @@ def _resource_to_model(node: dict[str, Any]) -> PlatformResource:
     """Normalize a raw MSGTYPE_RESLIST_NTF node dict into a PlatformResource."""
     node_type = int(node.get("nNodeType", 0))
     dev_type = int(node.get("nDevType", 0))
-    online_val = node.get("nOnline", None)
+    online_val = node.get("nOnline")
     if node_type in (pc.NODETYPE_DEVICE, pc.NODETYPE_CHANNEL) and online_val is not None:
         online: bool | None = int(online_val) == 1
     else:
@@ -395,6 +401,7 @@ def _resource_to_model(node: dict[str, Any]) -> PlatformResource:
 # ---------------------------------------------------------------------------
 # Session state — holds everything accumulated during async login + enumeration
 # ---------------------------------------------------------------------------
+
 
 class _PlatSessionState:
     """Thread-safe container for async callback state during a PlatformSDK session."""
@@ -444,13 +451,15 @@ class _PlatSessionState:
                     self.device_nodes.append(node_dict)
             elif list_msg.nOptType == NODEOPTTYPE_UPDATESTATE:
                 # State update — node ID + online state only
-                self.all_nodes.append({
-                    "_opt_type": "update_state",
-                    "ulNodeID": list_msg.ulNodeID,
-                    "nConnState": list_msg.nConnState,
-                    "szName": list_msg.szName.decode("utf-8", errors="replace").strip("\x00").strip(),
-                    "szIp": list_msg.szIp.decode("utf-8", errors="replace").strip("\x00").strip(),
-                })
+                self.all_nodes.append(
+                    {
+                        "_opt_type": "update_state",
+                        "ulNodeID": list_msg.ulNodeID,
+                        "nConnState": list_msg.nConnState,
+                        "szName": list_msg.szName.decode("utf-8", errors="replace").strip("\x00").strip(),
+                        "szIp": list_msg.szIp.decode("utf-8", errors="replace").strip("\x00").strip(),
+                    }
+                )
             if list_msg.bFinish:
                 self._list_done_event.set()
 
@@ -464,7 +473,7 @@ class _PlatSessionState:
                 }
             )
 
-    def on_ai_server_ntf(self, msg: "_Plat_AnsiServerListMsg") -> None:
+    def on_ai_server_ntf(self, msg: _Plat_AnsiServerListMsg) -> None:
         guid = _guid_to_hex(msg.guid)
         opt = int(msg.nOptType)
         with self._lock:
@@ -485,7 +494,7 @@ class _PlatSessionState:
                 "name": _decode_cstr(bytes(info.szName)),
             }
 
-    def on_storage_server_ntf(self, msg: "_Plat_StorageServerListMsg") -> None:
+    def on_storage_server_ntf(self, msg: _Plat_StorageServerListMsg) -> None:
         guid = _guid_to_hex(msg.guid)
         opt = int(msg.nOptType)
         with self._lock:
@@ -504,7 +513,7 @@ class _PlatSessionState:
                 "name": _decode_cstr(bytes(info.szName)),
             }
 
-    def on_alarm_host_ntf(self, msg: "_Plat_AlarmHostListMsg") -> None:
+    def on_alarm_host_ntf(self, msg: _Plat_AlarmHostListMsg) -> None:
         guid = _guid_to_hex(msg.guid)
         opt = int(msg.nOptType)
         with self._lock:
@@ -518,9 +527,7 @@ class _PlatSessionState:
                     existing["name"] = name
                 return
             info = msg.lpNodeinfo.contents
-            ip_or_sn = bytes(info.ipOrSn).rstrip(b"\x00").decode(
-                "utf-8", errors="replace"
-            ).strip()
+            ip_or_sn = bytes(info.ipOrSn).rstrip(b"\x00").decode("utf-8", errors="replace").strip()
             self.alarm_hosts[guid] = {
                 "guid": guid,
                 "name": _decode_cstr(bytes(info.szName)),
@@ -532,7 +539,7 @@ class _PlatSessionState:
                 "port": int(info.port),
             }
 
-    def on_alarm_zone_ntf(self, msg: "_Plat_AlarmZoneListMsg") -> None:
+    def on_alarm_zone_ntf(self, msg: _Plat_AlarmZoneListMsg) -> None:
         guid = _guid_to_hex(msg.guid)
         opt = int(msg.nOptType)
         with self._lock:
@@ -563,6 +570,7 @@ class _PlatSessionState:
 # PlatformSDKClient — active session wrapper
 # ---------------------------------------------------------------------------
 
+
 class PlatformSDKClient:
     """Manages a single authenticated session using the TVT PlatformSDK."""
 
@@ -586,7 +594,7 @@ class PlatformSDKClient:
         self._state = state
 
         # Use NamespacedLibrary for: init (shared), set_message_callback (PLAT-only), login (shared name, PLAT binding)
-        init_fn = self._ns.bind_function("init")
+        self._ns.bind_function("init")
         # set_message_callback uses the PLAT-specific fMessageCallback type — override argtypes
         set_cb_fn = self._ns.bind_function(
             "set_message_callback",
@@ -612,34 +620,19 @@ class PlatformSDKClient:
                 elif msg_type == MSGTYPE_RESLIST_NTF and buf_len >= ct.sizeof(_Plat_ResListMsg):
                     list_msg = ct.cast(buf, ct.POINTER(_Plat_ResListMsg)).contents
                     state.on_reslist_ntf(list_msg)
-                elif (
-                    msg_type == MSGTYPE_SERVER_CONNECT_NTF
-                    and buf_len >= ct.sizeof(_Server_Connect_MsgResult)
-                ):
+                elif msg_type == MSGTYPE_SERVER_CONNECT_NTF and buf_len >= ct.sizeof(_Server_Connect_MsgResult):
                     server_msg = ct.cast(buf, ct.POINTER(_Server_Connect_MsgResult)).contents
                     state.on_server_connect_ntf(server_msg)
-                elif (
-                    msg_type == MSGTYPE_AISERVER
-                    and buf_len >= ct.sizeof(_Plat_AnsiServerListMsg)
-                ):
+                elif msg_type == MSGTYPE_AISERVER and buf_len >= ct.sizeof(_Plat_AnsiServerListMsg):
                     ai_msg = ct.cast(buf, ct.POINTER(_Plat_AnsiServerListMsg)).contents
                     state.on_ai_server_ntf(ai_msg)
-                elif (
-                    msg_type == MSGTYPE_STORAGESERVER
-                    and buf_len >= ct.sizeof(_Plat_StorageServerListMsg)
-                ):
+                elif msg_type == MSGTYPE_STORAGESERVER and buf_len >= ct.sizeof(_Plat_StorageServerListMsg):
                     ss_msg = ct.cast(buf, ct.POINTER(_Plat_StorageServerListMsg)).contents
                     state.on_storage_server_ntf(ss_msg)
-                elif (
-                    msg_type == MSGTYPE_ALARMHOST
-                    and buf_len >= ct.sizeof(_Plat_AlarmHostListMsg)
-                ):
+                elif msg_type == MSGTYPE_ALARMHOST and buf_len >= ct.sizeof(_Plat_AlarmHostListMsg):
                     ah_msg = ct.cast(buf, ct.POINTER(_Plat_AlarmHostListMsg)).contents
                     state.on_alarm_host_ntf(ah_msg)
-                elif (
-                    msg_type == MSGTYPE_ALARMZONE
-                    and buf_len >= ct.sizeof(_Plat_AlarmZoneListMsg)
-                ):
+                elif msg_type == MSGTYPE_ALARMZONE and buf_len >= ct.sizeof(_Plat_AlarmZoneListMsg):
                     az_msg = ct.cast(buf, ct.POINTER(_Plat_AlarmZoneListMsg)).contents
                     state.on_alarm_zone_ntf(az_msg)
             except Exception:
@@ -711,13 +704,15 @@ class PlatformSDKClient:
             status = "online" if online == 1 else "offline"
             raw = dict(node)
             raw["sdk_family"] = "platform_sdk"
-            devices.append(ManagedDevice(
-                device_id=node_id,
-                name=name,
-                ip_address=ip,
-                status=status,
-                raw_data=raw,
-            ))
+            devices.append(
+                ManagedDevice(
+                    device_id=node_id,
+                    name=name,
+                    ip_address=ip,
+                    status=status,
+                    raw_data=raw,
+                )
+            )
         return devices
 
     def list_channels(self) -> list[ManagedChannel]:
@@ -725,16 +720,19 @@ class PlatformSDKClient:
         if not self._authenticated or self._state is None:
             raise SessionExpired("PlatformSDK session not authenticated.")
         from .models import ManagedChannel
+
         channels: list[ManagedChannel] = []
         for node in self._state.all_nodes:
             if node.get("nNodeType") != NODETYPE_CHANNEL:
                 continue
-            channels.append(ManagedChannel(
-                channel_id=str(node.get("ulNodeID", "")),
-                name=node.get("szName", ""),
-                device_id=str(node.get("ulParentID", "")),
-                raw_data=dict(node),
-            ))
+            channels.append(
+                ManagedChannel(
+                    channel_id=str(node.get("ulNodeID", "")),
+                    name=node.get("szName", ""),
+                    device_id=str(node.get("ulParentID", "")),
+                    raw_data=dict(node),
+                )
+            )
         return channels
 
     def get_device_statuses(self) -> list[DeviceStatus]:
@@ -746,11 +744,13 @@ class PlatformSDKClient:
             node_id = str(node.get("ulNodeID", ""))
             online_val = node.get("nOnline", 0)
             online = online_val == 1
-            statuses.append(DeviceStatus(
-                device_id=node_id,
-                online=online,
-                raw_data={"_source": "reslist_ntf", "nOnline": online_val},
-            ))
+            statuses.append(
+                DeviceStatus(
+                    device_id=node_id,
+                    online=online,
+                    raw_data={"_source": "reslist_ntf", "nOnline": online_val},
+                )
+            )
         return statuses
 
     def list_resources(self) -> list[dict[str, Any]]:
@@ -868,16 +868,10 @@ class PlatformSDKClient:
                 name=name,
                 kind=kind,
                 server_type=int(event.get("server_type", server_type)),
-                server_type_name=pc.server_type_name(
-                    int(event.get("server_type", server_type))
-                ),
+                server_type_name=pc.server_type_name(int(event.get("server_type", server_type))),
                 connect_state=connect_state,
-                connect_state_name=pc.connect_state_name(connect_state)
-                if connect_state >= 0
-                else "unknown",
-                online=pc.connect_state_is_online(connect_state)
-                if connect_state >= 0
-                else None,
+                connect_state_name=pc.connect_state_name(connect_state) if connect_state >= 0 else "unknown",
+                online=pc.connect_state_is_online(connect_state) if connect_state >= 0 else None,
                 ip=ip,
                 port=port,
                 raw_data=raw_data,
@@ -1023,9 +1017,7 @@ class PlatformSDKClient:
             )
         return {"dry_run": True, "operation": "create_user", "payload": payload}
 
-    def create_permission_group(
-        self, *, dry_run: bool = True, **payload: Any
-    ) -> dict[str, Any]:
+    def create_permission_group(self, *, dry_run: bool = True, **payload: Any) -> dict[str, Any]:
         if not dry_run:
             raise CapabilityNotAvailable(
                 "create_permission_group: live call not yet implemented. "
@@ -1033,9 +1025,7 @@ class PlatformSDKClient:
             )
         return {"dry_run": True, "operation": "create_permission_group", "payload": payload}
 
-    def create_transfer_server(
-        self, *, dry_run: bool = True, **payload: Any
-    ) -> dict[str, Any]:
+    def create_transfer_server(self, *, dry_run: bool = True, **payload: Any) -> dict[str, Any]:
         if not dry_run:
             raise CapabilityNotAvailable(
                 "create_transfer_server: PlatformSDK does not expose this via a "
@@ -1046,16 +1036,14 @@ class PlatformSDKClient:
     def create_tv_wall(self, *, dry_run: bool = True, **payload: Any) -> dict[str, Any]:
         if not dry_run:
             raise CapabilityNotAvailable(
-                "create_tv_wall: TV-wall operations go through "
-                "Plat_RequestKbTvWallOptionEx (XML); not yet bound."
+                "create_tv_wall: TV-wall operations go through Plat_RequestKbTvWallOptionEx (XML); not yet bound."
             )
         return {"dry_run": True, "operation": "create_tv_wall", "payload": payload}
 
     def add_device(self, *, dry_run: bool = True, **payload: Any) -> dict[str, Any]:
         if not dry_run:
             raise CapabilityNotAvailable(
-                "add_device: PlatformSDK write path for device enrollment is "
-                "not yet bound; live-test before enabling."
+                "add_device: PlatformSDK write path for device enrollment is not yet bound; live-test before enabling."
             )
         return {"dry_run": True, "operation": "add_device", "payload": payload}
 
@@ -1109,19 +1097,13 @@ class PlatformSDKClient:
         )
 
     def list_alarm_logs(self, **kwargs: Any) -> list[Any]:
-        raise CapabilityNotAvailable(
-            "list_alarm_logs: not exposed by PlatformSDK 20250115; use HTTP API."
-        )
+        raise CapabilityNotAvailable("list_alarm_logs: not exposed by PlatformSDK 20250115; use HTTP API.")
 
     def list_operation_logs(self, **kwargs: Any) -> list[Any]:
-        raise CapabilityNotAvailable(
-            "list_operation_logs: not exposed by PlatformSDK 20250115; use HTTP API."
-        )
+        raise CapabilityNotAvailable("list_operation_logs: not exposed by PlatformSDK 20250115; use HTTP API.")
 
     def list_exception_logs(self, **kwargs: Any) -> list[Any]:
-        raise CapabilityNotAvailable(
-            "list_exception_logs: not exposed by PlatformSDK 20250115; use HTTP API."
-        )
+        raise CapabilityNotAvailable("list_exception_logs: not exposed by PlatformSDK 20250115; use HTTP API.")
 
     def list_tv_walls(self) -> list[Any]:
         raise CapabilityNotAvailable(
@@ -1131,14 +1113,11 @@ class PlatformSDKClient:
 
     def list_alarm_events(self) -> list[Any]:
         raise CapabilityNotAvailable(
-            "list_alarm_events: live alarm stream needs MSGTYPE_* mapping "
-            "validation against the server."
+            "list_alarm_events: live alarm stream needs MSGTYPE_* mapping validation against the server."
         )
 
     def list_active_alarms(self) -> list[Any]:
-        raise CapabilityNotAvailable(
-            "list_active_alarms: not yet implemented."
-        )
+        raise CapabilityNotAvailable("list_active_alarms: not yet implemented.")
 
     def subscribe_alarms(self) -> AlarmSubscription:
         raise CapabilityNotAvailable(
@@ -1170,6 +1149,7 @@ class PlatformSDKClient:
 # ---------------------------------------------------------------------------
 # PlatformSdkManagementBackend  — BaseManagementBackend implementation
 # ---------------------------------------------------------------------------
+
 
 class PlatformSdkManagementBackend(BaseManagementBackend):
     """PlatformSDK-backed backend for TVT NVMS management server.
@@ -1292,9 +1272,7 @@ class PlatformSdkManagementBackend(BaseManagementBackend):
             reason = self._load_error or "No SDK path configured"
             raise CapabilityNotAvailable(f"PlatformSDK is not available: {reason}")
         if not self.supports_sdk():
-            raise CapabilityNotAvailable(
-                "PlatformSDK loaded but required Plat_* symbols are missing."
-            )
+            raise CapabilityNotAvailable("PlatformSDK loaded but required Plat_* symbols are missing.")
         return self._ns_lib
 
     def _require_session(self) -> PlatformSDKClient:
@@ -1450,7 +1428,7 @@ class PlatformSdkManagementBackend(BaseManagementBackend):
     # Context manager
     # ------------------------------------------------------------------
 
-    def __enter__(self) -> "PlatformSdkManagementBackend":
+    def __enter__(self) -> PlatformSdkManagementBackend:
         return self
 
     def __exit__(self, *_: object) -> None:

@@ -14,9 +14,7 @@ def _binary_frame(payload: bytes) -> bytes:
 
 
 def test_json_alarm_maps_code_and_fields():
-    raw = json.dumps(
-        {"type": "alarm", "alarm_type": 0x01, "channel": 3, "device_id": "dev-9"}
-    ).encode()
+    raw = json.dumps({"type": "alarm", "alarm_type": 0x01, "channel": 3, "device_id": "dev-9"}).encode()
     f = parse_alarm_frame(raw)
     assert f.parse_format == "json"
     assert f.event_code == "motion" and f.event_type == "alarm"

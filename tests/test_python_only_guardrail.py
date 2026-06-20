@@ -7,7 +7,6 @@ import sys
 from pathlib import Path
 from zipfile import ZipFile
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXCLUDED_DIRS = {".git", ".pytest_cache", ".mypy_cache", ".ruff_cache", "build", "dist", "__pycache__"}
 FORBIDDEN_NAMES = {"package.json", "package-lock.json"}

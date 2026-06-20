@@ -359,9 +359,7 @@ class ConnectionPool:
         """Probe all idle sessions.  Returns ``{key: healthy}``."""
         results: dict[str, bool] = {}
         with self._lock:
-            targets = [
-                (key, entry) for key, entry in self._sessions.items() if not entry.in_use and not entry.failed
-            ]
+            targets = [(key, entry) for key, entry in self._sessions.items() if not entry.in_use and not entry.failed]
 
         for key, entry in targets:
             ok = self._probe_session(entry)

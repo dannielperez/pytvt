@@ -20,10 +20,7 @@ import platform
 from typing import Any
 
 from .base import BaseManagementBackend
-from .context import CapabilityMap
-from .context import PlatformIdentity
-from .context import SDKContext
-from .context import SDKIdentity
+from .context import CapabilityMap, PlatformIdentity, SDKContext, SDKIdentity
 from .exceptions import CapabilityNotAvailable
 from .models import AlarmSubscription, DeviceStatus, ManagedChannel, ManagedDevice, ServerInfo
 

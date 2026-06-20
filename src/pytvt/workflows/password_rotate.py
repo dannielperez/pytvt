@@ -31,15 +31,14 @@ from __future__ import annotations
 
 import ipaddress
 import time
+from collections.abc import Iterable, Sequence
 from dataclasses import asdict, dataclass, field
-from typing import Iterable, Sequence
 
 from pytvt.models import NvrApiError
 from pytvt.xml_api import Channel, NvrClient
 
 from .exceptions import WorkflowError, WorkflowPrecheckError
 from .progress import NullProgressSink, ProgressEvent, ProgressSink
-
 
 _SETTLE_SECONDS = 6
 """Delay after pushing stored creds before re-querying online status.
@@ -381,12 +380,16 @@ def rotate_nvr_channel_passwords(
         # Step 1 — install OLD cred so NVR can authenticate to camera.
         try:
             client.update_device_credentials(
-                dev_ids=[ch.dev_id], username=username, password=old_password,
+                dev_ids=[ch.dev_id],
+                username=username,
+                password=old_password,
             )
         except Exception as exc:
             results.append(
                 ChannelRotationResult(
-                    chl_num=ch.chl_num, dev_id=ch.dev_id, ip=ch.ip,
+                    chl_num=ch.chl_num,
+                    dev_id=ch.dev_id,
+                    ip=ch.ip,
                     status="failed",
                     error=f"editDevList(old) failed: {exc}",
                 )
@@ -400,44 +403,49 @@ def rotate_nvr_channel_passwords(
         except NvrApiError as exc:
             results.append(
                 ChannelRotationResult(
-                    chl_num=ch.chl_num, dev_id=ch.dev_id, ip=ch.ip,
+                    chl_num=ch.chl_num,
+                    dev_id=ch.dev_id,
+                    ip=ch.ip,
                     status="failed",
                     error=f"editIPChlPassword failed: {exc}",
                 )
             )
-            sink.emit(
-                ProgressEvent("error", "pass_b.editIPChlPassword_failed", f"{label}: {exc}")
-            )
+            sink.emit(ProgressEvent("error", "pass_b.editIPChlPassword_failed", f"{label}: {exc}"))
             continue
         except Exception as exc:
             results.append(
                 ChannelRotationResult(
-                    chl_num=ch.chl_num, dev_id=ch.dev_id, ip=ch.ip,
+                    chl_num=ch.chl_num,
+                    dev_id=ch.dev_id,
+                    ip=ch.ip,
                     status="failed",
                     error=f"editIPChlPassword raised: {exc}",
                 )
             )
-            sink.emit(
-                ProgressEvent("error", "pass_b.editIPChlPassword_error", f"{label}: {exc}")
-            )
+            sink.emit(ProgressEvent("error", "pass_b.editIPChlPassword_error", f"{label}: {exc}"))
             continue
 
         # Step 3 — restore NEW cred on NVR so future auths succeed.
         try:
             client.update_device_credentials(
-                dev_ids=[ch.dev_id], username=username, password=new_password,
+                dev_ids=[ch.dev_id],
+                username=username,
+                password=new_password,
             )
         except Exception as exc:
             results.append(
                 ChannelRotationResult(
-                    chl_num=ch.chl_num, dev_id=ch.dev_id, ip=ch.ip,
+                    chl_num=ch.chl_num,
+                    dev_id=ch.dev_id,
+                    ip=ch.ip,
                     status="failed",
                     error=f"editDevList(new) post-rotation failed: {exc}",
                 )
             )
             sink.emit(
                 ProgressEvent(
-                    "warning", "pass_b.editDevList_new_failed",
+                    "warning",
+                    "pass_b.editDevList_new_failed",
                     f"{label}: camera rotated but NVR cred NOT updated — {exc}",
                 )
             )
@@ -446,13 +454,16 @@ def rotate_nvr_channel_passwords(
         rotated.append(ch)
         results.append(
             ChannelRotationResult(
-                chl_num=ch.chl_num, dev_id=ch.dev_id, ip=ch.ip,
+                chl_num=ch.chl_num,
+                dev_id=ch.dev_id,
+                ip=ch.ip,
                 status="rotated-via-pass-b",
             )
         )
         sink.emit(
             ProgressEvent(
-                "success", "channel.rotated",
+                "success",
+                "channel.rotated",
                 f"{label}: rotated and NVR cred synced",
                 context={"chl_num": ch.chl_num, "ip": ch.ip},
             )
@@ -466,10 +477,7 @@ def rotate_nvr_channel_passwords(
         ProgressEvent(
             "success" if failed == 0 else "warning",
             "workflow.done",
-            (
-                f"Done: already={len(already_ok)} synced={len(synced)} "
-                f"rotated={len(rotated)} failed={failed}"
-            ),
+            (f"Done: already={len(already_ok)} synced={len(synced)} rotated={len(rotated)} failed={failed}"),
             context={
                 "already": len(already_ok),
                 "synced": len(synced),
