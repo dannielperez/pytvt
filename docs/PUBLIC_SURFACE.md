@@ -9,7 +9,11 @@ These are expected to remain backward compatible for downstream callers:
 - Top-level package exports in `src/pytvt/__init__.py` for scanning/device flows
 - `DeviceManager` and `available_backends`
 - `NvrClient` and primary NVR models
+- `NvrApiError`, and `NvrApiResponseShapeError` (since 1.1.0) — the latter signals a firmware
+  response-shape mismatch from `query_channels` rather than a genuinely empty result
 - `WebApiClient`
+- `parse_alarm_frame` and `ParsedAlarmFrame` (since 1.2.0) — decode TVT alarm-server push frames
+  (JSON / binary / HTTP / length-prefixed)
 - `sdk_http` / `sdk_http_client` typed clients
 
 Compatibility-only:
