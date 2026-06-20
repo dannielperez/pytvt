@@ -11,9 +11,8 @@ import argparse
 import json
 import os
 import sys
-from typing import Sequence
+from collections.abc import Sequence
 
-from ..xml_api import NvrClient
 from ..workflows import (
     ConsoleProgressSink,
     WorkflowError,
@@ -23,6 +22,7 @@ from ..workflows import (
     rotate_nvr_channel_passwords,
     validate_site,
 )
+from ..xml_api import NvrClient
 
 
 def workflow_cli(argv: Sequence[str] | None = None) -> None:
@@ -42,26 +42,22 @@ def workflow_cli(argv: Sequence[str] | None = None) -> None:
             "cred ahead of camera, or camera ahead of NVR) automatically."
         ),
     )
-    pw.add_argument("--nvr", action="append", required=True,
-                    help="NVR host/IP (repeatable).")
+    pw.add_argument("--nvr", action="append", required=True, help="NVR host/IP (repeatable).")
     pw.add_argument("--nvr-username", default=os.environ.get("TVT_USERNAME", "admin"))
-    pw.add_argument("--nvr-password", default=os.environ.get("TVT_PASSWORD"),
-                    help="NVR admin password (default: $TVT_PASSWORD).")
-    pw.add_argument("--camera-username", default="admin",
-                    help="Camera-side admin username (default: admin).")
-    pw.add_argument("--old-password", required=True,
-                    help="Camera's current admin password.")
-    pw.add_argument("--new-password",
-                    default=os.environ.get("TVT_CAM_PASSWORD"),
-                    help="Target camera password (default: $TVT_CAM_PASSWORD).")
-    pw.add_argument("--subnet", default=None,
-                    help="Optional CIDR filter, e.g. 10.0.0.0/24.")
-    pw.add_argument("--apply", action="store_true",
-                    help="Actually perform rotations. Default is dry-run.")
-    pw.add_argument("--json", action="store_true",
-                    help="Emit structured JSON to stdout instead of human text.")
-    pw.add_argument("--quiet", action="store_true",
-                    help="Suppress per-step progress on stderr.")
+    pw.add_argument(
+        "--nvr-password", default=os.environ.get("TVT_PASSWORD"), help="NVR admin password (default: $TVT_PASSWORD)."
+    )
+    pw.add_argument("--camera-username", default="admin", help="Camera-side admin username (default: admin).")
+    pw.add_argument("--old-password", required=True, help="Camera's current admin password.")
+    pw.add_argument(
+        "--new-password",
+        default=os.environ.get("TVT_CAM_PASSWORD"),
+        help="Target camera password (default: $TVT_CAM_PASSWORD).",
+    )
+    pw.add_argument("--subnet", default=None, help="Optional CIDR filter, e.g. 10.0.0.0/24.")
+    pw.add_argument("--apply", action="store_true", help="Actually perform rotations. Default is dry-run.")
+    pw.add_argument("--json", action="store_true", help="Emit structured JSON to stdout instead of human text.")
+    pw.add_argument("--quiet", action="store_true", help="Suppress per-step progress on stderr.")
 
     sc = sub.add_parser(
         "site-subnet-change",
@@ -72,29 +68,31 @@ def workflow_cli(argv: Sequence[str] | None = None) -> None:
             "Optionally rotate the IPC admin password in lockstep."
         ),
     )
-    sc.add_argument("--nvr", action="append", required=True,
-                    help="NVR host/IP (repeatable).")
+    sc.add_argument("--nvr", action="append", required=True, help="NVR host/IP (repeatable).")
     sc.add_argument("--nvr-username", default=os.environ.get("TVT_USERNAME", "admin"))
-    sc.add_argument("--nvr-password", default=os.environ.get("TVT_PASSWORD"),
-                    help="NVR admin password (default: $TVT_PASSWORD).")
-    sc.add_argument("--old-subnet", required=True,
-                    help="Current camera subnet (e.g. 192.168.110.0/24).")
-    sc.add_argument("--new-subnet", required=True,
-                    help="Target camera subnet with same prefix length.")
-    sc.add_argument("--camera-username", default="admin",
-                    help="IPC admin username (default: admin).")
-    sc.add_argument("--camera-password",
-                    default=os.environ.get("TVT_CAM_PASSWORD"),
-                    help="Current IPC admin password (default: $TVT_CAM_PASSWORD).")
-    sc.add_argument("--new-camera-password",
-                    default=None,
-                    help="If set with --rotate-passwords, rotate IPCs to this password.")
-    sc.add_argument("--rotate-passwords", action="store_true",
-                    help="After readdress, rotate IPC admin password to --new-camera-password.")
-    sc.add_argument("--target-ip", action="append", default=None,
-                    help="Restrict migration to these old-subnet IPs (repeatable).")
-    sc.add_argument("--apply", action="store_true",
-                    help="Actually perform the migration. Default is dry-run.")
+    sc.add_argument(
+        "--nvr-password", default=os.environ.get("TVT_PASSWORD"), help="NVR admin password (default: $TVT_PASSWORD)."
+    )
+    sc.add_argument("--old-subnet", required=True, help="Current camera subnet (e.g. 192.168.110.0/24).")
+    sc.add_argument("--new-subnet", required=True, help="Target camera subnet with same prefix length.")
+    sc.add_argument("--camera-username", default="admin", help="IPC admin username (default: admin).")
+    sc.add_argument(
+        "--camera-password",
+        default=os.environ.get("TVT_CAM_PASSWORD"),
+        help="Current IPC admin password (default: $TVT_CAM_PASSWORD).",
+    )
+    sc.add_argument(
+        "--new-camera-password", default=None, help="If set with --rotate-passwords, rotate IPCs to this password."
+    )
+    sc.add_argument(
+        "--rotate-passwords",
+        action="store_true",
+        help="After readdress, rotate IPC admin password to --new-camera-password.",
+    )
+    sc.add_argument(
+        "--target-ip", action="append", default=None, help="Restrict migration to these old-subnet IPs (repeatable)."
+    )
+    sc.add_argument("--apply", action="store_true", help="Actually perform the migration. Default is dry-run.")
     sc.add_argument("--json", action="store_true")
     sc.add_argument("--quiet", action="store_true")
 
@@ -108,20 +106,19 @@ def workflow_cli(argv: Sequence[str] | None = None) -> None:
             "No write operations; --apply has no effect."
         ),
     )
-    vd.add_argument("--nvr", action="append", required=True,
-                    help="NVR host/IP (repeatable).")
+    vd.add_argument("--nvr", action="append", required=True, help="NVR host/IP (repeatable).")
     vd.add_argument("--nvr-username", default=os.environ.get("TVT_USERNAME", "admin"))
     vd.add_argument("--nvr-password", default=os.environ.get("TVT_PASSWORD"))
-    vd.add_argument("--expected-subnet", default=None,
-                    help="Camera subnet every channel must be in (CIDR).")
-    vd.add_argument("--expected-nvr-subnet", default=None,
-                    help="Subnet the NVR host itself must be in (CIDR).")
-    vd.add_argument("--expected-channel-count", type=int, default=None,
-                    help="Required registered-channel count.")
-    vd.add_argument("--compare-baseline", default=None,
-                    help="Path to a JSON file produced by a previous --json "
-                         "run against a reference NVR; compare current results "
-                         "to it structurally.")
+    vd.add_argument("--expected-subnet", default=None, help="Camera subnet every channel must be in (CIDR).")
+    vd.add_argument("--expected-nvr-subnet", default=None, help="Subnet the NVR host itself must be in (CIDR).")
+    vd.add_argument("--expected-channel-count", type=int, default=None, help="Required registered-channel count.")
+    vd.add_argument(
+        "--compare-baseline",
+        default=None,
+        help="Path to a JSON file produced by a previous --json "
+        "run against a reference NVR; compare current results "
+        "to it structurally.",
+    )
     vd.add_argument("--json", action="store_true")
     vd.add_argument("--quiet", action="store_true")
 
@@ -160,7 +157,7 @@ def _run_password_rotate(args: argparse.Namespace) -> None:
         )
         try:
             client.login()
-        except Exception as exc:  # noqa: BLE001 — surface any login error
+        except Exception as exc:
             print(f"ERROR: login to {host} failed: {exc}", file=sys.stderr)
             worst_exit = max(worst_exit, 2)
             continue
@@ -206,7 +203,9 @@ def _run_password_rotate(args: argparse.Namespace) -> None:
 
 
 def _login_or_exit(
-    host: str, username: str, password: str | None,
+    host: str,
+    username: str,
+    password: str | None,
 ) -> NvrClient | None:
     """Best-effort login. Prints to stderr and returns None on failure."""
     if not password:
@@ -215,7 +214,7 @@ def _login_or_exit(
     client = NvrClient(host, username=username, password=password)
     try:
         client.login()
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         print(f"ERROR: login to {host} failed: {exc}", file=sys.stderr)
         return None
     return client

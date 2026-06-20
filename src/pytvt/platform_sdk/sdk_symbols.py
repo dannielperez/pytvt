@@ -105,7 +105,9 @@ def build_symbol_inventory(exported_symbols: set[str]) -> list[dict[str, Any]]:
     return [{"name": name, "present": True, "args_count": None} for name in filtered]
 
 
-def build_symbol_presence_checks(exported_symbols: set[str], names: list[str] | tuple[str, ...]) -> list[dict[str, Any]]:
+def build_symbol_presence_checks(
+    exported_symbols: set[str], names: list[str] | tuple[str, ...]
+) -> list[dict[str, Any]]:
     return [
         {
             "name": name,

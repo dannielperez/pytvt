@@ -126,49 +126,23 @@ class LaneResult:
 _DEFAULT_ROUTES: dict[OperationKind, LanePlan] = {
     # Discovery prefers the platform server (it sees everything),
     # but falls back to direct device probes.
-    OperationKind.DISCOVER: LanePlan(
-        OperationKind.DISCOVER, Lane.PLATFORM_SDK, (Lane.XML_API, Lane.DEVICE_SDK)
-    ),
-    OperationKind.INVENTORY: LanePlan(
-        OperationKind.INVENTORY, Lane.PLATFORM_SDK, (Lane.XML_API,)
-    ),
-    OperationKind.HEALTH: LanePlan(
-        OperationKind.HEALTH, Lane.PLATFORM_SDK, (Lane.XML_API,)
-    ),
-    OperationKind.TOPOLOGY: LanePlan(
-        OperationKind.TOPOLOGY, Lane.PLATFORM_SDK, ()
-    ),
+    OperationKind.DISCOVER: LanePlan(OperationKind.DISCOVER, Lane.PLATFORM_SDK, (Lane.XML_API, Lane.DEVICE_SDK)),
+    OperationKind.INVENTORY: LanePlan(OperationKind.INVENTORY, Lane.PLATFORM_SDK, (Lane.XML_API,)),
+    OperationKind.HEALTH: LanePlan(OperationKind.HEALTH, Lane.PLATFORM_SDK, (Lane.XML_API,)),
+    OperationKind.TOPOLOGY: LanePlan(OperationKind.TOPOLOGY, Lane.PLATFORM_SDK, ()),
     # Device-level reads/writes go through the device lanes.
-    OperationKind.DEVICE_INFO: LanePlan(
-        OperationKind.DEVICE_INFO, Lane.DEVICE_SDK, (Lane.XML_API, Lane.WEB_API)
-    ),
-    OperationKind.SCAN_CHANNELS: LanePlan(
-        OperationKind.SCAN_CHANNELS, Lane.XML_API, (Lane.DEVICE_SDK,)
-    ),
-    OperationKind.PTZ: LanePlan(
-        OperationKind.PTZ, Lane.DEVICE_SDK, (Lane.WEB_API,)
-    ),
-    OperationKind.ALARM: LanePlan(
-        OperationKind.ALARM, Lane.PLATFORM_SDK, (Lane.XML_API,)
-    ),
+    OperationKind.DEVICE_INFO: LanePlan(OperationKind.DEVICE_INFO, Lane.DEVICE_SDK, (Lane.XML_API, Lane.WEB_API)),
+    OperationKind.SCAN_CHANNELS: LanePlan(OperationKind.SCAN_CHANNELS, Lane.XML_API, (Lane.DEVICE_SDK,)),
+    OperationKind.PTZ: LanePlan(OperationKind.PTZ, Lane.DEVICE_SDK, (Lane.WEB_API,)),
+    OperationKind.ALARM: LanePlan(OperationKind.ALARM, Lane.PLATFORM_SDK, (Lane.XML_API,)),
     # Account / security
-    OperationKind.ROTATE_PASSWORD: LanePlan(
-        OperationKind.ROTATE_PASSWORD, Lane.WORKFLOWS, ()
-    ),
-    OperationKind.LIST_USERS: LanePlan(
-        OperationKind.LIST_USERS, Lane.XML_API, (Lane.PLATFORM_SDK,)
-    ),
+    OperationKind.ROTATE_PASSWORD: LanePlan(OperationKind.ROTATE_PASSWORD, Lane.WORKFLOWS, ()),
+    OperationKind.LIST_USERS: LanePlan(OperationKind.LIST_USERS, Lane.XML_API, (Lane.PLATFORM_SDK,)),
     # Network / config
-    OperationKind.CHANGE_SUBNET: LanePlan(
-        OperationKind.CHANGE_SUBNET, Lane.WORKFLOWS, ()
-    ),
-    OperationKind.PLATFORM_ACCESS: LanePlan(
-        OperationKind.PLATFORM_ACCESS, Lane.XML_API, ()
-    ),
+    OperationKind.CHANGE_SUBNET: LanePlan(OperationKind.CHANGE_SUBNET, Lane.WORKFLOWS, ()),
+    OperationKind.PLATFORM_ACCESS: LanePlan(OperationKind.PLATFORM_ACCESS, Lane.XML_API, ()),
     # Verification
-    OperationKind.VALIDATE: LanePlan(
-        OperationKind.VALIDATE, Lane.WORKFLOWS, ()
-    ),
+    OperationKind.VALIDATE: LanePlan(OperationKind.VALIDATE, Lane.WORKFLOWS, ()),
 }
 
 

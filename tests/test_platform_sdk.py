@@ -13,6 +13,16 @@ from unittest.mock import MagicMock
 import pytest
 
 from pytvt.platform_sdk import platform_constants as pc
+from pytvt.platform_sdk.exceptions import (
+    CapabilityNotAvailable,
+    SessionExpired,
+)
+from pytvt.platform_sdk.platform_backend import (
+    PlatformSDKClient,
+    PlatformSdkManagementBackend,
+    _PlatSessionState,
+    _resource_to_model,
+)
 from pytvt.platform_sdk.platform_constants import (
     connect_state_is_online,
     connect_state_name,
@@ -28,21 +38,11 @@ from pytvt.platform_sdk.platform_models import (
     PlatformResource,
     PlatformServer,
 )
-from pytvt.platform_sdk.platform_backend import (
-    PlatformSDKClient,
-    PlatformSdkManagementBackend,
-    _PlatSessionState,
-    _resource_to_model,
-)
-from pytvt.platform_sdk.exceptions import (
-    CapabilityNotAvailable,
-    SessionExpired,
-)
-
 
 # ---------------------------------------------------------------------------
 # Constant mappings
 # ---------------------------------------------------------------------------
+
 
 class TestConstantMappings:
     def test_connect_state_known_values(self) -> None:
@@ -85,11 +85,7 @@ class TestRightsDecoding:
         assert names == ["log"]
 
     def test_decode_combined_system_rights(self) -> None:
-        mask = (
-            pc.PLAT_SYSTEM_RIGHT_LOG
-            | pc.PLAT_SYSTEM_RIGHT_TVWALL_CONFIG
-            | pc.PLAT_SYSTEM_RIGHT_RESOURCE_CONFIG
-        )
+        mask = pc.PLAT_SYSTEM_RIGHT_LOG | pc.PLAT_SYSTEM_RIGHT_TVWALL_CONFIG | pc.PLAT_SYSTEM_RIGHT_RESOURCE_CONFIG
         names = decode_system_rights(mask)
         assert set(names) == {"log", "tvwall_config", "resource_config"}
 
@@ -108,6 +104,7 @@ class TestRightsDecoding:
 # ---------------------------------------------------------------------------
 # Redaction
 # ---------------------------------------------------------------------------
+
 
 class TestRedactSensitive:
     def test_redacts_password_but_preserves_key(self) -> None:
@@ -133,6 +130,7 @@ class TestRedactSensitive:
 # ---------------------------------------------------------------------------
 # Resource normalization
 # ---------------------------------------------------------------------------
+
 
 class TestResourceNormalization:
     def _raw(self, **overrides: object) -> dict[str, object]:
@@ -166,16 +164,12 @@ class TestResourceNormalization:
         assert model.supports_face_match is True
 
     def test_area_has_no_online(self) -> None:
-        model = _resource_to_model(
-            self._raw(nNodeType=pc.NODETYPE_AREA, nOnline=0)
-        )
+        model = _resource_to_model(self._raw(nNodeType=pc.NODETYPE_AREA, nOnline=0))
         # Areas don't report online — must be None to avoid misleading "offline".
         assert model.online is None
 
     def test_device_offline(self) -> None:
-        model = _resource_to_model(
-            self._raw(nNodeType=pc.NODETYPE_DEVICE, nOnline=0)
-        )
+        model = _resource_to_model(self._raw(nNodeType=pc.NODETYPE_DEVICE, nOnline=0))
         assert model.online is False
 
     def test_unknown_types_fall_back(self) -> None:
@@ -187,6 +181,7 @@ class TestResourceNormalization:
 # ---------------------------------------------------------------------------
 # PlatformSDKClient list/tree/find helpers (mocked session)
 # ---------------------------------------------------------------------------
+
 
 class TestPlatformSDKClientHelpers:
     def _make_client_with_state(self, state: _PlatSessionState) -> PlatformSDKClient:
@@ -336,6 +331,7 @@ class TestPlatformSDKClientHelpers:
 # ---------------------------------------------------------------------------
 # Write scaffolding and unreachable APIs
 # ---------------------------------------------------------------------------
+
 
 class TestWriteScaffoldsAndUnreachable:
     def _client(self) -> PlatformSDKClient:

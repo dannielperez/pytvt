@@ -19,7 +19,8 @@ module as heuristics and be documented there.
 
 from __future__ import annotations
 
-from typing import Final, Mapping
+from collections.abc import Mapping
+from typing import Final
 
 # ---------------------------------------------------------------------------
 # PlatformSDK message types (Plat_MsgType — SDKDefs.h)
@@ -30,13 +31,13 @@ MSGTYPE_RESLIST_NTF: Final = 2
 MSGTYPE_LIVEPLAY: Final = 3
 MSGTYPE_CONFIG: Final = 6
 MSGTYPE_PLAYBACK_NTF: Final = 7
-MSGTYPE_AISERVER: Final = 10           # Intelligent analysis server list (stPlat_AnsiServerListMsg)
-MSGTYPE_STORAGESERVER: Final = 14      # Storage server list (stPlat_StorageServerListMsg)
-MSGTYPE_CHLUNDERSTORAGE: Final = 15    # Channels attached under a storage server
-MSGTYPE_STORAGE_INFO: Final = 18       # Disk/storage detail (StorageInfo XML blob)
-MSGTYPE_ALARMHOST: Final = 19          # Alarm host list (stPlat_AlarmHostListMsg)
-MSGTYPE_ALARMZONE: Final = 20          # Alarm zone list (stPlat_AlarmZoneListMsg)
-MSGTYPE_SERVER_CONNECT_NTF: Final = 35 # Generic server online/offline ntf
+MSGTYPE_AISERVER: Final = 10  # Intelligent analysis server list (stPlat_AnsiServerListMsg)
+MSGTYPE_STORAGESERVER: Final = 14  # Storage server list (stPlat_StorageServerListMsg)
+MSGTYPE_CHLUNDERSTORAGE: Final = 15  # Channels attached under a storage server
+MSGTYPE_STORAGE_INFO: Final = 18  # Disk/storage detail (StorageInfo XML blob)
+MSGTYPE_ALARMHOST: Final = 19  # Alarm host list (stPlat_AlarmHostListMsg)
+MSGTYPE_ALARMZONE: Final = 20  # Alarm zone list (stPlat_AlarmZoneListMsg)
+MSGTYPE_SERVER_CONNECT_NTF: Final = 35  # Generic server online/offline ntf
 MSGTYPE_AUTHOURITY_GROUP_INFO: Final = 39  # Authority group info
 
 _MSGTYPE_NAMES: Final[Mapping[int, str]] = {
@@ -185,7 +186,7 @@ def node_opt_name(value: int) -> str:
 # destructive / write operations.
 # ---------------------------------------------------------------------------
 
-SERVER_TYPE_MANAGEMENT: Final = 0      # Observed: main management server / null-GUID event
+SERVER_TYPE_MANAGEMENT: Final = 0  # Observed: main management server / null-GUID event
 
 _SERVER_TYPE_NAMES: Final[Mapping[int, str]] = {
     SERVER_TYPE_MANAGEMENT: "management",
