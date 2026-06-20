@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import sys
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import Any, ClassVar, Protocol
 
 
 @dataclass(frozen=True)
@@ -42,14 +42,14 @@ class ProgressSink(Protocol):
 class NullProgressSink:
     """Discards all events. Default for library consumers that don't care."""
 
-    def emit(self, event: ProgressEvent) -> None:  # noqa: D401 — protocol impl
+    def emit(self, event: ProgressEvent) -> None:
         return None
 
 
 class ConsoleProgressSink:
     """Prints to stderr. Intended for CLI use, never for library defaults."""
 
-    _LEVEL_PREFIX = {
+    _LEVEL_PREFIX: ClassVar[dict[str, str]] = {
         "info": "  ",
         "success": "  ✓ ",
         "warning": "  ⚠ ",

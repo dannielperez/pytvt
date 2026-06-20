@@ -35,14 +35,14 @@ from .exceptions import (
 )
 from .models import AlarmSubscription, DeviceStatus, ManagedChannel, ManagedDevice, ServerInfo
 from .native import NativeManagementBackend
+from .platform_backend import PlatformSdkManagementBackend
 from .platform_models import (
     PlatformAlarmZone,
     PlatformResource,
     PlatformServer,
 )
-from .platform_backend import PlatformSdkManagementBackend
-from .sidecar import SidecarManagementBackend
 from .sdk import SdkManagementBackend
+from .sidecar import SidecarManagementBackend
 
 logger = logging.getLogger(__name__)
 
@@ -137,8 +137,7 @@ class ManagementClient:
                 return sdk
             else:
                 logger.debug(
-                    "ManagementClient: SDK path provided but library unavailable — "
-                    "falling back to native stub for %s",
+                    "ManagementClient: SDK path provided but library unavailable — falling back to native stub for %s",
                     self.host,
                 )
 
@@ -148,9 +147,7 @@ class ManagementClient:
     def _require_backend(self) -> BaseManagementBackend:
         """Return the active backend or raise if not logged in."""
         if self._backend is None:
-            raise ManagementNotAuthenticatedError(
-                "ManagementClient is not logged in. Call login() first."
-            )
+            raise ManagementNotAuthenticatedError("ManagementClient is not logged in. Call login() first.")
         return self._backend
 
     # ------------------------------------------------------------------
@@ -164,9 +161,7 @@ class ManagementClient:
         Raises CapabilityNotAvailable if the selected backend cannot log in.
         """
         if self._backend is not None:
-            logger.warning(
-                "ManagementClient.login() called while already logged in — closing previous session"
-            )
+            logger.warning("ManagementClient.login() called while already logged in — closing previous session")
             self.close()
 
         backend = self._select_backend()
@@ -194,7 +189,7 @@ class ManagementClient:
     def list_devices_for_login_routing(self) -> list[dict[str, str]]:
         backend = self._require_backend()
         if hasattr(backend, "list_devices_for_login_routing"):
-            method = getattr(backend, "list_devices_for_login_routing")
+            method = backend.list_devices_for_login_routing
             return method()
 
         rows: list[dict[str, str]] = []
@@ -228,7 +223,7 @@ class ManagementClient:
 
         backend = self._require_backend()
         if hasattr(backend, "list_resources"):
-            method = getattr(backend, "list_resources")
+            method = backend.list_resources
             return method()
 
         rows: list[dict[str, object]] = []
@@ -261,7 +256,7 @@ class ManagementClient:
 
         backend = self._require_backend()
         if hasattr(backend, "list_server_connection_events"):
-            method = getattr(backend, "list_server_connection_events")
+            method = backend.list_server_connection_events
             return method()
         return []
 
@@ -270,7 +265,7 @@ class ManagementClient:
 
         backend = self._require_backend()
         if hasattr(backend, "list_transfer_servers"):
-            method = getattr(backend, "list_transfer_servers")
+            method = backend.list_transfer_servers
             return method()
         return []
 
@@ -287,9 +282,7 @@ class ManagementClient:
         backend = self._require_backend()
         method = getattr(backend, method_name, None)
         if method is None:
-            raise CapabilityNotAvailable(
-                f"{method_name} is only available on the platform_sdk backend."
-            )
+            raise CapabilityNotAvailable(f"{method_name} is only available on the platform_sdk backend.")
         return method(*args, **kwargs)
 
     # -- Normalized resource views --
@@ -340,19 +333,11 @@ class ManagementClient:
     def create_user(self, *, dry_run: bool = True, **payload: object) -> dict[str, object]:
         return self._platform_call("create_user", dry_run=dry_run, **payload)  # type: ignore[return-value]
 
-    def create_permission_group(
-        self, *, dry_run: bool = True, **payload: object
-    ) -> dict[str, object]:
-        return self._platform_call(
-            "create_permission_group", dry_run=dry_run, **payload
-        )  # type: ignore[return-value]
+    def create_permission_group(self, *, dry_run: bool = True, **payload: object) -> dict[str, object]:
+        return self._platform_call("create_permission_group", dry_run=dry_run, **payload)  # type: ignore[return-value]
 
-    def create_transfer_server(
-        self, *, dry_run: bool = True, **payload: object
-    ) -> dict[str, object]:
-        return self._platform_call(
-            "create_transfer_server", dry_run=dry_run, **payload
-        )  # type: ignore[return-value]
+    def create_transfer_server(self, *, dry_run: bool = True, **payload: object) -> dict[str, object]:
+        return self._platform_call("create_transfer_server", dry_run=dry_run, **payload)  # type: ignore[return-value]
 
     def create_tv_wall(self, *, dry_run: bool = True, **payload: object) -> dict[str, object]:
         return self._platform_call("create_tv_wall", dry_run=dry_run, **payload)  # type: ignore[return-value]
@@ -462,7 +447,7 @@ class ManagementClient:
     # Context manager support
     # ------------------------------------------------------------------
 
-    def __enter__(self) -> "ManagementClient":
+    def __enter__(self) -> ManagementClient:
         return self
 
     def __exit__(self, *_: object) -> None:

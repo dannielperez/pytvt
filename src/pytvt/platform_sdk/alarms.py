@@ -9,12 +9,10 @@ neutral :class:`PlatformAlarmEvent` shape that downstream consumers
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import datetime
-from datetime import timezone
-from typing import Any
-from typing import Iterable
-from typing import Literal
+from datetime import datetime, timezone
+from typing import Any, Literal
 
 __all__ = ["PlatformAlarmEvent", "normalize_alarm_events"]
 
@@ -154,21 +152,11 @@ def normalize_alarm_events(
     events: list[PlatformAlarmEvent] = []
 
     for row in raw_logs_or_zones:
-        device_guid = str(
-            _extract(row, "device_guid", "deviceGuid", "host_guid", "guidNodeID", "guid")
-            or ""
-        )
-        raw_type = str(
-            _extract(row, "raw_type", "type", "alarm_type", "alarmType", "name")
-            or ""
-        )
+        device_guid = str(_extract(row, "device_guid", "deviceGuid", "host_guid", "guidNodeID", "guid") or "")
+        raw_type = str(_extract(row, "raw_type", "type", "alarm_type", "alarmType", "name") or "")
         timestamp = _parse_ts(_extract(row, "timestamp", "time", "ts", "occurred_at"))
         explicit_site = _extract(row, "site_id", "siteId")
-        site_id = (
-            str(explicit_site)
-            if explicit_site
-            else site_lookup.get(device_guid.lower(), "orphans")
-        )
+        site_id = str(explicit_site) if explicit_site else site_lookup.get(device_guid.lower(), "orphans")
 
         alarm_type = _classify(raw_type)
         severity: AlarmSeverity = _SEVERITY_BY_TYPE.get(alarm_type, "low")

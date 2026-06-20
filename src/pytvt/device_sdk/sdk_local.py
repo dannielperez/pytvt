@@ -39,40 +39,42 @@ def scan_nvr_payload(
     }
 
     try:
-        with NetSdkClient(
-            sdk_path=sdk_path,
-            connect_timeout=timeout_ms,
-            recv_timeout=timeout_ms,
-        ) as client:
-            with client.login(ip, username, password, port=port) as session:
-                device_info = session.device_info()
-                result["device_name"] = device_info.device_name
-                result["device_model"] = device_info.product
-                result["serial_number"] = device_info.serial_number
-                result["firmware"] = device_info.firmware
+        with (
+            NetSdkClient(
+                sdk_path=sdk_path,
+                connect_timeout=timeout_ms,
+                recv_timeout=timeout_ms,
+            ) as client,
+            client.login(ip, username, password, port=port) as session,
+        ):
+            device_info = session.device_info()
+            result["device_name"] = device_info.device_name
+            result["device_model"] = device_info.product
+            result["serial_number"] = device_info.serial_number
+            result["firmware"] = device_info.firmware
 
-                try:
-                    cameras = session.ipc_info(max_channels=max_channels)
-                except NetSdkError as exc:
-                    result["success"] = True
-                    result["total_channels"] = device_info.video_inputs
-                    result["error"] = f"Could not retrieve IPC info, but device is reachable: {exc}"
-                    return result
-
-                result["cameras"] = [
-                    {
-                        "channel": camera.channel,
-                        "name": camera.name,
-                        "address": camera.ip,
-                        "port": camera.port,
-                        "status": "Online" if camera.online else "Offline",
-                        "protocol": camera.manufacturer,
-                        "model": camera.model,
-                    }
-                    for camera in cameras
-                ]
-                result["total_channels"] = len(cameras) or device_info.video_inputs
+            try:
+                cameras = session.ipc_info(max_channels=max_channels)
+            except NetSdkError as exc:
                 result["success"] = True
+                result["total_channels"] = device_info.video_inputs
+                result["error"] = f"Could not retrieve IPC info, but device is reachable: {exc}"
+                return result
+
+            result["cameras"] = [
+                {
+                    "channel": camera.channel,
+                    "name": camera.name,
+                    "address": camera.ip,
+                    "port": camera.port,
+                    "status": "Online" if camera.online else "Offline",
+                    "protocol": camera.manufacturer,
+                    "model": camera.model,
+                }
+                for camera in cameras
+            ]
+            result["total_channels"] = len(cameras) or device_info.video_inputs
+            result["success"] = True
     except (NetSdkError, NetSdkUnavailable, OSError, ValueError) as exc:
         result["error"] = str(exc)
 

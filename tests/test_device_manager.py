@@ -7,6 +7,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from pytvt.device_sdk.http_client import (
+    CommandResult,
+    DeviceInfoResult,
+    DeviceTimeResult,
+    RtspUrlResult,
+)
 from pytvt.device_sdk.manager import (
     Backend,
     DeviceManager,
@@ -17,12 +23,6 @@ from pytvt.device_sdk.manager import (
     available_backends,
 )
 from pytvt.models import DeviceEntry
-from pytvt.device_sdk.http_client import (
-    CommandResult,
-    DeviceInfoResult,
-    DeviceTimeResult,
-    RtspUrlResult,
-)
 
 CREDS = dict(ip="10.0.0.1", username="admin", password="pass123")
 
@@ -41,9 +41,11 @@ class TestNativeDetection:
 
     def test_netsdk_available_on_darwin(self) -> None:
         """NetSDK should be detectable on macOS (Darwin) with proper SDK path."""
-        with patch("pytvt.device_sdk.loader.platform") as mock_plat, \
-             patch("pytvt.device_sdk.loader._autodetect_macos_sdk_path") as mock_detect, \
-             patch("pytvt.device_sdk.loader.Path") as mock_path:
+        with (
+            patch("pytvt.device_sdk.loader.platform") as mock_plat,
+            patch("pytvt.device_sdk.loader._autodetect_macos_sdk_path") as mock_detect,
+            patch("pytvt.device_sdk.loader.Path") as mock_path,
+        ):
             mock_plat.system.return_value = "Darwin"
             mock_detect.return_value = "/path/to/sdk"
 
@@ -52,6 +54,7 @@ class TestNativeDetection:
             mock_path.return_value = mock_path_inst
 
             from pytvt.device_sdk.loader import is_netsdk_available
+
             # When SDK is detected and exists, it should be available
             assert is_netsdk_available() is True
 
@@ -486,28 +489,19 @@ class TestLoaderUpdates:
 
             assert _find_lib() == str(lib_path)
 
-    def test_find_lib_sdk_root_directory(self, tmp_path) -> None:
-        sdk_root = tmp_path / "vendor-sdk"
-        lib_path = sdk_root / "bin" / "linux" / "libdvrnetsdk.so"
-        lib_path.parent.mkdir(parents=True)
-        lib_path.write_text("", encoding="utf-8")
-
-        from pytvt.device_sdk.loader import _find_lib
-
-        assert _find_lib(str(sdk_root)) == str(lib_path)
-    def test_find_lib_sdk_root_directory(self, tmp_path) -> None:
+    def test_find_lib_sdk_root_directory_platform_specific(self, tmp_path) -> None:
         """Test that _find_lib can find SDK in vendor SDK root directory (platform-dependent)."""
         import platform as stdlib_platform
-        
+
         sdk_root = tmp_path / "vendor-sdk"
-        
+
         if stdlib_platform.system() == "Darwin":
             # On macOS, create dylib
             lib_path = sdk_root / "binaries" / "libNetClientSDK.dylib"
         else:
             # On Linux, create .so
             lib_path = sdk_root / "bin" / "linux" / "libdvrnetsdk.so"
-        
+
         lib_path.parent.mkdir(parents=True)
         lib_path.write_text("", encoding="utf-8")
 

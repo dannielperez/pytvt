@@ -111,12 +111,10 @@ def probe_capabilities(
     try:
         from ..xml_api import NvrClient
 
-        with NvrClient(
-            host, username=username, password=password, port=xml_api_port, timeout=timeout
-        ) as client:
+        with NvrClient(host, username=username, password=password, port=xml_api_port, timeout=timeout) as client:
             client.login()
             xml_api_ok = True
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         details["xml_api"] = repr(exc)
 
     # ── web_api (LAPI HTTP) ──────────────────────────────────────
@@ -124,14 +122,12 @@ def probe_capabilities(
     try:
         from ..web_api import WebApiClient
 
-        with WebApiClient(
-            host, username=username, password=password, port=web_api_port, timeout=timeout
-        ) as client:
+        with WebApiClient(host, username=username, password=password, port=web_api_port, timeout=timeout) as client:
             # A minimal handshake: instantiation + context-enter is enough
             # to detect that the endpoint is reachable; the auth challenge
             # happens lazily on first request.
             web_api_ok = True
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         details["web_api"] = repr(exc)
 
     # ── device_sdk (native NetSDK) ───────────────────────────────
@@ -141,7 +137,7 @@ def probe_capabilities(
 
         _find_lib(None)
         device_sdk_ok = True
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         details["device_sdk"] = repr(exc)
 
     # ── platform_sdk ─────────────────────────────────────────────

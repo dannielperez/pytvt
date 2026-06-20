@@ -30,26 +30,21 @@ from __future__ import annotations
 
 import ctypes
 import ctypes as ct
-import json
 import logging
 import platform
 import shutil
 import subprocess
-from dataclasses import dataclass
-from dataclasses import field
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Literal
+from typing import Any, Literal
 
 from pytvt.device_sdk import types as netsdk_types
 
 from .base import BaseManagementBackend
-from .context import CapabilityMap
-from .context import PlatformIdentity
-from .context import SDKContext
-from .context import SDKIdentity
+from .context import CapabilityMap, PlatformIdentity, SDKContext, SDKIdentity
 from .exceptions import (
     CapabilityNotAvailable,
-    CapabilityNotAvailableError,
     ManagementAuthError,
     ManagementNotAuthenticatedError,
     MissingSymbolError,
@@ -60,11 +55,13 @@ from .exceptions import (
 )
 from .models import AlarmSubscription, DeviceStatus, ManagedChannel, ManagedDevice, ServerInfo
 from .sdk_contract import stable_contract_definition
-from .sdk_symbols import build_symbol_capability_evidence
-from .sdk_symbols import build_symbol_inventory
-from .sdk_symbols import build_symbol_presence_checks
-from .sdk_symbols import build_windows_parity_report
-from .sdk_symbols import list_exported_symbols
+from .sdk_symbols import (
+    build_symbol_capability_evidence,
+    build_symbol_inventory,
+    build_symbol_presence_checks,
+    build_windows_parity_report,
+    list_exported_symbols,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -232,12 +229,8 @@ class SdkDiagnostics:
         logout_symbol = self.symbols.get("logout")
         alarm_subscribe = self.symbols.get("alarm_subscription")
         alarm_unsubscribe = self.symbols.get("alarm_unsubscribe")
-        supports_init = bool(
-            init_symbol and init_symbol.status == "confirmed" and init_symbol.signature_ready
-        )
-        supports_logout = bool(
-            logout_symbol and logout_symbol.status == "confirmed" and logout_symbol.signature_ready
-        )
+        supports_init = bool(init_symbol and init_symbol.status == "confirmed" and init_symbol.signature_ready)
+        supports_logout = bool(logout_symbol and logout_symbol.status == "confirmed" and logout_symbol.signature_ready)
         supports_alarm_subscription = bool(
             alarm_subscribe
             and alarm_unsubscribe
@@ -254,9 +247,7 @@ class SdkDiagnostics:
             supports_device_enumeration=self.supports_device_enumeration,
             supports_alarm_subscription=supports_alarm_subscription,
             supports_management_server_login=(
-                "provisional"
-                if self.supports_login or self.supports_login_ex
-                else False
+                "provisional" if self.supports_login or self.supports_login_ex else False
             ),
         )
         notes = [
@@ -524,10 +515,7 @@ SYMBOL_EVIDENCE: tuple[SymbolEvidence, ...] = (
         confirmed_names=("NET_SDK_SetNat2Addr",),
         signature_source="pytvt.device_sdk.bindings.NET_SDK_SetNat2Addr",
         signature_ready=True,
-        notes=(
-            "NAT2 pre-login endpoint configuration used by LoginEx NAT20 mode in "
-            "the vendor demo path."
-        ),
+        notes=("NAT2 pre-login endpoint configuration used by LoginEx NAT20 mode in the vendor demo path."),
         confidence="medium",
         semantics="transport_setup",
         evidence_records=(
@@ -545,10 +533,7 @@ SYMBOL_EVIDENCE: tuple[SymbolEvidence, ...] = (
         confirmed_names=("NET_SDK_GetDeviceInfo",),
         signature_source="pytvt.device_sdk.bindings.NET_SDK_GetDeviceInfo",
         signature_ready=True,
-        notes=(
-            "Semantics assumed minimal: device-level info, not yet confirmed as "
-            "management-server-specific."
-        ),
+        notes=("Semantics assumed minimal: device-level info, not yet confirmed as management-server-specific."),
         confidence="high",
         semantics="unknown",
         evidence_records=(
@@ -1045,6 +1030,7 @@ def _best_status_identifier(raw: dict[str, Any]) -> str:
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+
 class _SDKLoadError(Exception):
     """Internal: library failed to load — not part of public API."""
 
@@ -1320,7 +1306,9 @@ def _build_sdk_not_ready_blockers(
             }
         )
 
-    ambiguous = [name for name in required if symbols.get(name) and symbols[name].status not in {"confirmed", "missing"}]
+    ambiguous = [
+        name for name in required if symbols.get(name) and symbols[name].status not in {"confirmed", "missing"}
+    ]
     if ambiguous:
         blockers.append(
             {
@@ -1436,9 +1424,7 @@ def inspect_sdk_library(
     supports_login_ex = lifecycle_ready and "NET_SDK_LoginEx" in observed_symbols
     device_enum_symbol = resolved.get("device_enumeration")
     supports_device_enumeration = bool(
-        device_enum_symbol
-        and device_enum_symbol.status == "confirmed"
-        and device_enum_symbol.signature_ready
+        device_enum_symbol and device_enum_symbol.status == "confirmed" and device_enum_symbol.signature_ready
     )
 
     blockers = _build_sdk_not_ready_blockers(
@@ -1489,6 +1475,7 @@ def inspect_sdk_library(
 # ---------------------------------------------------------------------------
 # SDKClient  — thin wrapper around an active SDK session
 # ---------------------------------------------------------------------------
+
 
 class SDKClient:
     """Manages a single authenticated session against the TVT management SDK.
@@ -1624,12 +1611,8 @@ class SDKClient:
         if handle < 0:
             error_code = self._read_last_error()
             if error_code is None:
-                raise ManagementAuthError(
-                    f"{login_symbol} returned an invalid handle (error_code unavailable)."
-                )
-            raise ManagementAuthError(
-                f"{login_symbol} returned an invalid handle (error_code={error_code})."
-            )
+                raise ManagementAuthError(f"{login_symbol} returned an invalid handle (error_code unavailable).")
+            raise ManagementAuthError(f"{login_symbol} returned an invalid handle (error_code={error_code}).")
 
         self._session_handle = int(handle)
         self._authenticated = True
@@ -1700,10 +1683,7 @@ class SDKClient:
             raise TransportError(f"NET_SDK_GetDeviceIPCInfo failed (error_code={error_code})")
 
         if count.value < 0 or count.value > max_records:
-            raise ProtocolError(
-                "NET_SDK_GetDeviceIPCInfo returned invalid count "
-                f"{count.value} (max={max_records})"
-            )
+            raise ProtocolError(f"NET_SDK_GetDeviceIPCInfo returned invalid count {count.value} (max={max_records})")
 
         if count.value == 0:
             return []
@@ -1750,9 +1730,7 @@ class SDKClient:
             )
 
         if not devices_by_id:
-            raise ProtocolError(
-                "NET_SDK_GetDeviceIPCInfo returned entries but none could be mapped to ManagedDevice"
-            )
+            raise ProtocolError("NET_SDK_GetDeviceIPCInfo returned entries but none could be mapped to ManagedDevice")
 
         return list(devices_by_id.values())
 
@@ -1797,10 +1775,7 @@ class SDKClient:
             raise TransportError(f"NET_SDK_GetDeviceCHStatus failed (error_code={error_code})")
 
         if count.value < 0 or count.value > max_records:
-            raise ProtocolError(
-                "NET_SDK_GetDeviceCHStatus returned invalid count "
-                f"{count.value} (max={max_records})"
-            )
+            raise ProtocolError(f"NET_SDK_GetDeviceCHStatus returned invalid count {count.value} (max={max_records})")
 
         if count.value == 0:
             return []
@@ -1929,6 +1904,7 @@ class SDKClient:
 # SdkManagementBackend
 # ---------------------------------------------------------------------------
 
+
 class SdkManagementBackend(BaseManagementBackend):
     """SDK-backed backend for the TVT management-server interface.
 
@@ -1954,40 +1930,44 @@ class SdkManagementBackend(BaseManagementBackend):
         self._load_error: str | None = None
         self._client: SDKClient | None = None
         self._authenticated = False
-        self._diagnostics = inspect_sdk_library(
-            self.sdk_path,
-            login_mode=self._login_mode,
-            login_connect_type=self._login_connect_type,
-        ) if self.sdk_path else SdkDiagnostics(
-            sdk_path="",
-            load_success=False,
-            load_error="No SDK path configured",
-            symbol_scan_success=False,
-            symbol_scan_error="symbol scan skipped because no SDK path configured",
-            discovered_symbol_count=None,
-            symbols=_resolve_symbol_registry(None, login_mode=self._login_mode),
-            login_path_ready=False,
-            login_readiness_reason="No SDK path configured",
-            evidence_record_count=len(export_evidence_records()),
-            login_mode=self._login_mode,
-            login_connect_type=self._login_connect_type,
-            symbol_probe={"source": "none", "error": "sdk_path_not_configured"},
-            symbol_inventory=(),
-            symbol_presence_checks=tuple(
-                build_symbol_presence_checks(
-                    set(),
-                    [
-                        "NET_SDK_Init",
-                        "NET_SDK_Login",
-                        "NET_SDK_LoginEx",
-                        "NET_SDK_Logout",
-                        "NET_SDK_Cleanup",
-                        "NET_SDK_GetDeviceIPCInfo",
-                    ],
-                )
-            ),
-            windows_symbol_parity=tuple(build_windows_parity_report(set())),
-            capability_evidence=build_symbol_capability_evidence(set()),
+        self._diagnostics = (
+            inspect_sdk_library(
+                self.sdk_path,
+                login_mode=self._login_mode,
+                login_connect_type=self._login_connect_type,
+            )
+            if self.sdk_path
+            else SdkDiagnostics(
+                sdk_path="",
+                load_success=False,
+                load_error="No SDK path configured",
+                symbol_scan_success=False,
+                symbol_scan_error="symbol scan skipped because no SDK path configured",
+                discovered_symbol_count=None,
+                symbols=_resolve_symbol_registry(None, login_mode=self._login_mode),
+                login_path_ready=False,
+                login_readiness_reason="No SDK path configured",
+                evidence_record_count=len(export_evidence_records()),
+                login_mode=self._login_mode,
+                login_connect_type=self._login_connect_type,
+                symbol_probe={"source": "none", "error": "sdk_path_not_configured"},
+                symbol_inventory=(),
+                symbol_presence_checks=tuple(
+                    build_symbol_presence_checks(
+                        set(),
+                        [
+                            "NET_SDK_Init",
+                            "NET_SDK_Login",
+                            "NET_SDK_LoginEx",
+                            "NET_SDK_Logout",
+                            "NET_SDK_Cleanup",
+                            "NET_SDK_GetDeviceIPCInfo",
+                        ],
+                    )
+                ),
+                windows_symbol_parity=tuple(build_windows_parity_report(set())),
+                capability_evidence=build_symbol_capability_evidence(set()),
+            )
         )
 
         if self._diagnostics.load_success and self.sdk_path:
@@ -2039,17 +2019,14 @@ class SdkManagementBackend(BaseManagementBackend):
             raise CapabilityNotAvailable(f"TVT SDK is not available: {reason}")
         if not self._diagnostics.login_path_ready:
             raise CapabilityNotAvailable(
-                "TVT SDK library loaded but login path is not ready: "
-                f"{self._diagnostics.login_readiness_reason}"
+                f"TVT SDK library loaded but login path is not ready: {self._diagnostics.login_readiness_reason}"
             )
         return self._lib
 
     def _require_session(self) -> SDKClient:
         """Return the active SDKClient or raise ManagementNotAuthenticatedError."""
         if self._client is None or not self._authenticated:
-            raise ManagementNotAuthenticatedError(
-                "SDK session not established. Call login() first."
-            )
+            raise ManagementNotAuthenticatedError("SDK session not established. Call login() first.")
         return self._client
 
     # ------------------------------------------------------------------
@@ -2130,8 +2107,7 @@ class SdkManagementBackend(BaseManagementBackend):
         self._require_session()
         # TODO: identify SDK channel enumeration function.
         raise CapabilityNotAvailable(
-            "SDK list_channels symbol not yet mapped. "
-            "Requires channel enumeration capture before wiring."
+            "SDK list_channels symbol not yet mapped. Requires channel enumeration capture before wiring."
         )
 
     def get_device_statuses(self) -> list[DeviceStatus]:

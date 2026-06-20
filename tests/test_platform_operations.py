@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
-from datetime import datetime
-from datetime import timezone
+from datetime import datetime, timezone
 
 import pytest
 
+from pytvt.platform_sdk.alarms import normalize_alarm_events
+from pytvt.platform_sdk.capabilities import detect_capabilities
+from pytvt.platform_sdk.classification import classify_resource
+from pytvt.platform_sdk.exceptions import CapabilityNotAvailable
+from pytvt.platform_sdk.health import compute_device_health
+from pytvt.platform_sdk.inventory import get_platform_inventory_snapshot
 from pytvt.platform_sdk.platform_constants import (
     DEVTYPE_IPC,
     DEVTYPE_NONE,
@@ -20,23 +25,14 @@ from pytvt.platform_sdk.platform_models import (
     PlatformResource,
     PlatformServer,
 )
-from pytvt.platform_sdk.alarms import normalize_alarm_events
-from pytvt.platform_sdk.capabilities import detect_capabilities
-from pytvt.platform_sdk.classification import classify_resource
-from pytvt.platform_sdk.health import compute_device_health
-from pytvt.platform_sdk.inventory import get_platform_inventory_snapshot
 from pytvt.platform_sdk.topology import ORPHAN_SITE_ID, build_site_topology
-from pytvt.platform_sdk.exceptions import CapabilityNotAvailable
-
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
 # ---------------------------------------------------------------------------
 
 
-def _area(
-    node_id: int, parent_id: int, name: str, *, guid: str | None = None
-) -> PlatformResource:
+def _area(node_id: int, parent_id: int, name: str, *, guid: str | None = None) -> PlatformResource:
     guid = guid or f"area-{node_id:08x}"
     return PlatformResource(
         node_id=node_id,
@@ -154,9 +150,7 @@ def test_topology_is_deterministic(small_tree: list[PlatformResource]) -> None:
     sites1 = build_site_topology(small_tree)
     sites2 = build_site_topology(list(reversed(small_tree)))
     assert [s.id for s in sites1] == [s.id for s in sites2]
-    assert [
-        [d.node_id for d in s.devices] for s in sites1
-    ] == [[d.node_id for d in s.devices] for s in sites2]
+    assert [[d.node_id for d in s.devices] for s in sites1] == [[d.node_id for d in s.devices] for s in sites2]
 
 
 def test_topology_alarm_zone_mapping() -> None:
@@ -250,9 +244,7 @@ def test_health_alarm_event_degrades_online_device() -> None:
         ("something weird", "unknown", "low"),
     ],
 )
-def test_alarm_normalization_mapping(
-    raw: str, expected_type: str, expected_sev: str
-) -> None:
+def test_alarm_normalization_mapping(raw: str, expected_type: str, expected_sev: str) -> None:
     events = normalize_alarm_events([{"device_guid": "x", "type": raw}])
     assert len(events) == 1
     assert events[0].type == expected_type

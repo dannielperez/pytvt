@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-
 _SUPPORTED_OS = {"linux", "windows", "macos", "android", "ios", "unknown"}
 _SUPPORTED_RUNTIME_KIND = {"native", "sidecar", "bridge", "compat"}
 _SUPPORTED_SDK_FAMILY = {"device_sdk", "management_sdk", "mobile_sdk", "unknown"}

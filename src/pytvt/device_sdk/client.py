@@ -1016,8 +1016,7 @@ class NetSdkClient:
         modify_net_info = getattr(self._lib, "NET_SDK_ModifyDeviceNetInfo", None)
         if modify_net_info is None:
             raise NetSdkCapabilityError(
-                "Loaded TVT NetSDK does not export NET_SDK_SetDeviceIP or "
-                "NET_SDK_ModifyDeviceNetInfo.",
+                "Loaded TVT NetSDK does not export NET_SDK_SetDeviceIP or NET_SDK_ModifyDeviceNetInfo.",
             )
 
         payload = NET_SDK_DEVICE_IP_INFO()
