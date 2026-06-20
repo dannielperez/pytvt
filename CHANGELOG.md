@@ -38,6 +38,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   A genuine empty (`<content total="0">`) still returns `[]`. Callers can catch the subclass to treat
   shape-drift as a *fetch failure*, not a real empty.
 
+## [1.0.0] — 2026-05-17
+
+Major reorganization of the package into focused sub-packages ("lanes"). Public symbols remain
+importable from the top-level `pytvt` namespace; only direct sub-module import paths changed.
+
+### Changed
+
+- **Module reorganization (breaking sub-module import paths):** `webapi` → `web_api`,
+  `nvr_api` → `xml_api`, `management` → `platform_sdk`; the Net SDK and top-level SDK files merged
+  into `device_sdk`; `platform_*` helpers moved under `platform_sdk/`; and CLI entry points moved
+  into a new `pytvt/tools/` lane.
+- **`sdk-local` backend reimplemented in pure Python** on top of the ctypes bindings — no Node.js
+  or bridge scripts.
+
+### Added
+
+- **Capabilities + backend-strategy resolution:** `detect_capabilities`, plus `BackendFamily`,
+  `IntegrationMode`, `CompositeStrategy`, `ExecutionPlan`, `resolve_backend`, and
+  `resolve_execution_plan` for composite backend selection.
+
 ## [0.8.0] — 2026-04-24
 
 ### Changed
