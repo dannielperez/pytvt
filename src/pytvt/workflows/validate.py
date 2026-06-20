@@ -175,16 +175,8 @@ def validate_site(
 
     # Parse expected subnets once.
     try:
-        cam_net = (
-            ipaddress.ip_network(expected_subnet, strict=False)
-            if expected_subnet
-            else None
-        )
-        nvr_net = (
-            ipaddress.ip_network(expected_nvr_subnet, strict=False)
-            if expected_nvr_subnet
-            else None
-        )
+        cam_net = ipaddress.ip_network(expected_subnet, strict=False) if expected_subnet else None
+        nvr_net = ipaddress.ip_network(expected_nvr_subnet, strict=False) if expected_nvr_subnet else None
     except ValueError as exc:
         return SiteValidationResult(
             nvr_host=host,
@@ -209,7 +201,7 @@ def validate_site(
 
     try:
         raw_channels = client.query_channels()
-    except Exception as exc:  # noqa: BLE001 — surface as orchestration error
+    except Exception as exc:
         return SiteValidationResult(
             nvr_host=host,
             expected_subnet=expected_subnet,
@@ -244,25 +236,18 @@ def validate_site(
     offline = [c for c in channels if not c.online]
     if offline:
         ids = ", ".join(f"ch{c.chl_num}" for c in offline)
-        issues.append(
-            f"{len(offline)}/{len(channels)} channel(s) offline: {ids}"
-        )
+        issues.append(f"{len(offline)}/{len(channels)} channel(s) offline: {ids}")
 
     # Check 2 — subnet conformance.
     if cam_net is not None:
         stray = [c for c in channels if not c.in_expected_subnet]
         if stray:
             ids = ", ".join(f"ch{c.chl_num}({c.ip})" for c in stray)
-            issues.append(
-                f"{len(stray)} channel(s) outside expected {cam_net}: {ids}"
-            )
+            issues.append(f"{len(stray)} channel(s) outside expected {cam_net}: {ids}")
 
     # Check 3 — channel count.
     if expected_channel_count is not None and len(channels) != expected_channel_count:
-        issues.append(
-            f"channel count mismatch: got {len(channels)}, "
-            f"expected {expected_channel_count}"
-        )
+        issues.append(f"channel count mismatch: got {len(channels)}, expected {expected_channel_count}")
 
     # Check 4 — NVR host subnet.
     if nvr_net is not None and not _ip_in_net(host, nvr_net):
@@ -283,18 +268,18 @@ def validate_site(
     if result.ok:
         sink.emit(
             ProgressEvent(
-                "success", "validate.done",
+                "success",
+                "validate.done",
                 f"{host}: OK ({len(channels)} channel(s), all online)",
             )
         )
     else:
         for issue in issues:
-            sink.emit(
-                ProgressEvent("warning", "validate.issue", issue)
-            )
+            sink.emit(ProgressEvent("warning", "validate.issue", issue))
         sink.emit(
             ProgressEvent(
-                "warning", "validate.done",
+                "warning",
+                "validate.done",
                 f"{host}: {len(issues)} issue(s)",
             )
         )
@@ -323,18 +308,12 @@ def compare_sites(
     differences: list[str] = []
 
     if baseline.channels_total != candidate.channels_total:
-        differences.append(
-            f"channel count: baseline={baseline.channels_total} "
-            f"candidate={candidate.channels_total}"
-        )
+        differences.append(f"channel count: baseline={baseline.channels_total} candidate={candidate.channels_total}")
 
     baseline_offline = baseline.channels_total - baseline.channels_online
     candidate_offline = candidate.channels_total - candidate.channels_online
     if baseline_offline != candidate_offline:
-        differences.append(
-            f"offline channels: baseline={baseline_offline} "
-            f"candidate={candidate_offline}"
-        )
+        differences.append(f"offline channels: baseline={baseline_offline} candidate={candidate_offline}")
 
     return SiteComparisonResult(
         baseline_host=baseline.nvr_host,

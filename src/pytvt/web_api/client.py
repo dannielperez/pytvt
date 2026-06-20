@@ -330,11 +330,7 @@ class WebApiClient:
         root = xml.parse_response(data)
         nat = root.find("NAT") or root.find("NATConfig") or root
 
-        enabled_text = (
-            xml.find_text(nat, "enabled")
-            or xml.find_text(nat, "natEnabled")
-            or xml.find_text(nat, "enable")
-        )
+        enabled_text = xml.find_text(nat, "enabled") or xml.find_text(nat, "natEnabled") or xml.find_text(nat, "enable")
         enabled = enabled_text.lower() in ("true", "1", "yes") if enabled_text else False
 
         nat_serial = (
@@ -344,18 +340,9 @@ class WebApiClient:
             or xml.find_text(nat, "p2pSerial")
             or xml.find_text(nat, "deviceSerial")
         )
-        nat_status = (
-            xml.find_text(nat, "natStatus")
-            or xml.find_text(nat, "status")
-        )
-        visit_address = (
-            xml.find_text(nat, "visitAddress")
-            or xml.find_text(nat, "serverAddress")
-        )
-        security_access_text = (
-            xml.find_text(nat, "securityAccess")
-            or xml.find_text(nat, "securityMode")
-        )
+        nat_status = xml.find_text(nat, "natStatus") or xml.find_text(nat, "status")
+        visit_address = xml.find_text(nat, "visitAddress") or xml.find_text(nat, "serverAddress")
+        security_access_text = xml.find_text(nat, "securityAccess") or xml.find_text(nat, "securityMode")
         security_access = security_access_text.lower() in ("true", "1", "yes") if security_access_text else False
 
         return NatConfig(

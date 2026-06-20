@@ -20,8 +20,8 @@ from __future__ import annotations
 import ctypes as ct
 import os
 import platform
-import subprocess
 import struct
+import subprocess
 from ctypes.util import find_library
 from pathlib import Path
 
@@ -88,16 +88,15 @@ def _autodetect_macos_sdk_path() -> str | None:
 
     home = Path.home()
     sdk_root = home / "git" / "tvt-sdk" / "sdk" / "macos"
-    
+
     if not sdk_root.exists():
         return None
-    
+
     try:
         candidates: list[Path] = sorted(
-            (sdk_root / entry.name / "binaries" for entry in sdk_root.iterdir() if entry.is_dir()),
-            reverse=True
+            (sdk_root / entry.name / "binaries" for entry in sdk_root.iterdir() if entry.is_dir()), reverse=True
         )
-        
+
         for candidate in candidates:
             lib = candidate / MAC_LIB_NAME
             if lib.exists():
@@ -109,7 +108,7 @@ def _autodetect_macos_sdk_path() -> str | None:
     iptool_frameworks = Path("/Applications/IPTool.app/Contents/Frameworks")
     if (iptool_frameworks / MAC_LIB_NAME).exists():
         return str(iptool_frameworks)
-    
+
     return None
 
 
@@ -126,7 +125,7 @@ def _sdk_root_candidates(root: Path) -> list[Path]:
             root / MAC_LIB_NAME,
             root / "binaries" / MAC_LIB_NAME,
         ]
-    
+
     arch_dir = _arch_dir()
     return [
         root / LIB_NAME,
@@ -146,7 +145,7 @@ def _resolve_explicit_lib_path(raw_path: str) -> str:
         for path in _sdk_root_candidates(candidate):
             if path.exists():
                 return str(path)
-        
+
         lib_name = MAC_LIB_NAME if _is_darwin() else LIB_NAME
         raise NetSdkUnavailable(
             f"No {lib_name} found under {candidate}. Set {SDK_PATH_ENV_VAR} to the library file "
@@ -174,14 +173,14 @@ def _find_system_lib() -> str:
 
 def _find_lib(sdk_path: str | os.PathLike[str] | None = None) -> str:
     """Resolve the path or soname for the SDK library.
-    
+
     On macOS, also checks for auto-detected ~/git/tvt-sdk/sdk/macos/*/binaries/ path.
     """
     requested = _requested_sdk_path(sdk_path)
-    
+
     if requested:
         return _resolve_explicit_lib_path(requested)
-    
+
     # On macOS, try auto-detect before system search
     if _is_darwin():
         auto_path = _autodetect_macos_sdk_path()
@@ -189,7 +188,7 @@ def _find_lib(sdk_path: str | os.PathLike[str] | None = None) -> str:
             lib = Path(auto_path) / MAC_LIB_NAME
             if lib.exists():
                 return str(lib)
-    
+
     return _find_system_lib()
 
 
@@ -257,17 +256,17 @@ def _preload_linux_companions(lib_dir: str | None, *, require_nat: bool = False)
 
 def _preload_macos_companions(lib_dir: str | None) -> None:
     """Pre-load macOS MonitorClient SDK companion libraries.
-    
+
     Searches in:
     1. The SDK lib_dir
     2. /Applications/MonitorClient.app/Contents/Frameworks
     """
     search_dirs: list[str | None] = [lib_dir]
-    
+
     frameworks_dir = "/Applications/MonitorClient.app/Contents/Frameworks"
     if Path(frameworks_dir).exists():
         search_dirs.append(frameworks_dir)
-    
+
     # Also try environment variable override
     env_frameworks = os.environ.get("TVT_MAC_FRAMEWORKS_PATH")
     if env_frameworks:
@@ -276,7 +275,7 @@ def _preload_macos_companions(lib_dir: str | None) -> None:
     iptool_frameworks = "/Applications/IPTool.app/Contents/Frameworks"
     if Path(iptool_frameworks).exists():
         search_dirs.append(iptool_frameworks)
-    
+
     for lib_name in _MAC_COMPANION_LIBS:
         for search_dir in search_dirs:
             if search_dir:
@@ -450,7 +449,7 @@ def _load_sdk_macos(sdk_path: str | os.PathLike[str] | None = None) -> ct.CDLL:
 
 def ensure_nat_support(sdk_path: str | os.PathLike[str] | None = None) -> None:
     """Validate that the NAT companion library can be loaded (Linux only).
-    
+
     Raises:
         NetSdkUnavailable: If NAT support is unavailable or not on Linux.
     """
@@ -474,23 +473,23 @@ def is_netsdk_available(
     require_nat: bool = False,
 ) -> bool:
     """Check if the native SDK can be loaded on this platform.
-    
+
     Supports both Linux (libdvrnetsdk.so) and macOS (libNetClientSDK.dylib).
-    
+
     Args:
         sdk_path: Explicit path to SDK library or root directory.
         require_nat: If True, also check NAT support (Linux only).
-    
+
     Returns:
         True if SDK is available and loadable, False otherwise.
     """
     sys_name = platform.system()
-    
+
     if sys_name == "Linux":
         return _is_netsdk_available_linux(sdk_path, require_nat=require_nat)
     elif sys_name == "Darwin":
         return _is_netsdk_available_macos(sdk_path)
-    
+
     return False
 
 
@@ -502,7 +501,7 @@ def _is_netsdk_available_linux(
     """Check if the native SDK is available on Linux."""
     if platform.machine() not in ("x86_64", "aarch64"):
         return False
-    
+
     try:
         lib_path = _find_lib(sdk_path)
     except NetSdkUnavailable:

@@ -24,13 +24,13 @@ from . import __version__
 from .device_sdk.loader import (
     _NAT_DEPENDENCY_GROUP,
     _OPTIONAL_DEPENDENCY_GROUPS,
+    LEGACY_SDK_PATH_ENV_VAR,
     LIB_NAME,
     SDK_PATH_ENV_VAR,
-    LEGACY_SDK_PATH_ENV_VAR,
     NetSdkUnavailable,
+    _candidate_targets,
     _find_lib,
     _lib_dir,
-    _candidate_targets,
 )
 
 
@@ -163,21 +163,16 @@ def diagnostics(sdk_path: str | os.PathLike[str] | None = None) -> DiagnosticsRe
 
     # --- Warnings ---
     if report.sdk_path_legacy_env and not report.sdk_path_env:
-        report.warnings.append(
-            f"Using legacy ${LEGACY_SDK_PATH_ENV_VAR}; migrate to ${SDK_PATH_ENV_VAR}."
-        )
+        report.warnings.append(f"Using legacy ${LEGACY_SDK_PATH_ENV_VAR}; migrate to ${SDK_PATH_ENV_VAR}.")
 
     if report.platform_system != "Linux":
         report.warnings.append(
-            f"Native SDK requires Linux (current: {report.platform_system}). "
-            "Only pure-Python backends available."
+            f"Native SDK requires Linux (current: {report.platform_system}). Only pure-Python backends available."
         )
         return report
 
     if report.platform_machine not in ("x86_64", "aarch64"):
-        report.warnings.append(
-            f"Unsupported architecture: {report.platform_machine}."
-        )
+        report.warnings.append(f"Unsupported architecture: {report.platform_machine}.")
         return report
 
     # --- Resolve SDK path ---
@@ -195,8 +190,7 @@ def diagnostics(sdk_path: str | os.PathLike[str] | None = None) -> DiagnosticsRe
 
     if not report.sdk_path_is_absolute and report.sdk_path_env:
         report.warnings.append(
-            "SDK path resolves to a relative path. Use an absolute path to avoid "
-            "working-directory-dependent behavior."
+            "SDK path resolves to a relative path. Use an absolute path to avoid working-directory-dependent behavior."
         )
 
     lib_dir = _lib_dir(lib_path)

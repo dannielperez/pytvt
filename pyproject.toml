@@ -24,6 +24,7 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: System :: Networking",
     "Topic :: System :: Systems Administration",
 ]
@@ -110,7 +111,9 @@ ignore = [
 "src/pytvt/nvr_api.py" = ["F401", "E402", "UP041", "E702", "F541", "F841", "B905", "I001", "RUF013", "F811"]
 "src/pytvt/snapshot.py" = ["F401", "E402", "UP041", "E702", "F541", "F841", "B007", "RUF013", "I001", "B905"]
 "src/pytvt/cli.py" = ["E402", "I001", "F541"]
-"tests/*" = ["F401"]
+# Tests: unused imports are common in fixtures; SIM117 (combine nested `with`)
+# hurts readability in arrange-heavy test setups — kept nested intentionally.
+"tests/*" = ["F401", "SIM117"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["pytvt"]

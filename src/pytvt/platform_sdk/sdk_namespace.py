@@ -42,8 +42,7 @@ import ctypes as ct
 import shutil
 import subprocess
 from enum import Enum
-from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from .exceptions import CapabilityNotAvailable, MissingSymbolError
 
@@ -91,17 +90,14 @@ CAPABILITY_SYMBOLS: dict[str, dict[SdkNamespace, str]] = {
         SdkNamespace.NET_SDK: "NET_SDK_Logout",
         SdkNamespace.PLAT: "Plat_LogOutEx",
     },
-
     # Plat_*-only: async message callback registration
     "set_message_callback": {
         SdkNamespace.PLAT: "Plat_SetMessageCBEx",
     },
-
     # NAT helpers (NET_SDK only)
     "set_nat2_addr": {
         SdkNamespace.NET_SDK: "NET_SDK_SetNat2Addr",
     },
-
     # Info / enumeration
     "get_device_info": {
         SdkNamespace.NET_SDK: "NET_SDK_GetDeviceInfo",
@@ -115,7 +111,6 @@ CAPABILITY_SYMBOLS: dict[str, dict[SdkNamespace, str]] = {
     "get_ch_status": {
         SdkNamespace.NET_SDK: "NET_SDK_GetDeviceCHStatus",
     },
-
     # Alarm channel
     "setup_alarm_chan": {
         SdkNamespace.NET_SDK: "NET_SDK_SetupAlarmChan",
@@ -130,19 +125,13 @@ CAPABILITY_SYMBOLS: dict[str, dict[SdkNamespace, str]] = {
 
 # Reverse map: symbol_name -> (namespace, capability)
 SYMBOL_TO_CAPABILITY: dict[str, tuple[SdkNamespace, str]] = {
-    sym: (ns, cap)
-    for cap, ns_map in CAPABILITY_SYMBOLS.items()
-    for ns, sym in ns_map.items()
+    sym: (ns, cap) for cap, ns_map in CAPABILITY_SYMBOLS.items() for ns, sym in ns_map.items()
 }
 
 
 def capabilities_for_namespace(ns: SdkNamespace) -> dict[str, str]:
     """Return {capability: symbol_name} for all capabilities available in *ns*."""
-    return {
-        cap: ns_map[ns]
-        for cap, ns_map in CAPABILITY_SYMBOLS.items()
-        if ns in ns_map
-    }
+    return {cap: ns_map[ns] for cap, ns_map in CAPABILITY_SYMBOLS.items() if ns in ns_map}
 
 
 # ---------------------------------------------------------------------------
@@ -151,8 +140,10 @@ def capabilities_for_namespace(ns: SdkNamespace) -> dict[str, str]:
 # Import netsdk types lazily so this module stays importable even when pytvt.device_sdk
 # is not yet installed; the bindings are only applied when the library is loaded.
 
+
 def _netsdk_types() -> Any:
-    from pytvt.device_sdk import types as _t  # noqa: PLC0415
+    from pytvt.device_sdk import types as _t
+
     return _t
 
 
@@ -289,6 +280,7 @@ def _build_restypes() -> dict[str, dict[SdkNamespace, Any]]:
 # NamespacedLibrary
 # ---------------------------------------------------------------------------
 
+
 class NamespacedLibrary:
     """Wraps a loaded ctypes.CDLL with namespace-aware symbol resolution and binding.
 
@@ -348,19 +340,16 @@ class NamespacedLibrary:
         name = self.symbol_name(capability)
         if name is None:
             raise CapabilityNotAvailable(
-                f"Capability {capability!r} is not available in the "
-                f"{self.namespace.value!r} SDK namespace."
+                f"Capability {capability!r} is not available in the {self.namespace.value!r} SDK namespace."
             )
         fn = getattr(self._lib, name, None)
         if fn is None:
             raise MissingSymbolError(
-                f"Symbol {name!r} (capability={capability!r}) not found in "
-                f"{self.namespace.value!r} library."
+                f"Symbol {name!r} (capability={capability!r}) not found in {self.namespace.value!r} library."
             )
         return fn
 
-    def bind_function(self, capability: str, *, argtypes: tuple[Any, ...] | None = None,
-                      restype: Any = None) -> Any:
+    def bind_function(self, capability: str, *, argtypes: tuple[Any, ...] | None = None, restype: Any = None) -> Any:
         """Resolve, type-annotate, and return the ctypes function for *capability*.
 
         If *argtypes* / *restype* are not supplied the shared tables are used.
@@ -394,10 +383,7 @@ class NamespacedLibrary:
     def probe_namespace_capabilities(self) -> dict[str, bool]:
         """Return present/absent status for capabilities mapped to this namespace only."""
         ns_caps = capabilities_for_namespace(self.namespace)
-        return {
-            cap: getattr(self._lib, sym, None) is not None
-            for cap, sym in ns_caps.items()
-        }
+        return {cap: getattr(self._lib, sym, None) is not None for cap, sym in ns_caps.items()}
 
     def login_path_ready(self) -> bool:
         """Return True if the minimum init/login/logout triple is callable."""
@@ -420,7 +406,9 @@ class NamespacedLibrary:
         try:
             result = subprocess.run(
                 [nm, "-D", "--defined-only", lib_path],
-                capture_output=True, text=True, check=False,
+                capture_output=True,
+                text=True,
+                check=False,
             )
         except OSError:
             return set()
@@ -493,6 +481,7 @@ class NamespacedLibrary:
 # ---------------------------------------------------------------------------
 # Factory helpers
 # ---------------------------------------------------------------------------
+
 
 def detect_namespace(exported_symbols: set[str]) -> SdkNamespace | None:
     """Infer the SDK namespace from the set of exported symbols."""

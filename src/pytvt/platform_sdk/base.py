@@ -2,16 +2,11 @@
 
 from __future__ import annotations
 
-from abc import ABC
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from typing import Any
 
 from .context import SDKContext
-from .models import AlarmSubscription
-from .models import DeviceStatus
-from .models import ManagedChannel
-from .models import ManagedDevice
-from .models import ServerInfo
+from .models import AlarmSubscription, DeviceStatus, ManagedChannel, ManagedDevice, ServerInfo
 
 
 class BaseManagementBackend(ABC):
