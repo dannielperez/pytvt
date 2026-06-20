@@ -1,3 +1,67 @@
+# pytvt v1.2.0
+
+TVT alarm-server frame parsing at the SDK boundary.
+
+## Highlights
+
+**Alarm-frame parser** — new `parse_alarm_frame(data: bytes) -> ParsedAlarmFrame` owns the TVT
+alarm push/listener wire format (the `b"TVT\0"` magic, the little-endian struct layout, and the
+JSON / HTTP / length-prefixed variants, plus the `TVT_ALARM_CODES` table). Transport- and
+framework-agnostic, it returns wire fields only and never raises on malformed input.
+
+## What's new
+
+- `pytvt.parse_alarm_frame` / `pytvt.ParsedAlarmFrame` (`alarm_protocol.py`)
+- CI now also runs on Python 3.14 (the consuming platform's runtime)
+
+## Upgrade notes
+
+- Additive; no breaking changes. See [CHANGELOG.md](CHANGELOG.md) for full detail.
+
+---
+
+# pytvt v1.1.0
+
+Durable fetch-status signaling for the platform inventory + NVR response-shape safety.
+
+## Highlights
+
+**Per-section `fetch_status`** — `get_platform_inventory_snapshot()` now reports each section as
+`"ok"` / `"unavailable"` / `"failed"`, letting consumers tell a confirmed-fetched empty section
+from a fetch failure (see `docs/platform_sdk.md`).
+
+**Response-shape safety** — `xml_api.query_channels()` raises the new `NvrApiResponseShapeError`
+(an `NvrApiError` subclass) on firmware shape-drift instead of silently returning an empty list.
+
+## Upgrade notes
+
+- Additive (`fetch_status` is a new snapshot key; the new exception subclasses `NvrApiError`, so
+  existing `except NvrApiError` handlers still catch it). See [CHANGELOG.md](CHANGELOG.md).
+
+---
+
+# pytvt v1.0.0
+
+Major reorganization into focused sub-packages ("lanes").
+
+## Highlights
+
+**Module reorganization** — `webapi`→`web_api`, `nvr_api`→`xml_api`, `management`→`platform_sdk`;
+the Net SDK + top-level SDK files merged into `device_sdk`; CLI entry points moved under
+`pytvt.tools`. Public symbols remain importable from the top-level `pytvt` namespace; only direct
+sub-module import paths changed (see [MIGRATION.md](MIGRATION.md)).
+
+**Pure-Python `sdk-local`** and **capabilities/strategy resolution** (`detect_capabilities`,
+`BackendFamily`, `IntegrationMode`, `CompositeStrategy`, `ExecutionPlan`, `resolve_backend`,
+`resolve_execution_plan`).
+
+## Upgrade notes
+
+- Breaking **sub-module import paths** only — update direct imports per [MIGRATION.md](MIGRATION.md).
+  Top-level `from pytvt import ...` is unaffected.
+
+---
+
 # pytvt v0.8.0
 
 Final hardening release for the Python-only runtime.
