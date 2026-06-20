@@ -7,6 +7,12 @@ from unittest.mock import patch
 
 import pytest
 
+# Import the submodule explicitly: the package-level ``pytvt.diagnostics()``
+# convenience function shadows the ``pytvt.diagnostics`` submodule, and
+# unittest.mock resolves the dotted string ``"pytvt.diagnostics.diagnostics"``
+# differently on 3.10 vs 3.11+. Patching the imported module object with
+# ``patch.object`` is unambiguous on every supported version.
+import pytvt.diagnostics
 from pytvt.device_sdk.http_client import DeviceInfoResult
 from pytvt.device_sdk.manager import Backend
 from pytvt.models import DeviceEntry
@@ -488,7 +494,7 @@ class TestConnectCommand:
             def to_dict():
                 return {"sdk_available": False}
 
-        with patch("pytvt.diagnostics.diagnostics", return_value=Report()):
+        with patch.object(pytvt.diagnostics, "diagnostics", return_value=Report()):
             with pytest.raises(SystemExit, match="1"):
                 doctor_cli(["--json"])
 
@@ -505,7 +511,7 @@ class TestConnectCommand:
             def __str__(self):
                 return "doctor ok"
 
-        with patch("pytvt.diagnostics.diagnostics", return_value=Report()):
+        with patch.object(pytvt.diagnostics, "diagnostics", return_value=Report()):
             doctor_cli([])
 
         assert capsys.readouterr().out.strip() == "doctor ok"
