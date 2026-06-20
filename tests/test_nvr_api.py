@@ -4,8 +4,14 @@ from __future__ import annotations
 
 import base64
 
+import pytest
+
 import pytvt.xml_api as nvr_api
-from pytvt.models import NvrApiError, PlatformAccessDisabledError
+from pytvt.models import (
+    NvrApiError,
+    NvrApiResponseShapeError,
+    PlatformAccessDisabledError,
+)
 from pytvt.xml_api import NvrClient
 
 
@@ -183,6 +189,53 @@ class TestDeleteNvrDevices:
         assert channels[0].poe_index == 1
         assert channels[0].chl_type == "digital"
         assert channels[0].access_type == "0"
+
+    def test_query_channels_genuine_empty_returns_empty_list(self):
+        # success + recognized <content> container + total=0 → genuinely empty,
+        # NOT a shape error (must return [] so the caller may sweep stale).
+        client = NvrClient("10.0.0.1", "admin", "pass")
+        client._logged_in = True
+        responses = {
+            "queryDevList": (
+                '<response cmdUrl="queryDevList"><status>success</status>'
+                '<content type="list" total="0"></content></response>'
+            ),
+            "queryOnlineChlList": (
+                "<response><status>success</status><content/></response>"
+            ),
+        }
+        client._post = lambda path, body: responses[path]
+        assert client.query_channels() == []
+
+    def test_query_channels_missing_content_raises_shape_error(self):
+        # success status but NO <content> container → unrecognized shape (#512):
+        # must raise, never return [] (which would look like a genuine empty).
+        client = NvrClient("10.0.0.1", "admin", "pass")
+        client._logged_in = True
+        client._post = lambda path, body: (
+            '<response cmdUrl="queryDevList"><status>success</status>'
+            "<somethingElse/></response>"
+        )
+        with pytest.raises(NvrApiResponseShapeError):
+            client.query_channels()
+
+    def test_query_channels_total_mismatch_raises_shape_error(self):
+        # success + <content total="3"> but item shape changed so 0 parse →
+        # partial/shape drift → raise rather than silently drop channels.
+        client = NvrClient("10.0.0.1", "admin", "pass")
+        client._logged_in = True
+        client._post = lambda path, body: (
+            '<response cmdUrl="queryDevList"><status>success</status>'
+            '<content type="list" total="3">'
+            "<row>drifted-shape-no-item-id</row></content></response>"
+        )
+        with pytest.raises(NvrApiResponseShapeError):
+            client.query_channels()
+
+    def test_query_channels_shape_error_is_not_plain_genuine_empty(self):
+        # NvrApiResponseShapeError must be an NvrApiError subclass so existing
+        # broad handlers still catch it, but distinguishable for #512 callers.
+        assert issubclass(NvrApiResponseShapeError, NvrApiError)
 
     def test_delete_nvr_devices_builds_expected_request(self):
         client = NvrClient("10.0.0.1", "admin", "pass")
