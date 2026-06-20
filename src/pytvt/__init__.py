@@ -5,7 +5,10 @@ Public API:
                resolve_backend, resolve_execution_plan
     Models:    ScannerConfig, DeviceEntry, CameraInfo, ScanResult, NvrApiError
     NVR API:   NvrClient, Channel, NvrLanFreeDevice, LanFreeDevice, RtspServerConfig, ApiServerConfig, PortConfig
+               (errors: NvrApiError, NvrApiResponseShapeError)
     Web API:   WebApiClient (TVT HTTP API / LAPI)
+    Alarm:     parse_alarm_frame, ParsedAlarmFrame — decode TVT alarm-server push
+               frames (JSON / binary / HTTP / length-prefixed)
     Net SDK:   pytvt.device_sdk — ctypes bindings for libdvrnetsdk.so (Linux only;
                requires a vendor-supplied shared library — NOT included in this package)
     SDK HTTP:  SdkHttpClient — typed client for a compatible SDK bridge service
