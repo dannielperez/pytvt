@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] — 2026-06-20
+
+### Added
+
+- **TVT alarm-server frame parser** (`alarm_protocol.py`). New `parse_alarm_frame(data: bytes) ->
+  ParsedAlarmFrame` owns the alarm push/listener **wire format** (the `b"TVT\0"` magic, the
+  little-endian struct layout, the length-prefixed/HTTP/JSON variants, and the `TVT_ALARM_CODES`
+  table) — vendor protocol logic that previously lived hand-rolled in a downstream Django app
+  (downstream application `alarm_receiver`), now consolidated at the SDK boundary (CLAUDE.md §4). Transport- and
+  framework-agnostic: it returns wire fields only (`event_code`, `event_type`, `channel`,
+  `device_id`, `parse_format`, `parsed`); source address / receive time / persistence stay with the
+  caller. Never raises on malformed input (unparseable → `parse_format="unknown"` with a hex/ascii
+  dump). Exported as `pytvt.parse_alarm_frame` / `pytvt.ParsedAlarmFrame`.
+
 ## [1.1.0] — 2026-06-20
 
 ### Added
