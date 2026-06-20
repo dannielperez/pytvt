@@ -25,6 +25,7 @@ Requires Python 3.10+. The published wheel contains only pure Python code.
 - LAN discovery and remote subnet discovery
 - `NvrClient` for NVR CGI operations
 - `WebApiClient` for TVT HTTP Web API / LAPI operations
+- `parse_alarm_frame` for decoding TVT alarm-server push frames (JSON / binary / HTTP / length-prefixed)
 - `DeviceManager` for unified device actions across `netsdk` and `sdk_http`
 - Direct SDK login helpers, including AutoNAT / P2P flows
 - Connection pooling and `connect-many` orchestration for large fleets
