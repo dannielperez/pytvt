@@ -447,22 +447,24 @@ class TestConnectManyParser:
         from pytvt.tools.cli import _build_connect_many_parser
 
         parser = _build_connect_many_parser()
-        args = parser.parse_args([
-            "--file",
-            "devices.json",
-            "-u",
-            "admin",
-            "-p",
-            "pass123",
-            "--sdk-path",
-            "/opt/tvt",
-            "--timeout",
-            "15",
-            "--concurrency",
-            "20",
-            "--nat",
-            "--json",
-        ])
+        args = parser.parse_args(
+            [
+                "--file",
+                "devices.json",
+                "-u",
+                "admin",
+                "-p",
+                "pass123",
+                "--sdk-path",
+                "/opt/tvt",
+                "--timeout",
+                "15",
+                "--concurrency",
+                "20",
+                "--nat",
+                "--json",
+            ]
+        )
         assert args.file == "devices.json"
         assert args.username == "admin"
         assert args.password == "pass123"
@@ -495,15 +497,17 @@ class TestConnectManyMain:
             SessionResult(target="ABC123", success=True, connection_method="nat", latency_ms=200),
         ]
 
-        _connect_many_main([
-            "--file",
-            str(devices_file),
-            "-u",
-            "admin",
-            "-p",
-            "pass",
-            "--json",
-        ])
+        _connect_many_main(
+            [
+                "--file",
+                str(devices_file),
+                "-u",
+                "admin",
+                "-p",
+                "pass",
+                "--json",
+            ]
+        )
         mock_cm.assert_called_once()
 
     @patch("pytvt.connection_pool.connect_many")

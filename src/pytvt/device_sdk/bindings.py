@@ -336,7 +336,7 @@ def bind(lib: ct.CDLL) -> None:
     # ── Access control ──────────────────────────────────────────
     lib.NET_SDK_UnlockAccessControl.restype = ct.c_bool
     lib.NET_SDK_UnlockAccessControl.argtypes = [ct.c_long, ct.c_long]
-    
+
     # NET_CLIENT_* compatibility is intentionally not auto-aliased here because
     # call signatures differ from NET_SDK_* and can crash the process.
 

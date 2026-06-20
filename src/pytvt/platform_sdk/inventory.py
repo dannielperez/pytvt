@@ -9,15 +9,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from .exceptions import CapabilityNotAvailable
-from .platform_constants import redact_sensitive
-from .platform_models import PlatformAlarmZone
-from .platform_models import PlatformResource
-from .platform_models import PlatformServer
 from .alarms import normalize_alarm_events
 from .capabilities import detect_capabilities
 from .classification import classify_resource
+from .exceptions import CapabilityNotAvailable
 from .health import compute_device_health
+from .platform_constants import redact_sensitive
+from .platform_models import PlatformResource, PlatformServer
 from .topology import build_site_topology
 
 __all__ = ["get_platform_inventory_snapshot"]
@@ -77,18 +75,10 @@ def get_platform_inventory_snapshot(client: Any) -> dict[str, Any]:
 
     capabilities = detect_capabilities(client)
 
-    resources, st_resources = _safe_call_status(
-        getattr(client, "list_resources_normalized", lambda: []), []
-    )
-    servers, st_servers = _safe_call_status(
-        getattr(client, "list_servers", lambda: []), []
-    )
-    alarm_zones, st_alarm_zones = _safe_call_status(
-        getattr(client, "list_alarm_zones", lambda: []), []
-    )
-    alarm_events_raw, st_alarm_events = _safe_call_status(
-        getattr(client, "list_alarm_events", lambda: []), []
-    )
+    resources, st_resources = _safe_call_status(getattr(client, "list_resources_normalized", lambda: []), [])
+    servers, st_servers = _safe_call_status(getattr(client, "list_servers", lambda: []), [])
+    alarm_zones, st_alarm_zones = _safe_call_status(getattr(client, "list_alarm_zones", lambda: []), [])
+    alarm_events_raw, st_alarm_events = _safe_call_status(getattr(client, "list_alarm_events", lambda: []), [])
     resources = resources or []
     servers = servers or []
     alarm_zones = alarm_zones or []

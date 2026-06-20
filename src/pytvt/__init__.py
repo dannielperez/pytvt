@@ -31,10 +31,12 @@ no longer depends on Node.js or any bridge scripts.
 
 __version__ = "1.2.0"
 
+from . import workflows  # Provisional — technician-facing workflow orchestrations.
 from .alarm_protocol import ParsedAlarmFrame, parse_alarm_frame
 from .config import load_config
 from .connection_pool import ConnectionPool, PoolStats, SessionMetrics, SessionResult, connect_many
 from .constants import BackendFamily, CompositeStrategy, ExecutionPlan, IntegrationMode, resolve_backend
+from .device_sdk.http_client import CommandResult, DeviceInfoResult, DeviceTimeResult, RtspUrlResult, SdkHttpClient
 from .device_sdk.manager import Backend, DeviceManager, NoBackendAvailable, available_backends
 from .diff import DeviceDiff, ScanDiff, diff_scans, load_scan_file
 from .exceptions import BackendError, PytvtError, RegistryError
@@ -44,9 +46,9 @@ from .models import (
     Channel,
     DeviceEntry,
     LanFreeDevice,
-    NvrLanFreeDevice,
     NvrApiError,
     NvrApiResponseShapeError,
+    NvrLanFreeDevice,
     PlatformAccessConfig,
     PlatformAccessDisabledError,
     PortConfig,
@@ -54,21 +56,21 @@ from .models import (
     ScannerConfig,
     ScanResult,
 )
-from .platform_sdk import ManagementClient
-from .platform_sdk import ManagementError
-from .xml_api import NvrClient
 from .output import save_csv, save_failed_devices, save_json, save_xlsx_per_site
+from .platform_sdk import ManagementClient, ManagementError
 from .registry import resolve_execution_plan
 from .scanner import filter_tvt_devices, load_devices, scan_single_nvr
-from .device_sdk.http_client import CommandResult, DeviceInfoResult, DeviceTimeResult, RtspUrlResult, SdkHttpClient
 from .web_api import WebApiClient
-from . import workflows  # Provisional — technician-facing workflow orchestrations.
+from .xml_api import NvrClient
+
 
 # Lazy diagnostics accessor — avoids heavy ctypes probes at import time.
 def diagnostics(sdk_path=None):
     """Run runtime diagnostics and return a :class:`~pytvt.diagnostics.DiagnosticsReport`."""
     from .diagnostics import diagnostics as _diag
+
     return _diag(sdk_path=sdk_path)
+
 
 __all__ = [
     # Version
@@ -98,6 +100,7 @@ __all__ = [
     "LanFreeDevice",
     "NvrApiError",
     "NvrApiResponseShapeError",
+    "PlatformAccessConfig",
     "PlatformAccessDisabledError",
     "PortConfig",
     "RtspServerConfig",
