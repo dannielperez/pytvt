@@ -29,8 +29,9 @@ native SDK bindings. It still requires a local vendor SDK installation, but it
 no longer depends on Node.js or any bridge scripts.
 """
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
+from .alarm_protocol import ParsedAlarmFrame, parse_alarm_frame
 from .config import load_config
 from .connection_pool import ConnectionPool, PoolStats, SessionMetrics, SessionResult, connect_many
 from .constants import BackendFamily, CompositeStrategy, ExecutionPlan, IntegrationMode, resolve_backend
@@ -74,6 +75,9 @@ __all__ = [
     "__version__",
     # Diagnostics
     "diagnostics",
+    # Alarm-server wire protocol
+    "ParsedAlarmFrame",
+    "parse_alarm_frame",
     # Constants / enums
     "BackendFamily",
     "CompositeStrategy",
