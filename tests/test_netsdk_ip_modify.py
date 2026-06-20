@@ -214,16 +214,18 @@ def test_diagnostics_include_selected_function_when_symbol_available():
 
 
 def test_scan_only_helper_never_calls_modify():
-    with patch("pytvt.device_sdk.ip_modify.modify_device_ip_by_mac") as mock_modify:
-        with patch(
+    with (
+        patch("pytvt.device_sdk.ip_modify.modify_device_ip_by_mac") as mock_modify,
+        patch(
             "pytvt.device_sdk.ip_modify._scan_match_by_mac_or_ip",
             return_value={"mac": "AA:BB:CC:DD:EE:FF", "ip": "192.168.1.10"},
-        ):
-            with patch(
-                "pytvt.device_sdk.ip_modify.sdk_ip_modify_diagnostics",
-                return_value={"symbols": {"NET_SDK_DiscoverDevice": True}},
-            ):
-                payload = scan_device_match(mac="AA:BB:CC:DD:EE:FF", ip="192.168.1.10")
+        ),
+        patch(
+            "pytvt.device_sdk.ip_modify.sdk_ip_modify_diagnostics",
+            return_value={"symbols": {"NET_SDK_DiscoverDevice": True}},
+        ),
+    ):
+        payload = scan_device_match(mac="AA:BB:CC:DD:EE:FF", ip="192.168.1.10")
 
     assert payload["matched"] is True
     mock_modify.assert_not_called()

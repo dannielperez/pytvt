@@ -7,8 +7,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from pytvt.models import DeviceEntry, ScannerConfig
 from pytvt.device_sdk.sdk_http import sdk_scan
+from pytvt.models import DeviceEntry, ScannerConfig
 
 
 class TestSdkScan:

@@ -97,12 +97,15 @@ class TestNvrLanNetworkEdit:
         posted: list[tuple[str, str]] = []
 
         client._encrypt_for_session = lambda plaintext, session_key: "ENC"  # type: ignore[method-assign]
-        client._post = lambda path, body: posted.append((path, body)) or (
-            '<?xml version="1.0" encoding="UTF-8"?>'
-            '<response version="1.0" cmdId="" cmdUrl="editDevNetworkList">'
-            "<status>success</status>"
-            "<content><item><errorCode>0</errorCode></item></content>"
-            "</response>"
+        client._post = lambda path, body: (
+            posted.append((path, body))
+            or (
+                '<?xml version="1.0" encoding="UTF-8"?>'
+                '<response version="1.0" cmdId="" cmdUrl="editDevNetworkList">'
+                "<status>success</status>"
+                "<content><item><errorCode>0</errorCode></item></content>"
+                "</response>"
+            )
         )
 
         client.edit_nvr_lan_device_network(
@@ -200,9 +203,7 @@ class TestDeleteNvrDevices:
                 '<response cmdUrl="queryDevList"><status>success</status>'
                 '<content type="list" total="0"></content></response>'
             ),
-            "queryOnlineChlList": (
-                "<response><status>success</status><content/></response>"
-            ),
+            "queryOnlineChlList": ("<response><status>success</status><content/></response>"),
         }
         client._post = lambda path, body: responses[path]
         assert client.query_channels() == []
@@ -213,8 +214,7 @@ class TestDeleteNvrDevices:
         client = NvrClient("10.0.0.1", "admin", "pass")
         client._logged_in = True
         client._post = lambda path, body: (
-            '<response cmdUrl="queryDevList"><status>success</status>'
-            "<somethingElse/></response>"
+            '<response cmdUrl="queryDevList"><status>success</status><somethingElse/></response>'
         )
         with pytest.raises(NvrApiResponseShapeError):
             client.query_channels()
@@ -241,11 +241,14 @@ class TestDeleteNvrDevices:
         client = NvrClient("10.0.0.1", "admin", "pass")
         client._logged_in = True
         posted: list[tuple[str, str]] = []
-        client._post = lambda path, body: posted.append((path, body)) or (
-            '<?xml version="1.0" encoding="UTF-8"?>'
-            '<response version="1.0" cmdId="" cmdUrl="delDevList">'
-            "<status>success</status>"
-            "</response>"
+        client._post = lambda path, body: (
+            posted.append((path, body))
+            or (
+                '<?xml version="1.0" encoding="UTF-8"?>'
+                '<response version="1.0" cmdId="" cmdUrl="delDevList">'
+                "<status>success</status>"
+                "</response>"
+            )
         )
 
         deleted = client.delete_nvr_devices(
@@ -268,11 +271,14 @@ class TestEditNvrIpcPasswords:
         posted: list[tuple[str, str]] = []
 
         client._encrypt_for_session = lambda plaintext, session_key: "ENC"  # type: ignore[method-assign]
-        client._post = lambda path, body: posted.append((path, body)) or (
-            '<?xml version="1.0" encoding="UTF-8"?>'
-            '<response version="1.0" cmdId="" cmdUrl="editIPChlPassword">'
-            "<status>success</status>"
-            "</response>"
+        client._post = lambda path, body: (
+            posted.append((path, body))
+            or (
+                '<?xml version="1.0" encoding="UTF-8"?>'
+                '<response version="1.0" cmdId="" cmdUrl="editIPChlPassword">'
+                "<status>success</status>"
+                "</response>"
+            )
         )
 
         updated = client.edit_nvr_ipc_passwords(["dev-1", "dev-2"], new_password="TestPass123!")
@@ -322,6 +328,7 @@ class TestEditNvrChannelCredentials:
 
         assert updated == 3
         assert calls == [(["dev-1", "dev-2"], "admin", "TestPass123!")]
+
 
 class TestPlatformAccess:
     def test_query_platform_access_parses_response(self):
@@ -377,11 +384,9 @@ class TestPlatformAccess:
         client = NvrClient("10.0.0.1", "admin", "pass")
         client._logged_in = True
         posted: list[tuple[str, str]] = []
-        client._post = lambda path, body: posted.append((path, body)) or (
-            '<?xml version="1.0" encoding="UTF-8"?>'
-            '<response version="1.0">'
-            "<status>success</status>"
-            "</response>"
+        client._post = lambda path, body: (
+            posted.append((path, body))
+            or ('<?xml version="1.0" encoding="UTF-8"?><response version="1.0"><status>success</status></response>')
         )
 
         client.set_platform_access(
@@ -402,11 +407,9 @@ class TestPlatformAccess:
         client = NvrClient("10.0.0.1", "admin", "pass")
         client._logged_in = True
         posted: list[tuple[str, str]] = []
-        client._post = lambda path, body: posted.append((path, body)) or (
-            '<?xml version="1.0" encoding="UTF-8"?>'
-            '<response version="1.0">'
-            "<status>success</status>"
-            "</response>"
+        client._post = lambda path, body: (
+            posted.append((path, body))
+            or ('<?xml version="1.0" encoding="UTF-8"?><response version="1.0"><status>success</status></response>')
         )
 
         client.set_platform_access(

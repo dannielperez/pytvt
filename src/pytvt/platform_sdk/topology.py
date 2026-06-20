@@ -16,16 +16,12 @@ already-normalized data — which makes it trivially unit-testable.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from dataclasses import field
+from collections.abc import Iterable
+from dataclasses import dataclass, field
 from typing import Any
-from typing import Iterable
 
-from .platform_constants import NODETYPE_AREA
-from .platform_constants import NODETYPE_CHANNEL
-from .platform_constants import NODETYPE_DEVICE
-from .platform_models import PlatformAlarmZone
-from .platform_models import PlatformResource
+from .platform_constants import NODETYPE_AREA, NODETYPE_CHANNEL, NODETYPE_DEVICE
+from .platform_models import PlatformAlarmZone, PlatformResource
 
 __all__ = ["PlatformSite", "build_site_topology"]
 
@@ -87,9 +83,7 @@ def build_site_topology(
     resources_list = list(resources)
     zones_list = list(alarm_zones or [])
 
-    by_node_id: dict[int, PlatformResource] = {
-        r.node_id: r for r in resources_list
-    }
+    by_node_id: dict[int, PlatformResource] = {r.node_id: r for r in resources_list}
     areas = [r for r in resources_list if r.node_type == NODETYPE_AREA]
     devices = [r for r in resources_list if r.node_type == NODETYPE_DEVICE]
     channels = [r for r in resources_list if r.node_type == NODETYPE_CHANNEL]
@@ -196,9 +190,7 @@ def build_site_topology(
                 root_resource_guid=_resource_guid(root),
                 devices=sorted(site_devices[root_id], key=lambda r: r.node_id),
                 channels=sorted(site_channels[root_id], key=lambda r: r.node_id),
-                alarm_zones=sorted(
-                    site_zones[root_id], key=lambda z: (z.name, z.guid)
-                ),
+                alarm_zones=sorted(site_zones[root_id], key=lambda z: (z.name, z.guid)),
             )
         )
 
