@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] — 2026-06-20
+
+### Added
+
+- **Per-section fetch status on the platform inventory snapshot** (`platform_sdk/inventory.py`).
+  `get_platform_inventory_snapshot()` now returns a `fetch_status` map alongside `capabilities`,
+  reporting each section as `"ok"` / `"unavailable"` / `"failed"` via a new `_safe_call_status`
+  helper. This lets a consumer distinguish a *confirmed-fetched empty* section from a *fetch
+  failure* — the SDK-boundary half of the UniqueOS #512 "don't sweep on a failed fetch" fix
+  (`tvt_platform/sync.py` already consumes it, with a backward-compatible fallback when the key is
+  absent). `_safe_call` is retained unchanged for other callers. Backward compatible (additive key).
+
 ## [0.8.0] — 2026-04-24
 
 ### Changed
