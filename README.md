@@ -80,7 +80,7 @@ To enable SDK-backed features, obtain the TVT SDK directly from the vendor and c
 
 Legacy environment variable `PYTVT_NETSDK_LIB` is still honored for existing developer workflows.
 
-All SDK features fail gracefully with clear errors when dependencies are absent. The default `protocol` and `webapi` backends work with a plain `pip install`.
+All SDK features fail gracefully with clear errors when dependencies are absent. The default `protocol` and `web_api` backends work with a plain `pip install`.
 
 The SDK must always be supplied by the user through `TVT_SDK_PATH` or an explicit `sdk_path=` argument. `pytvt` does not download, embed, or vendor `libdvrnetsdk.so`, `libNatClientSDK.so`, or any other TVT binary.
 
@@ -121,7 +121,7 @@ Use NAT mode when the recorder is not directly reachable by IP but is provisione
 ### Example SDK loader
 
 ```python
-from pytvt.netsdk.loader import NetSdkUnavailable, load_sdk
+from pytvt.device_sdk.loader import NetSdkUnavailable, load_sdk
 
 try:
   sdk = load_sdk(sdk_path="/opt/tvt-sdk")
@@ -163,7 +163,7 @@ provisional management-server package.
 - Scanner, discovery, `NvrClient`, `WebApiClient`, `DeviceManager`,
   connection-pool helpers, and netsdk-backed device operations
 
-**Provisional (`pytvt.management`):**
+**Provisional (`pytvt.platform_sdk`):**
 - Management-server backend family and related validation tooling in `tools/`
 - Runtime modes include `native_linux_sdk`, `platform_sdk`, `sidecar`,
   `native_protocol`, and `auto`
@@ -373,7 +373,7 @@ pytvt doctor --sdk-path /opt/tvt-sdk --json
 The `WebApiClient` provides direct HTTP access to TVT devices (NVRs and IPCs) using the TVT LAPI protocol. Unlike the NVR CGI client (`NvrClient`), it uses HTTP Basic auth per request and targets individual devices.
 
 ```python
-from pytvt.webapi import WebApiClient
+from pytvt import WebApiClient
 
 client = WebApiClient("198.51.100.25", "admin", "example-password")
 
@@ -405,6 +405,28 @@ The Web API service must be enabled on the device. Use `ensure_webapi_available(
 client = WebApiClient("198.51.100.25", "admin", "example-password")
 client.ensure_webapi_available()  # enables via NvrClient if disabled
 ```
+
+## Alarm frame parser (v1.2.0+)
+
+TVT NVRs push alarm/heartbeat frames to a listener ("alarm server") in several shapes depending on
+firmware: JSON, an HTTP POST wrapping JSON, a binary `TVT\0`-magic frame, or a length-prefixed JSON
+frame. `parse_alarm_frame` decodes any of them into a neutral `ParsedAlarmFrame` — it owns only the
+vendor wire format (transport, persistence, and rate-limiting stay with the caller) and never raises
+on malformed input (unparseable frames yield `parse_format="unknown"` with a diagnostic dump).
+
+```python
+from pytvt import parse_alarm_frame
+
+frame = parse_alarm_frame(raw_bytes)            # raw_bytes from your TCP/HTTP listener
+print(frame.parse_format)                       # "json" | "binary" | "http" | "unknown"
+print(frame.event_type, frame.event_code)       # e.g. "alarm" "motion"
+print(frame.channel, frame.device_id)
+```
+
+> Channel inventory has a related safety net: `NvrClient.query_channels()` raises
+> `NvrApiResponseShapeError` (an `NvrApiError` subclass) when a recorder returns a success status but
+> an unrecognized payload shape (firmware drift), so a parse mismatch is never mistaken for a
+> genuinely empty channel list.
 
 ## DeviceManager (v0.5.0+)
 
@@ -461,7 +483,7 @@ All methods return the same result types regardless of which backend is active. 
 pip install pytvt
 ```
 
-Requires Python 3.10+ and network access to NVR port 6036. No native dependencies are needed for `protocol` or `webapi`.
+Requires Python 3.10+ and network access to NVR port 6036. No native dependencies are needed for `protocol` or `web_api`.
 
 ### Enable device SDK features
 
@@ -833,30 +855,29 @@ pytvt/
 ├── src/pytvt/                 # Installable Python package (supported runtime)
 │   ├── __init__.py            # Public API + version
 │   ├── __main__.py            # python -m pytvt support
-│   ├── cli.py                 # CLI entry points (pytvt, pytvt-discover, etc.)
 │   ├── config.py              # Configuration loading + precedence
 │   ├── constants.py           # Enums, ExecutionPlan, backend resolution
-│   ├── exceptions.py          # Base exception hierarchy
-│   ├── models.py              # Dataclasses: ScannerConfig, DeviceEntry, CameraInfo, ScanResult
 │   ├── registry.py            # Backend/integration mode dispatch table
+│   ├── exceptions.py          # Base exception hierarchy
+│   ├── models.py              # Dataclasses + NvrApiError / NvrApiResponseShapeError
 │   ├── scanner.py             # Backend dispatch + scan orchestration
-│   ├── protocol.py            # Pure Python TVT binary protocol client
+│   ├── protocol.py            # Pure-Python TVT binary protocol client
 │   ├── discovery.py           # SSDP multicast + subnet sweep discovery
 │   ├── diff.py                # Scan diffing / change detection
-│   ├── sdk_http.py            # SDK HTTP backend (compat mode → external bridge)
-│   ├── sdk_http_client.py     # Typed SDK HTTP client
-│   ├── device_manager.py      # Unified facade with auto-backend selection
-│   ├── sdk_local.py           # SDK local backend (direct ctypes mode)
-│   ├── output.py              # CSV / JSON / XLSX formatters
-│   ├── nvr_api.py             # NVR web CGI client
-│   ├── snapshot.py            # Camera snapshot capture
-│   └── netsdk/                # Native SDK ctypes bindings (Linux only)
-│       ├── __init__.py        # Package exports
-│       ├── loader.py          # Library search + loading
-│       ├── bindings.py        # ctypes function prototypes
-│       ├── types.py           # ctypes structure definitions
-│       ├── constants.py       # Enums (PtzCommand, StreamType, etc.)
-│       └── client.py          # NetSdkClient + DeviceSession
+│   ├── output.py             # CSV / JSON / XLSX formatters
+│   ├── connection_pool.py     # Thread-safe session pool + connect_many
+│   ├── diagnostics.py         # runtime diagnostics (pytvt doctor)
+│   ├── xml_api.py             # NVR web CGI client (NvrClient)  [was nvr_api.py]
+│   ├── alarm_protocol.py      # TVT alarm-server frame parser (parse_alarm_frame)
+│   ├── web_api/               # TVT HTTP Web API / LAPI client (WebApiClient)  [was webapi/]
+│   ├── device_sdk/            # Unified device backends: manager, http_client, sdk_http,
+│   │                          #   sdk_local, loader/bindings/types (native ctypes), ip_modify
+│   ├── platform_sdk/          # NVMS PlatformSDK (ManagementClient) + inventory/topology/health
+│   ├── capabilities/          # backend capability detection
+│   ├── strategy/              # composite execution strategy
+│   ├── sdk/                   # shared SDK helpers
+│   ├── tools/                 # CLI entry points (cli.py, workflow_cli.py, snapshot.py)
+│   └── workflows/             # technician-facing workflow orchestrations (provisional)
 ├── tvt-api/                   # Local-only SDK bridge workspace (excluded from PyPI)
 ├── tests/                     # pytest test suite
 │   ├── conftest.py            # Shared fixtures + sample data

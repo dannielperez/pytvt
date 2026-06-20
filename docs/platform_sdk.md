@@ -5,6 +5,23 @@ The PlatformSDK backend wraps TVT's `libPlatClientSDK.so` /
 `ctypes`.  It is selected by passing `backend_mode="platform_sdk"` and
 `platform_sdk_path="/path/to/libPlatClientSDK.so"` to `ManagementClient`.
 
+## Snapshot fetch status (since 1.1.0)
+
+`get_platform_inventory_snapshot()` returns a `fetch_status` map alongside
+`capabilities`, reporting each section as one of:
+
+| value | meaning |
+|---|---|
+| `"ok"` | the section was fetched (the result may be a genuine empty list) |
+| `"unavailable"` | the capability is not supported by this client (`CapabilityNotAvailable`) |
+| `"failed"` | the fetch raised (transport/parse error, etc.) |
+
+Sections: `resources`, `devices`, `channels`, `areas`, `servers`, `alarm_zones`,
+`alarm_events` (`devices`/`channels`/`areas` share `resources`' status, since they
+derive from it). This lets a consumer distinguish a *confirmed-fetched empty*
+section from a *fetch failure* — e.g. so a downstream sync sweeps a genuinely empty
+section stale but never sweeps on a failed fetch.
+
 ## Live-validated against a reference management server (2026-04-23)
 
 Capability matrix reflects behavior observed end-to-end on a reference TVT
