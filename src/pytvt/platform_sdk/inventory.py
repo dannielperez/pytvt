@@ -32,6 +32,27 @@ def _safe_call(fn: Any, default: Any) -> Any:
         return default
 
 
+def _safe_call_status(fn: Any, default: Any) -> tuple[Any, str]:
+    """Like :func:`_safe_call` but also reports per-section fetch status.
+
+    Returns ``(value, status)`` where ``status`` is one of:
+
+    * ``"ok"``          — the call returned (a value, possibly genuinely empty);
+    * ``"unavailable"`` — the capability is not supported by this client;
+    * ``"failed"``      — the call raised (transport/parse error, etc.).
+
+    This lets a caller tell a *confirmed-empty* section from a *fetch failure*
+    (the durable half of issue #512): an empty list with ``"ok"`` is genuinely
+    empty and may be swept, while ``"failed"`` must never be treated as empty.
+    """
+    try:
+        return fn(), "ok"
+    except CapabilityNotAvailable:
+        return default, "unavailable"
+    except Exception:  # pragma: no cover - defensive
+        return default, "failed"
+
+
 def _resource_payload(resource: PlatformResource) -> dict[str, Any]:
     payload = resource.as_dict()
     payload["classification"] = classify_resource(resource)
@@ -56,18 +77,22 @@ def get_platform_inventory_snapshot(client: Any) -> dict[str, Any]:
 
     capabilities = detect_capabilities(client)
 
-    resources: list[PlatformResource] = _safe_call(
+    resources, st_resources = _safe_call_status(
         getattr(client, "list_resources_normalized", lambda: []), []
-    ) or []
-    servers: list[PlatformServer] = _safe_call(
+    )
+    servers, st_servers = _safe_call_status(
         getattr(client, "list_servers", lambda: []), []
-    ) or []
-    alarm_zones: list[PlatformAlarmZone] = _safe_call(
+    )
+    alarm_zones, st_alarm_zones = _safe_call_status(
         getattr(client, "list_alarm_zones", lambda: []), []
-    ) or []
-    alarm_events_raw: list[Any] = _safe_call(
+    )
+    alarm_events_raw, st_alarm_events = _safe_call_status(
         getattr(client, "list_alarm_events", lambda: []), []
-    ) or []
+    )
+    resources = resources or []
+    servers = servers or []
+    alarm_zones = alarm_zones or []
+    alarm_events_raw = alarm_events_raw or []
 
     sites = build_site_topology(resources, alarm_zones)
 
@@ -110,6 +135,18 @@ def get_platform_inventory_snapshot(client: Any) -> dict[str, Any]:
 
     return {
         "capabilities": capabilities,
+        # Per-section fetch status (#512 durable signal, CLAUDE.md §4). Lets the
+        # consumer tell a confirmed-fetched empty section from a fetch failure.
+        # devices/channels/areas all derive from `resources`, so they share it.
+        "fetch_status": {
+            "resources": st_resources,
+            "devices": st_resources,
+            "channels": st_resources,
+            "areas": st_resources,
+            "servers": st_servers,
+            "alarm_zones": st_alarm_zones,
+            "alarm_events": st_alarm_events,
+        },
         "sites": [s.as_dict() for s in sites],
         "devices": devices,
         "channels": channels,
