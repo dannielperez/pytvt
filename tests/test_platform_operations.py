@@ -447,3 +447,56 @@ def test_inventory_snapshot_handles_missing_capabilities() -> None:
     assert snap["summary"]["device_count"] == 0
     assert snap["capabilities"]["servers"] is False
     assert snap["sites"] == []
+
+
+def test_inventory_snapshot_fetch_status_ok_failed_unavailable() -> None:
+    """#512 durable signal: per-section fetch_status distinguishes ok / failed /
+    unavailable so the consumer can tell a confirmed-empty section from a fetch
+    failure (the SDK-boundary half of the fix; see tvt_platform/sync.py)."""
+
+    class _Client:
+        def list_resources_normalized(self):
+            return []  # genuinely empty, fetched OK
+
+        def list_servers(self):
+            raise RuntimeError("transport boom")  # -> "failed"
+
+        def list_alarm_zones(self):
+            raise CapabilityNotAvailable("alarm zones not supported")  # -> "unavailable"
+
+        # list_alarm_events absent -> getattr default lambda returns [] -> "ok"
+
+    snap = get_platform_inventory_snapshot(_Client())
+    fs = snap["fetch_status"]
+
+    assert fs["resources"] == "ok"
+    assert fs["servers"] == "failed"
+    assert fs["alarm_zones"] == "unavailable"
+    assert fs["alarm_events"] == "ok"
+    # devices/channels/areas derive from resources and share its status
+    assert fs["devices"] == fs["channels"] == fs["areas"] == "ok"
+    # a "failed" fetch must NOT masquerade as a genuine empty
+    assert snap["servers"] == []
+    assert fs["servers"] != "ok"
+
+
+def test_inventory_snapshot_fetch_status_keys_match_consumer_contract() -> None:
+    """fetch_status must carry every section uniqueos/tvt_platform/sync.py asks
+    _section_fetched_ok() about: resources, devices, channels, areas, servers,
+    alarm_zones (alarm_events provided too)."""
+
+    class _Minimal:
+        def list_resources_normalized(self):
+            return []
+
+    fs = get_platform_inventory_snapshot(_Minimal())["fetch_status"]
+    assert {
+        "resources",
+        "devices",
+        "channels",
+        "areas",
+        "servers",
+        "alarm_zones",
+    } <= set(fs)
+    # every value is one of the three documented states
+    assert set(fs.values()) <= {"ok", "failed", "unavailable"}
