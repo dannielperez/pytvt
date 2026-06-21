@@ -1193,8 +1193,26 @@ class NvrClient:
         return rtsp_snapshot(url, output_path, timeout=timeout)
 
 
+def _ffmpeg_rtsp_frame_args(rtsp_url: str, timeout: int) -> list[str]:
+    """Shared ffmpeg argument list for grabbing one JPEG frame from RTSP."""
+    return [
+        "ffmpeg",
+        "-y",
+        "-rtsp_transport",
+        "tcp",
+        "-timeout",
+        str(timeout * 1_000_000),
+        "-i",
+        rtsp_url,
+        "-frames:v",
+        "1",
+        "-q:v",
+        "2",
+    ]
+
+
 def rtsp_snapshot(rtsp_url: str, output_path: str, timeout: int = 10) -> bool:
-    """Capture a single JPEG frame from an RTSP stream using ffmpeg.
+    """Capture a single JPEG frame from an RTSP stream to a file using ffmpeg.
 
     Args:
         rtsp_url: Full RTSP URL (with credentials)
@@ -1209,27 +1227,36 @@ def rtsp_snapshot(rtsp_url: str, output_path: str, timeout: int = 10) -> bool:
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
     try:
         result = subprocess.run(
-            [
-                "ffmpeg",
-                "-y",
-                "-rtsp_transport",
-                "tcp",
-                "-timeout",
-                str(timeout * 1_000_000),
-                "-i",
-                rtsp_url,
-                "-frames:v",
-                "1",
-                "-q:v",
-                "2",
-                output_path,
-            ],
+            [*_ffmpeg_rtsp_frame_args(rtsp_url, timeout), output_path],
             capture_output=True,
             timeout=timeout + 5,
         )
         return result.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0
     except (subprocess.TimeoutExpired, FileNotFoundError):
         return False
+
+
+def rtsp_snapshot_bytes(rtsp_url: str, timeout: int = 10) -> bytes | None:
+    """Capture a single JPEG frame from an RTSP stream as bytes (ffmpeg -> stdout).
+
+    The byte-returning sibling of :func:`rtsp_snapshot` — same ffmpeg frame-grab,
+    but written to ``pipe:1`` so callers that want a JPEG in memory (e.g. the
+    device-SDK ``snapshot`` preferred path) avoid a temp file.
+
+    Returns the JPEG bytes, or ``None`` on any failure (non-zero exit, empty
+    output, ffmpeg missing, or timeout).
+    """
+    try:
+        result = subprocess.run(
+            [*_ffmpeg_rtsp_frame_args(rtsp_url, timeout), "-f", "image2", "pipe:1"],
+            capture_output=True,
+            timeout=timeout + 5,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return None
+    if result.returncode == 0 and result.stdout:
+        return result.stdout
+    return None
 
 
 def main():
