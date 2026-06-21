@@ -328,8 +328,25 @@ class DeviceManager:
             set_timestamp=set_timestamp,
         )
 
-    def snapshot(self, *, channel: int = 0) -> bytes | None:
-        """Capture a JPEG snapshot from a channel."""
+    def snapshot(
+        self,
+        *,
+        channel: int = 0,
+        prefer_rtsp: bool = True,
+        stream_type: int = 0,
+        timeout: int = 10,
+    ) -> bytes | None:
+        """Capture a JPEG snapshot from a channel.
+
+        The preferred path is a direct-RTSP frame grab (lower latency / NAT-free
+        wherever the RTSP endpoint is reachable); on any failure it transparently
+        falls back to the SDK/NAT (NETSDK) or HTTP snapshot. Pass
+        ``prefer_rtsp=False`` to force the legacy SDK/HTTP path.
+        """
+        if prefer_rtsp:
+            data = self._rtsp_snapshot(channel=channel, stream_type=stream_type, timeout=timeout)
+            if data:
+                return data
         if self._backend == Backend.NETSDK:
             return self._netsdk_snapshot(channel=channel)
         return self._get_http().snapshot(
@@ -339,6 +356,16 @@ class DeviceManager:
             port=self._port,
             channel=channel,
         )
+
+    def _rtsp_snapshot(self, *, channel: int = 0, stream_type: int = 0, timeout: int = 10) -> bytes | None:
+        """Direct-RTSP JPEG grab via the resolved RTSP URL; ``None`` on any failure."""
+        result = self.rtsp_url(channel=channel, stream_type=stream_type)
+        if not result.success or not isinstance(result.rtsp_url, str) or not result.rtsp_url:
+            return None
+        # Lazy import avoids pulling the NVR XML/HTTP module at device_sdk load.
+        from ..xml_api import rtsp_snapshot_bytes
+
+        return rtsp_snapshot_bytes(result.rtsp_url, timeout=timeout)
 
     def rtsp_url(self, *, channel: int = 0, stream_type: int = 0) -> RtspUrlResult:
         """Get RTSP stream URL for a channel."""
