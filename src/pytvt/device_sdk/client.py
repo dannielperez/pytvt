@@ -323,6 +323,44 @@ class DeviceSession:
         )
         return _device_info_from(info)
 
+    # ── Generic device web-CGI over the SDK transport ───────────
+
+    def api_call(
+        self,
+        url: str,
+        content: str = "",
+        *,
+        request: str | None = None,
+        buf_size: int = 131072,
+    ) -> str:
+        """Run a device web-CGI command over the SDK session (``NET_SDK_ApiInterface``).
+
+        Reusable "write to device via SDK" primitive — works LAN-direct or
+        NAT-tunneled, with no dependence on the device's HTTP port. ``url`` is the
+        CGI command (e.g. ``"editPlatformCfg"``); ``content`` is the inner XML
+        placed inside the default NVMS-9000 request envelope. Pass a full
+        ``request`` to override the envelope (e.g. a camera's ``ipc.com/ver10``
+        format). Returns the raw XML response.
+        """
+        if request is None:
+            request = (
+                '<?xml version="1.0" encoding="utf-8" ?>'
+                '<request version="1.0" systemType="NVMS-9000" clientType="WEB">'
+                f"<token>null</token>{content}</request>"
+            )
+        buf = ct.create_string_buffer(buf_size)
+        ret = ct.c_uint(0)
+        ok = sdk._lib.NET_SDK_ApiInterface(  # type: ignore[union-attr]
+            self._handle,
+            request.encode("utf-8"),
+            url.encode("utf-8"),
+            buf,
+            buf_size,
+            ct.byref(ret),
+        )
+        self._check(bool(ok), f"ApiInterface({url})")
+        return buf.raw[: ret.value].decode("utf-8", "replace")
+
     def device_time(self) -> datetime:
         """Query current device clock."""
         t = DD_TIME()
