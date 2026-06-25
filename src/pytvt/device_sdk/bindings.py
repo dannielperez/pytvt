@@ -61,11 +61,11 @@ def bind(lib: ct.CDLL) -> None:
     if hasattr(lib, "NET_SDK_ApiInterface"):
         lib.NET_SDK_ApiInterface.restype = ct.c_bool
         lib.NET_SDK_ApiInterface.argtypes = [
-            ct.c_long,              # login handle
-            ct.c_char_p,            # request body (XML)
-            ct.c_char_p,            # CGI url / command
-            ct.c_void_p,            # output buffer
-            ct.c_uint,              # buffer size
+            ct.c_long,  # login handle
+            ct.c_char_p,  # request body (XML)
+            ct.c_char_p,  # CGI url / command
+            ct.c_void_p,  # output buffer
+            ct.c_uint,  # buffer size
             ct.POINTER(ct.c_uint),  # out: bytes written
         ]
 
