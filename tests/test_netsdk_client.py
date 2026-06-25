@@ -631,3 +631,49 @@ class TestDataclasses:
         a = AlarmOutStatus(name="Relay1", online=True, active=False)
         assert a.name == "Relay1"
         assert not a.active
+
+
+# ── DeviceSession.api_call (NET_SDK_ApiInterface) ──────────────────
+
+
+class TestSessionApiCall:
+    def test_api_call_returns_response_and_wraps_request(self, session, mock_lib):
+        resp = b'<config status="success"/>'
+
+        def fill(handle, req, url, buf, size, ret_ptr):
+            ct.memmove(buf, resp, len(resp))
+            ret_ptr._obj.value = len(resp)
+            return True
+
+        mock_lib.NET_SDK_ApiInterface.side_effect = fill
+        out = session.api_call("queryPlatformCfg", "<inner/>")
+
+        assert out == resp.decode()
+        args = mock_lib.NET_SDK_ApiInterface.call_args[0]
+        assert args[0] == 1                    # login handle
+        assert args[2] == b"queryPlatformCfg"  # CGI url
+        assert b"<inner/>" in args[1]          # content placed in default envelope
+        assert b"NVMS-9000" in args[1]
+
+    def test_api_call_custom_request_envelope(self, session, mock_lib):
+        seen = {}
+
+        def fill(handle, req, url, buf, size, ret_ptr):
+            seen["req"] = req
+            ct.memmove(buf, b"<ok/>", 5)
+            ret_ptr._obj.value = 5
+            return True
+
+        mock_lib.NET_SDK_ApiInterface.side_effect = fill
+        session.api_call(
+            "SetServerConfig",
+            request='<config version="1.0" xmlns="http://www.ipc.com/ver10"/>',
+        )
+        assert b"ipc.com/ver10" in seen["req"]   # custom envelope used verbatim
+        assert b"NVMS-9000" not in seen["req"]    # default envelope NOT applied
+
+    def test_api_call_failure_raises(self, session, mock_lib):
+        mock_lib.NET_SDK_ApiInterface.return_value = False
+        mock_lib.NET_SDK_GetLastError.return_value = 1
+        with pytest.raises(NetSdkError, match="ApiInterface"):
+            session.api_call("queryPlatformCfg")

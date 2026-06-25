@@ -54,6 +54,21 @@ def bind(lib: ct.CDLL) -> None:
     lib.NET_SDK_SetReconnect.restype = ct.c_bool
     lib.NET_SDK_SetReconnect.argtypes = [ct.c_uint, ct.c_bool]
 
+    # ── Generic device web-CGI over the authenticated SDK transport ──
+    # Runs a device's web API command (NVR queryPlatformCfg/editPlatformCfg, or a
+    # camera's ipc.com Get/Set command) through the SDK session — works LAN-direct
+    # and NAT-tunneled. Optional symbol on some .so variants.
+    if hasattr(lib, "NET_SDK_ApiInterface"):
+        lib.NET_SDK_ApiInterface.restype = ct.c_bool
+        lib.NET_SDK_ApiInterface.argtypes = [
+            ct.c_long,              # login handle
+            ct.c_char_p,            # request body (XML)
+            ct.c_char_p,            # CGI url / command
+            ct.c_void_p,            # output buffer
+            ct.c_uint,              # buffer size
+            ct.POINTER(ct.c_uint),  # out: bytes written
+        ]
+
     # ── Login / logout ──────────────────────────────────────────
     lib.NET_SDK_Login.restype = ct.c_long
     lib.NET_SDK_Login.argtypes = [
