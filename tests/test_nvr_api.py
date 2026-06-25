@@ -262,6 +262,62 @@ class TestDeleteNvrDevices:
         assert '<item id="dev-2"></item>' in posted[0][1]
 
 
+class TestAddNvrDevices:
+    _OK = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<response cmdId="" cmdUrl="createDevList"><status>success</status></response>'
+    )
+
+    def test_quick_add_uses_createDevList_with_mac_and_no_password(self):
+        client = NvrClient("10.0.0.1", "admin", "pass")
+        client._logged_in = True
+        posted: list[tuple[str, str]] = []
+        client._post = lambda path, body: posted.append((path, body)) or self._OK
+
+        client.add_nvr_devices(
+            [
+                {"ip": "10.0.0.50", "mac": "AA:BB:CC:DD:EE:01", "model": "IP-5IRD4S4C4-28", "name": "Cam 1"},
+            ]
+        )
+
+        path, body = posted[0]
+        assert path == "createDevList"
+        assert "<ip>10.0.0.50</ip>" in body
+        assert "<mac>AA:BB:CC:DD:EE:01</mac>" in body
+        assert "<allowAssignIP>true</allowAssignIP>" in body
+        assert "<password" not in body  # quick-add carries no password
+        assert "<port>9008</port>" in body
+        assert 'factoryName="EAST"' in body
+
+    def test_manual_add_includes_session_encrypted_password(self):
+        client = NvrClient("10.0.0.1", "admin", "pass")
+        client._logged_in = True
+        client._session_key = "session-key"
+        client._security_ver = "1"
+        client._encrypt_for_session = lambda plaintext, session_key: "ENC"  # type: ignore[method-assign]
+        posted: list[tuple[str, str]] = []
+        client._post = lambda path, body: posted.append((path, body)) or self._OK
+
+        client.add_nvr_devices(
+            [
+                {"ip": "10.0.0.51", "password": "secret", "model": "IP-5IRD4S4C4-28"},
+            ]
+        )
+
+        path, body = posted[0]
+        assert path == "createDevList"
+        assert "<ip>10.0.0.51</ip>" in body
+        assert '<password securityVer="1"><![CDATA[ENC]]></password>' in body
+        assert "<mac>" not in body  # manual-add omits mac
+
+    def test_password_mode_without_session_key_raises(self):
+        client = NvrClient("10.0.0.1", "admin", "pass")
+        client._logged_in = True
+        client._session_key = None
+        with pytest.raises(NvrApiError):
+            client.add_nvr_devices([{"ip": "10.0.0.51", "password": "secret"}])
+
+
 class TestEditNvrIpcPasswords:
     def test_edit_nvr_ipc_passwords_builds_expected_requests(self):
         client = NvrClient("10.0.0.1", "admin", "pass")

@@ -599,6 +599,89 @@ class NvrClient:
         self._check_response(data, "delDevList")
         return len(dev_ids)
 
+    # XML envelope blocks captured from the NVMS-9000 web UI "Quickly Add" flow.
+    _ADD_TYPES = (
+        "<types><manufacturer>"
+        '<enum displayName="IP CAM">TVT</enum>'
+        '<enum displayName="Onvif CAM">ONVIF</enum>'
+        '<enum displayName="HIKVISION">HIKVISION</enum>'
+        '<enum displayName="DAHUA">DAHUA</enum>'
+        "</manufacturer><protocolType>"
+        "<enum>TVT_IPCAMERA</enum><enum>ONVIF</enum>"
+        "</protocolType></types>"
+    )
+    _ADD_ITEMTYPE = '<itemType><manufacturer type="manufacturer"/><protocolType type="protocolType"/></itemType>'
+
+    def add_nvr_devices(self, devices: list[dict]) -> str:
+        """Add cameras as NVR channels via the ``createDevList`` CGI.
+
+        Request shapes captured from the NVMS-9000 web UI (NOT
+        ``addDevList``/``editDevList`` — those don't add channels on this
+        firmware). Two per-item modes, chosen automatically:
+
+        * **With an explicit ``password``** (manual-add): the password is
+          session-encrypted (``<password securityVer=...>`` CDATA, like
+          :meth:`edit_nvr_lan_device_network`). Use this for cameras whose
+          password differs from the NVR's default. ``mac`` not required.
+        * **Without a password** (quick-add of a discovered free device): the NVR
+          authenticates with its stored *default camera password* (the "Camera
+          Default Password" / ``queryDevDefaultPwd`` setting), so the channel only
+          comes ONLINE if the camera's password matches that default. Requires
+          ``mac``.
+
+        Device dict keys: ``ip`` (required); ``password`` (optional — selects the
+        mode); ``mac`` (required for the no-password mode); plus optional ``name``
+        (default = ip), ``port`` (9008), ``username`` ("admin"), ``manufacturer``
+        ("TVT"), ``protocol`` ("TVT_IPCAMERA"), ``model``, ``factory_name``
+        ("EAST"), ``access_type`` ("NORMAL"), ``local_eth`` ("eth0"), ``index`` (0).
+
+        Returns the raw response XML. Raises NvrApiError on a top-level failure
+        (e.g. errorCode 536871004 = NVR channel maximum reached).
+        """
+        self._require_login()
+        if not devices:
+            return ""
+        sec_attr = f' securityVer="{self._security_ver}"' if self._security_ver else ""
+        items = []
+        for d in devices:
+            name = d.get("name", d["ip"])
+            common = (
+                f"<name><![CDATA[{name}]]></name>"
+                f"<ip>{d['ip']}</ip>"
+                f"<port>{d.get('port', 9008)}</port>"
+                f"<userName><![CDATA[{d.get('username', 'admin')}]]></userName>"
+            )
+            pw = d.get("password")
+            if pw is not None:
+                if not self._session_key:
+                    raise NvrApiError("createDevList with password needs a session key; call login() first.")
+                enc = self._encrypt_for_session(pw, self._session_key)
+                common += f"<password{sec_attr}><![CDATA[{enc}]]></password>"
+            tail = (
+                f"<index>{d.get('index', 0)}</index>"
+                f"<manufacturer>{d.get('manufacturer', 'TVT')}</manufacturer>"
+                f"<protocolType>{d.get('protocol', 'TVT_IPCAMERA')}</protocolType>"
+                f'<productModel factoryName="{d.get("factory_name", "EAST")}">{d.get("model", "")}</productModel>'
+                f"<accessType>{d.get('access_type', 'NORMAL')}</accessType>"
+                '<rec per="5" post="10"/>'
+                "<snapSwitch>true</snapSwitch>"
+                "<buzzerSwitch>false</buzzerSwitch>"
+                "<popVideoSwitch>false</popVideoSwitch>"
+                "<frontEndOffline_popMsgSwitch>true</frontEndOffline_popMsgSwitch>"
+            )
+            if pw is None:
+                # quick-add of a discovered free device — carries L2 identity
+                tail += (
+                    f"<localEthName>{d.get('local_eth', 'eth0')}</localEthName>"
+                    f"<mac>{d['mac']}</mac>"
+                    "<allowAssignIP>true</allowAssignIP>"
+                )
+            items.append("<item>" + common + tail + "</item>")
+        content = self._ADD_TYPES + '<content type="list">' + self._ADD_ITEMTYPE + "".join(items) + "</content>"
+        data = self._post("createDevList", self._build_request_with_content(content))
+        self._check_response(data, "createDevList")
+        return data
+
     def edit_nvr_ipc_passwords(
         self,
         channel_ids: list[str],
