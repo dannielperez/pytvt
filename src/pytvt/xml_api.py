@@ -610,10 +610,7 @@ class NvrClient:
         "<enum>TVT_IPCAMERA</enum><enum>ONVIF</enum>"
         "</protocolType></types>"
     )
-    _ADD_ITEMTYPE = (
-        '<itemType><manufacturer type="manufacturer"/>'
-        '<protocolType type="protocolType"/></itemType>'
-    )
+    _ADD_ITEMTYPE = '<itemType><manufacturer type="manufacturer"/><protocolType type="protocolType"/></itemType>'
 
     def add_nvr_devices(self, devices: list[dict]) -> str:
         """Add cameras as NVR channels via the ``createDevList`` CGI.
@@ -644,7 +641,7 @@ class NvrClient:
         self._require_login()
         if not devices:
             return ""
-        sec_attr = f" securityVer=\"{self._security_ver}\"" if self._security_ver else ""
+        sec_attr = f' securityVer="{self._security_ver}"' if self._security_ver else ""
         items = []
         for d in devices:
             name = d.get("name", d["ip"])
@@ -680,13 +677,7 @@ class NvrClient:
                     "<allowAssignIP>true</allowAssignIP>"
                 )
             items.append("<item>" + common + tail + "</item>")
-        content = (
-            self._ADD_TYPES
-            + '<content type="list">'
-            + self._ADD_ITEMTYPE
-            + "".join(items)
-            + "</content>"
-        )
+        content = self._ADD_TYPES + '<content type="list">' + self._ADD_ITEMTYPE + "".join(items) + "</content>"
         data = self._post("createDevList", self._build_request_with_content(content))
         self._check_response(data, "createDevList")
         return data

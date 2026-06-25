@@ -272,12 +272,13 @@ class TestAddNvrDevices:
         client = NvrClient("10.0.0.1", "admin", "pass")
         client._logged_in = True
         posted: list[tuple[str, str]] = []
-        client._post = lambda path, body: (posted.append((path, body)) or self._OK)
+        client._post = lambda path, body: posted.append((path, body)) or self._OK
 
-        client.add_nvr_devices([
-            {"ip": "10.0.0.50", "mac": "AA:BB:CC:DD:EE:01",
-             "model": "IP-5IRD4S4C4-28", "name": "Cam 1"},
-        ])
+        client.add_nvr_devices(
+            [
+                {"ip": "10.0.0.50", "mac": "AA:BB:CC:DD:EE:01", "model": "IP-5IRD4S4C4-28", "name": "Cam 1"},
+            ]
+        )
 
         path, body = posted[0]
         assert path == "createDevList"
@@ -295,16 +296,18 @@ class TestAddNvrDevices:
         client._security_ver = "1"
         client._encrypt_for_session = lambda plaintext, session_key: "ENC"  # type: ignore[method-assign]
         posted: list[tuple[str, str]] = []
-        client._post = lambda path, body: (posted.append((path, body)) or self._OK)
+        client._post = lambda path, body: posted.append((path, body)) or self._OK
 
-        client.add_nvr_devices([
-            {"ip": "10.0.0.51", "password": "secret", "model": "IP-5IRD4S4C4-28"},
-        ])
+        client.add_nvr_devices(
+            [
+                {"ip": "10.0.0.51", "password": "secret", "model": "IP-5IRD4S4C4-28"},
+            ]
+        )
 
         path, body = posted[0]
         assert path == "createDevList"
         assert "<ip>10.0.0.51</ip>" in body
-        assert "<password securityVer=\"1\"><![CDATA[ENC]]></password>" in body
+        assert '<password securityVer="1"><![CDATA[ENC]]></password>' in body
         assert "<mac>" not in body  # manual-add omits mac
 
     def test_password_mode_without_session_key_raises(self):
