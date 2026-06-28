@@ -329,6 +329,129 @@ class TestPlatformSDKClientHelpers:
 
 
 # ---------------------------------------------------------------------------
+# Live online-state merge (update_state supersedes create-time nOnline)
+# ---------------------------------------------------------------------------
+
+
+class TestLiveOnlineMerge:
+    """Regression for the create-time `.online` bug (FIELD_LEARNINGS.md).
+
+    The PlatformSDK emits each node once via NODEOPTTYPE_CREATE (carrying a
+    create-time `nOnline`, typically 0 at enumeration), then streams live
+    status as separate `update_state` notifications (`nConnState` keyed by
+    `ulNodeID`).  `list_resources_normalized()` must merge the latest
+    `update_state` so `.online` reflects live state, not the stale create flag.
+    """
+
+    def _client(self, state: _PlatSessionState) -> PlatformSDKClient:
+        client = PlatformSDKClient(ns_lib=MagicMock(), host="1.2.3.4", port=6003)
+        client._state = state
+        client._authenticated = True
+        return client
+
+    def _add_create(
+        self,
+        state: _PlatSessionState,
+        *,
+        node_id: int,
+        name: str,
+        online: int,
+        node_type: int = pc.NODETYPE_DEVICE,
+    ) -> None:
+        state.all_nodes.append(
+            {
+                "_opt_type": "create",
+                "ulNodeID": node_id,
+                "ulParentID": 1,
+                "guidNodeID": "deadbeef-0000-0000-0000000000000000",
+                "guidParentID": "00000000-0000-0000-0000000000000000",
+                "szName": name,
+                "nNodeType": node_type,
+                "nDevType": pc.DEVTYPE_NVR,
+                "nOnline": online,
+                "nChlCount": 0,
+                "nChlNO": -1,
+                "szIp": "10.0.0.1",
+                "bisSupportFaceMatch": False,
+                "usSensorInNum": 0,
+                "usAlarmOutNum": 0,
+            }
+        )
+
+    def _add_update_state(self, state: _PlatSessionState, *, node_id: int, conn_state: int) -> None:
+        state.all_nodes.append(
+            {
+                "_opt_type": "update_state",
+                "ulNodeID": node_id,
+                "nConnState": conn_state,
+                "szName": "",
+                "szIp": "",
+            }
+        )
+
+    def test_update_state_brings_node_online(self) -> None:
+        # Create-time reads offline; a later update_state reports it online.
+        state = _PlatSessionState()
+        self._add_create(state, node_id=2, name="NVR1", online=0)
+        self._add_update_state(state, node_id=2, conn_state=1)
+        [model] = self._client(state).list_resources_normalized()
+        assert model.online is True
+        assert model.raw_data["_live_conn_state"] == 1
+
+    def test_update_state_takes_node_offline(self) -> None:
+        # Create-time reads online; a later update_state reports it offline.
+        state = _PlatSessionState()
+        self._add_create(state, node_id=2, name="NVR1", online=1)
+        self._add_update_state(state, node_id=2, conn_state=0)
+        [model] = self._client(state).list_resources_normalized()
+        assert model.online is False
+
+    def test_latest_update_state_wins(self) -> None:
+        # Several updates arrive in order; the last one is authoritative.
+        state = _PlatSessionState()
+        self._add_create(state, node_id=2, name="NVR1", online=0)
+        self._add_update_state(state, node_id=2, conn_state=1)
+        self._add_update_state(state, node_id=2, conn_state=0)
+        self._add_update_state(state, node_id=2, conn_state=1)
+        [model] = self._client(state).list_resources_normalized()
+        assert model.online is True
+
+    def test_node_without_update_state_keeps_create_value(self) -> None:
+        # No update_state for this node → create-time flag is preserved verbatim.
+        state = _PlatSessionState()
+        self._add_create(state, node_id=2, name="NVR1", online=1)
+        [model] = self._client(state).list_resources_normalized()
+        assert model.online is True
+        assert "_live_conn_state" not in model.raw_data
+
+    def test_golden_fleet_create_all_offline_then_live(self) -> None:
+        # GOLDEN: enumeration reads all 3 NVRs offline; live updates show 2 up,
+        # 1 down.  The pre-fix normalizer reported 0 online (create-time only).
+        state = _PlatSessionState()
+        self._add_create(state, node_id=10, name="NVR-A", online=0)
+        self._add_create(state, node_id=11, name="NVR-B", online=0)
+        self._add_create(state, node_id=12, name="NVR-C", online=0)
+        self._add_update_state(state, node_id=10, conn_state=1)
+        self._add_update_state(state, node_id=11, conn_state=1)
+        self._add_update_state(state, node_id=12, conn_state=0)
+
+        models = {m.node_id: m for m in self._client(state).list_resources_normalized()}
+        online_count = sum(1 for m in models.values() if m.online)
+        assert online_count == 2
+        assert models[10].online is True
+        assert models[11].online is True
+        assert models[12].online is False
+
+    def test_update_state_does_not_force_area_online(self) -> None:
+        # Areas never report online; a stray update_state must not flip it to a bool.
+        state = _PlatSessionState()
+        self._add_create(state, node_id=1, name="Root", online=0, node_type=pc.NODETYPE_AREA)
+        self._add_update_state(state, node_id=1, conn_state=1)
+        [model] = self._client(state).list_resources_normalized()
+        assert model.online is None
+
+
+# ---------------------------------------------------------------------------
 # Write scaffolding and unreachable APIs
 # ---------------------------------------------------------------------------
 
