@@ -763,17 +763,38 @@ class PlatformSDKClient:
     # --- Normalized resource views ---------------------------------------
 
     def list_resources_normalized(self) -> list[PlatformResource]:
-        """Return normalized PlatformResource models for every known node."""
+        """Return normalized PlatformResource models for every known node.
+
+        Only nodes created via NODEOPTTYPE_CREATE carry a full
+        ``_Plat_ResNodeInfo`` payload, and that payload's ``nOnline`` flag
+        reflects only the **create-time** state.  Live status arrives later as
+        separate ``update_state`` notifications (``nConnState`` keyed by
+        ``ulNodeID``).  Merge the latest ``update_state`` per node so ``.online``
+        reflects the current connection state, not the stale create-time value
+        (which is typically all-offline at enumeration).
+        """
 
         if not self._authenticated or self._state is None:
             raise SessionExpired("PlatformSDK session not authenticated.")
-        # Only nodes created via NODEOPTTYPE_CREATE carry a full _Plat_ResNodeInfo
-        # payload.  Status-updates (_opt_type == "update_state") don't, so skip.
+        # Latest update_state per node id wins — notifications arrive in order,
+        # so a later row supersedes an earlier one.  nConnState == 1 means online.
+        latest_conn_state: dict[int, int] = {}
+        for raw in self._state.all_nodes:
+            if raw.get("_opt_type") == "update_state":
+                latest_conn_state[int(raw.get("ulNodeID", 0))] = int(raw.get("nConnState", 0))
         out: list[PlatformResource] = []
         for raw in self._state.all_nodes:
             if raw.get("_opt_type") != "create":
                 continue
-            out.append(_resource_to_model(raw))
+            conn = latest_conn_state.get(int(raw.get("ulNodeID", 0)))
+            if conn is None:
+                out.append(_resource_to_model(raw))
+                continue
+            # A later update_state supersedes the create-time online flag.
+            merged = dict(raw)
+            merged["nOnline"] = 1 if conn == 1 else 0
+            merged["_live_conn_state"] = conn
+            out.append(_resource_to_model(merged))
         return out
 
     def list_areas(self) -> list[PlatformResource]:
