@@ -9,12 +9,13 @@ From a live WAN-outage response: pulled the NVMS platform inventory and repointe
   Companion .so set (libNetCommon, libNodeManager, libShareLib, libuuid, libcrypto.so.1.1)
   must be on `LD_LIBRARY_PATH`; the trimmed vendor bundle omits deps.
 - Login: dedicated/admin account, port **6003**.
-- **BUG — online status is wrong:** `list_devices_normalized()` `.online` reflects the
-  **create-time** notification only (reads all-offline). Live status arrives in separate
-  `update_state` notifications carrying `nConnState` keyed by `ulNodeID`, which the normalizer
-  **drops**. Fix: merge latest `update_state.nConnState==1` per node to compute live online.
-  Also `list_resources()` must **settle** (poll until node count stable) after login or it
-  returns 0.
+- **BUG (FIXED 1.2.1) — online status was wrong:** `list_devices_normalized()` `.online`
+  reflected the **create-time** notification only (reads all-offline). Live status arrives in
+  separate `update_state` notifications carrying `nConnState` keyed by `ulNodeID`, which the
+  normalizer **dropped**. `list_resources_normalized()` now merges the latest
+  `update_state.nConnState==1` per node to compute live online (`TestLiveOnlineMerge`).
+  Note: `list_resources()` must still **settle** (poll until node count stable) after login or
+  it returns 0.
 - `stPlat_ResNodeInfo` has **no serial number** (only node id/name/type/online/ip/channels) —
   even in the newest header. The "IP/Domain" field is a real IP/DDNS OR a numeric **auto-report
   report ID** for "Initiatively report" devices. Device serials come from the device SDK, not here.
