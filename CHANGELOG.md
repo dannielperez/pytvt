@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.1] — 2026-06-28
+
+### Fixed
+
+- **PlatformSDK live online status** (`platform_sdk/platform_backend.py`).
+  `list_resources_normalized()` (and the `list_devices_normalized()` /
+  `list_channels_normalized()` views built on it) reported each node's
+  **create-time** `nOnline` flag — which is typically all-offline at
+  enumeration — and silently dropped the live `update_state` notifications
+  (`nConnState` keyed by `ulNodeID`) that carry current connectivity. The
+  normalizer now merges the **latest** `update_state` per node so `.online`
+  reflects live state (`nConnState == 1` → online), preserving the create-time
+  value only when no update arrived. Fixes wrong NVR/authority online counts in
+  downstream consumers. Documented as a confirmed field bug in
+  `docs/FIELD_LEARNINGS.md`; covered by a GOLDEN regression
+  (`TestLiveOnlineMerge` in `tests/test_platform_sdk.py`).
+
 ## [1.2.0] — 2026-06-20
 
 ### Added
