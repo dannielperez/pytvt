@@ -741,6 +741,7 @@ class TestNodeEncodeInfo:
         )
         assert ch1.event.fps == 15 and ch1.event.quality == "higher" and ch1.event.audio is False
         assert ch1.supported_resolutions == ("2560x1440", "1920x1080")
+        assert ch1.supported_codecs == ("h264", "h265", "h265p")
         assert ch1.allowed_bitrates == (1024, 2048, 3072, 4096)
 
     def test_lenient_parse_of_malformed_name(self, session):
