@@ -1,0 +1,26 @@
+No.	Type	Record Time	Node Name	Details
+1	Monitor offline	2020-01-01 00:00:00	NVR-0015_IP Camera	
+2	Monitor offline	2020-01-01 00:00:02	NVR-0015_IP Camera	
+3	Monitor online	2020-01-01 00:00:12	NVR-0015_IP Camera	
+4	Monitor online	2020-01-01 00:00:20	NVR-0015_IP Camera	
+5	Monitor online	2020-01-01 00:00:22	NVR-0015_IP Camera	
+6	Monitor offline	2020-01-01 00:00:30	NVR-0015_IP Camera	
+7	Monitor offline	2020-01-01 00:00:43	NVR-0015_IP Camera	
+8	Monitor online	2020-01-01 00:00:44	NVR-0015_IP Camera	
+9	Monitor online	2020-01-01 00:00:50	NVR-0015_IP Camera	
+10	Monitor offline	2020-01-01 00:00:55	NVR-0015_IP Camera	
+11	Monitor offline	2020-01-01 00:00:58	NVR-0015_IP Camera	
+12	Monitor online	2020-01-01 00:01:07	NVR-0015_IP Camera	
+13	Monitor offline	2020-01-01 00:01:17	NVR-0015_IP Camera	
+14	Monitor online	2020-01-01 00:01:46	NVR-0015_IP Camera	
+15	Monitor online	2020-01-01 00:01:50	NVR-0015_IP Camera	
+16	Monitor offline	2020-01-01 00:02:15	NVR-0015_IP Camera	
+17	Server offline	2020-01-01 13:33:21	Management Server	
+18	Server online	2020-01-01 13:38:39	Management Server	
+19	Decoder online	2020-01-01 13:38:53	DEC-22	
+20	Encoding device online	2020-01-01 13:45:56	NVR-0001	
+21	Encoding device offline	2020-01-01 14:11:47	NVR-0001	
+22	Encoding device online	2020-01-01 14:16:24	NVR-0001	
+23	Monitor online	2020-01-01 14:47:52	NVR-0219_Camera 6	
+24	Monitor offline	2020-01-01 14:48:03	NVR-0219_Camera 6	
+25	Decoder offline	2020-01-01 22:41:13	DEC-15	
