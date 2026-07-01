@@ -211,6 +211,7 @@ class NodeEncodeInfo:
     continuous: EncodeStream | None  # <an>
     event: EncodeStream | None  # <ae>
     supported_resolutions: tuple[str, ...]  # from <mainCaps>
+    supported_codecs: tuple[str, ...]  # from <mainCaps supEnct=...>, e.g. ("h264","h265","h265p")
     allowed_bitrates: tuple[int, ...]  # from <mainStreamQualityNote>
 
 
@@ -886,6 +887,8 @@ class DeviceSession:
             mn = re.search(r"<main\s+([^/>]*)/?>", body)
             main = _xml_attrs(mn.group(1)) if mn else {}
             codec = main.get("enct", "")
+            caps = re.search(r"<mainCaps\s+([^>]*)>", body)
+            sup_enct = _xml_attrs(caps.group(1)).get("supEnct", "") if caps else ""
             note = re.search(r"<mainStreamQualityNote>([^<]*)</mainStreamQualityNote>", body)
             bitrates = tuple(int(x) for x in (note.group(1).split(",") if note else []) if x.strip().isdigit())
             out.append(
@@ -899,6 +902,7 @@ class DeviceSession:
                     continuous=self._encode_stream("continuous", _tag_attrs(body, "an"), codec),
                     event=self._encode_stream("event", _tag_attrs(body, "ae"), codec),
                     supported_resolutions=tuple(re.findall(r"<res[^>]*>([^<]+)</res>", body)),
+                    supported_codecs=tuple(x for x in sup_enct.split(",") if x),
                     allowed_bitrates=bitrates,
                 )
             )
@@ -983,26 +987,33 @@ class DeviceSession:
         an = _merge(cur.continuous, continuous)
         ae = _merge(cur.event, event)
 
-        def _render(tag: str, a: dict) -> str:
+        def _tag(tag: str, a: dict) -> str:
             order = ["res", "fps", "bitType", "level", "QoI", "audio", "type"]
             body = " ".join(f'{k}="{a[k]}"' for k in order if a.get(k) not in (None, ""))
-            main = f'<main enct="{enct}"'
-            if cur.a_gop:
-                main += f' aGOP="{cur.a_gop}"'
-            if cur.m_gop:
-                main += f' mGOP="{cur.m_gop}"'
-            return f'<item id="{node_id}"><{tag} {body}/>{main}/></item>'
+            return f"<{tag} {body}/>"
 
+        main = f'<main enct="{enct}"'
+        if cur.a_gop:
+            main += f' aGOP="{cur.a_gop}"'
+        if cur.m_gop:
+            main += f' mGOP="{cur.m_gop}"'
+        main += "/>"
+        # Both <an> and <ae> MUST go in a SINGLE <item>: the device silently
+        # applies only the first item when the same id appears twice.
+        item = f'<item id="{node_id}">{_tag("an", an)}{_tag("ae", ae)}{main}</item>'
         req = (
             '<?xml version="1.0" encoding="utf-8" ?>'
             '<request version="1.0" systemType="NVMS-9000" clientType="WEB" url="editNodeEncodeInfo">'
-            f'<content type="list" total="2">{_render("an", an)}{_render("ae", ae)}</content></request>'
+            f'<content type="list" total="1">{item}</content></request>'
         )
         resp = self.api_call("editNodeEncodeInfo", request=req)
         if _xml_status(resp) != "success":
             raise NetSdkError(f"editNodeEncodeInfo(ch{channel}) rejected: {resp[:160]}", -1)
         if not verify:
             return cur
+        # NOTE: the device serves cached encode config for the life of a session,
+        # so this same-session re-read can be stale; reconnect for authoritative
+        # verification.
         return {n.channel: n for n in self.node_encode_info()}[channel]
 
     # ── Log search ──────────────────────────────────────────────
