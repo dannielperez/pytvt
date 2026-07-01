@@ -235,6 +235,7 @@ class RecordSchedule:
 # Device CGI XML is NOT guaranteed well-formed (camera names routinely contain
 # raw '&' and other chars that break strict parsers), so parse with regex.
 
+
 def _xml_status(xml: str) -> str:
     m = re.search(r"<status>\s*([^<\s]+)\s*</status>", xml or "")
     return m.group(1) if m else ""
@@ -251,7 +252,7 @@ def _xml_items(xml: str):
 
 
 def _node_channel(node_id: str) -> int:
-    """"{0000000C-...}" -> 12 (1-based channel number)."""
+    """ "{0000000C-...}" -> 12 (1-based channel number)."""
     try:
         return int(node_id[1:9], 16)
     except (ValueError, IndexError):
@@ -259,7 +260,20 @@ def _node_channel(node_id: str) -> int:
 
 
 def _node_guid(channel: int) -> str:
-    return "{%08X-0000-0000-0000-000000000000}" % channel
+    return f"{{{channel:08X}-0000-0000-0000-000000000000}}"
+
+
+def _tag_attrs(body: str, tag: str) -> dict[str, str]:
+    """Attributes of the first ``<tag ...>`` element in ``body``."""
+    t = re.search(rf"<{tag}\s+([^/>]*)/?>", body)
+    return _xml_attrs(t.group(1)) if t else {}
+
+
+def _tag_switch(body: str, tag: str) -> bool:
+    """``<tag><switch>true</switch></tag>`` -> True."""
+    b = re.search(rf"<{tag}>(.*?)</{tag}>", body, re.S)
+    s = re.search(r"<switch>(.*?)</switch>", b.group(1)) if b else None
+    return bool(s) and s.group(1).strip() == "true"
 
 
 @dataclass(frozen=True, slots=True)
@@ -872,15 +886,8 @@ class DeviceSession:
             mn = re.search(r"<main\s+([^/>]*)/?>", body)
             main = _xml_attrs(mn.group(1)) if mn else {}
             codec = main.get("enct", "")
-
-            def _attrs(tag: str) -> dict:
-                t = re.search(rf"<{tag}\s+([^/>]*)/?>", body)
-                return _xml_attrs(t.group(1)) if t else {}
-
             note = re.search(r"<mainStreamQualityNote>([^<]*)</mainStreamQualityNote>", body)
-            bitrates = tuple(
-                int(x) for x in (note.group(1).split(",") if note else []) if x.strip().isdigit()
-            )
+            bitrates = tuple(int(x) for x in (note.group(1).split(",") if note else []) if x.strip().isdigit())
             out.append(
                 NodeEncodeInfo(
                     channel=_node_channel(node_id),
@@ -889,8 +896,8 @@ class DeviceSession:
                     codec=codec,
                     a_gop=int(main.get("aGOP", 0) or 0),
                     m_gop=int(main.get("mGOP", 0) or 0),
-                    continuous=self._encode_stream("continuous", _attrs("an"), codec),
-                    event=self._encode_stream("event", _attrs("ae"), codec),
+                    continuous=self._encode_stream("continuous", _tag_attrs(body, "an"), codec),
+                    event=self._encode_stream("event", _tag_attrs(body, "ae"), codec),
                     supported_resolutions=tuple(re.findall(r"<res[^>]*>([^<]+)</res>", body)),
                     allowed_bitrates=bitrates,
                 )
@@ -906,21 +913,15 @@ class DeviceSession:
         for node_id, body in _xml_items(xml):
             nm = re.search(r"<name>(.*?)</name>", body, re.S)
             name = re.sub(r"<!\[CDATA\[|\]\]>", "", nm.group(1) if nm else "").strip()
-
-            def _sw(tag: str) -> bool:
-                b = re.search(rf"<{tag}>(.*?)</{tag}>", body, re.S)
-                s = re.search(r"<switch>(.*?)</switch>", b.group(1)) if b else None
-                return bool(s) and s.group(1).strip() == "true"
-
             out.append(
                 RecordSchedule(
                     channel=_node_channel(node_id),
                     node_id=node_id,
                     name=name,
-                    schedule=_sw("scheduleRec"),
-                    motion=_sw("motionRec"),
-                    alarm=_sw("alarmRec"),
-                    intelligent=_sw("intelligentRec"),
+                    schedule=_tag_switch(body, "scheduleRec"),
+                    motion=_tag_switch(body, "motionRec"),
+                    alarm=_tag_switch(body, "alarmRec"),
+                    intelligent=_tag_switch(body, "intelligentRec"),
                 )
             )
         return out
@@ -969,8 +970,12 @@ class DeviceSession:
             }
             for k, v in (override or {}).items():
                 key = {
-                    "resolution": "res", "fps": "fps", "bitrate_type": "bitType",
-                    "quality": "level", "max_bitrate": "QoI", "audio": "audio",
+                    "resolution": "res",
+                    "fps": "fps",
+                    "bitrate_type": "bitType",
+                    "quality": "level",
+                    "max_bitrate": "QoI",
+                    "audio": "audio",
                 }.get(k, k)
                 base[key] = "ON" if (k == "audio" and v) else "OFF" if k == "audio" else v
             return base
