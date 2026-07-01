@@ -12,13 +12,14 @@ catalog through this boundary instead of hard-coding a model→feature table.
 
 Two vocabularies are involved:
 
-* **ENS model** — the Unique Security part number, e.g. ``IP-5IRPC4A30``.
+* **Catalog model** — the OEM/reseller catalog part number, e.g.
+  ``IP-5IRPC4A30``. Devices rebranded from the base TVT unit report this form.
 * **TVT model** — the manufacturer part number that flows through the SDK
   (see :class:`pytvt.models.Channel.model`), e.g. ``TD-9742A3-PC``, sometimes
   with a hardware-variant suffix like ``TD-9544S4-C(D/PE/AW2)``.
 
 :func:`normalize_model` accepts either form (with or without the suffix) and
-resolves it to the canonical ENS key; the lookup helpers accept either form.
+resolves it to the canonical catalog key; the lookup helpers accept either form.
 
 Note on the feature→event mapping: the SDK's ``SmartEventType`` codes do not
 cleanly separate every product feature (e.g. "line crossing" and "intrusion"
@@ -83,7 +84,7 @@ FEATURE_SMART_EVENTS: dict[CameraFeature, tuple[SmartEventType, ...]] = {
 }
 
 
-# Per-model supported features, keyed by ENS model. Transcribed from the TVT
+# Per-model supported features, keyed by catalog model. Transcribed from the TVT
 # "Functionality list overview" matrix; the trailing comment is the base TVT
 # model. Keep this table sorted the same way as the source matrix.
 MODEL_CAPABILITIES: dict[str, frozenset[CameraFeature]] = {
@@ -287,10 +288,10 @@ MODEL_CAPABILITIES: dict[str, frozenset[CameraFeature]] = {
 }
 
 
-# Base TVT model → ENS model. Built from MODEL_CAPABILITIES comments; when two
-# ENS variants share a base TVT model they carry identical feature sets, so a
-# single representative ENS is fine here.
-_TVT_TO_ENS: dict[str, str] = {
+# Base TVT model → catalog model. Built from MODEL_CAPABILITIES comments; when
+# two catalog variants share a base TVT model they carry identical feature sets,
+# so a single representative catalog key is fine here.
+_TVT_TO_CATALOG: dict[str, str] = {
     "TD-9443A3BH-A-LR": "IP-5IR4A3H4-MZ-LR",
     "TD-9443A3BH-LR": "IP-5IR4A3B4-MZ-LR",
     "TD-9483E3B": "IP-5IR8E3B3/MZ",
@@ -315,22 +316,22 @@ def _strip_variant_suffix(model: str) -> str:
 
 
 def normalize_model(model: str) -> str | None:
-    """Resolve an ENS or TVT model string to its canonical ENS key.
+    """Resolve a catalog or TVT model string to its canonical catalog key.
 
     Accepts either vocabulary, with or without a variant suffix. Returns the
-    canonical ENS key present in :data:`MODEL_CAPABILITIES`, or ``None`` if the
-    model is not in the catalog.
+    canonical catalog key present in :data:`MODEL_CAPABILITIES`, or ``None`` if
+    the model is not in the catalog.
     """
     if not model:
         return None
     candidate = _strip_variant_suffix(model).upper()
     if candidate in MODEL_CAPABILITIES:
         return candidate
-    return _TVT_TO_ENS.get(candidate)
+    return _TVT_TO_CATALOG.get(candidate)
 
 
 def is_known_model(model: str) -> bool:
-    """Return ``True`` if the model (ENS or TVT) is present in the catalog."""
+    """Return ``True`` if the model (catalog or TVT) is present in the catalog."""
     return normalize_model(model) is not None
 
 
@@ -356,5 +357,5 @@ def smart_events_for_model(model: str) -> frozenset[SmartEventType]:
 
 
 def models_supporting(feature: CameraFeature) -> frozenset[str]:
-    """Return the ENS model keys that support ``feature``."""
+    """Return the catalog model keys that support ``feature``."""
     return frozenset(m for m, feats in MODEL_CAPABILITIES.items() if feature in feats)
