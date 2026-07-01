@@ -6,7 +6,7 @@ import pytest
 
 from pytvt.device_sdk.constants import SmartEventType
 from pytvt.device_sdk.model_capabilities import (
-    _TVT_TO_ENS,
+    _TVT_TO_CATALOG,
     FEATURE_SMART_EVENTS,
     MODEL_CAPABILITIES,
     CameraFeature,
@@ -45,15 +45,15 @@ def test_feature_smart_events_reference_real_codes() -> None:
             assert isinstance(event, SmartEventType)
 
 
-def test_tvt_alias_targets_are_valid_ens_keys() -> None:
-    for ens in _TVT_TO_ENS.values():
-        assert ens in MODEL_CAPABILITIES
+def test_tvt_alias_targets_are_valid_catalog_keys() -> None:
+    for catalog_key in _TVT_TO_CATALOG.values():
+        assert catalog_key in MODEL_CAPABILITIES
 
 
 # ── Model normalization ─────────────────────────────────────────────
 
 
-def test_normalize_accepts_ens_model() -> None:
+def test_normalize_accepts_catalog_model() -> None:
     assert normalize_model("IP-5IRPC4A30") == "IP-5IRPC4A30"
 
 
@@ -85,7 +85,7 @@ def test_is_known_model() -> None:
 
 
 def test_people_counting_camera_supports_people_counting_only() -> None:
-    # The IP-5IRPC4A30 is the dedicated people-counting camera in the fleet.
+    # The IP-5IRPC4A30 is the dedicated people-counting camera in the catalog.
     feats = features_for_model("IP-5IRPC4A30")
     assert CameraFeature.PEOPLE_COUNTING in feats
     assert CameraFeature.HEAT_MAP not in feats

@@ -39,8 +39,8 @@ class NvrApiResponseShapeError(NvrApiError):
     Firmware drift can return ``<status>success</status>`` with a payload whose
     structure the parser does not recognize (e.g. a missing ``<content>``
     container, or a declared ``total`` that does not match the parsed item
-    count). Returning an empty list in that case is a silent false-empty
-    (#512-class). Callers should treat this as a *fetch failure*, NOT a genuine
+    count). Returning an empty list in that case is a silent false-empty.
+    Callers should treat this as a *fetch failure*, NOT a genuine
     empty result, so it must be distinguishable from ``NvrApiError`` (a reported
     API error) — hence its own subclass.
     """

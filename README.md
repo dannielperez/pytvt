@@ -94,10 +94,10 @@ LAN device IP changes use the native SDK first. The operator-safe sequence is:
 4. Verify the same camera at the new IP before touching NVR channel mappings or site gateway LAN settings.
 
 ```bash
-python -m pytvt sdk scan-match --mac AA:BB:CC:DD:EE:FF --ip ***REMOVED*** --sdk-path /opt/tvt-sdk
-python -m pytvt sdk modify-ip --mac AA:BB:CC:DD:EE:FF --old-ip ***REMOVED*** --new-ip ***REMOVED*** --mask 255.255.255.0 --gateway ***REMOVED*** --sdk-path /opt/tvt-sdk --dry-run
-python -m pytvt sdk modify-ip --mac AA:BB:CC:DD:EE:FF --old-ip ***REMOVED*** --new-ip ***REMOVED*** --mask 255.255.255.0 --gateway ***REMOVED*** --username admin --password "$TVT_PASSWORD" --sdk-path /opt/tvt-sdk --verify-timeout-ms 5000 --yes
-python -m pytvt sdk verify-ip --mac AA:BB:CC:DD:EE:FF --new-ip ***REMOVED*** --sdk-path /opt/tvt-sdk --timeout-ms 5000
+python -m pytvt sdk scan-match --mac AA:BB:CC:DD:EE:FF --ip 192.0.2.50 --sdk-path /opt/tvt-sdk
+python -m pytvt sdk modify-ip --mac AA:BB:CC:DD:EE:FF --old-ip 192.0.2.50 --new-ip 198.51.100.50 --mask 255.255.255.0 --gateway 198.51.100.1 --sdk-path /opt/tvt-sdk --dry-run
+python -m pytvt sdk modify-ip --mac AA:BB:CC:DD:EE:FF --old-ip 192.0.2.50 --new-ip 198.51.100.50 --mask 255.255.255.0 --gateway 198.51.100.1 --username admin --password "$TVT_PASSWORD" --sdk-path /opt/tvt-sdk --verify-timeout-ms 5000 --yes
+python -m pytvt sdk verify-ip --mac AA:BB:CC:DD:EE:FF --new-ip 198.51.100.50 --sdk-path /opt/tvt-sdk --timeout-ms 5000
 ```
 
 On Linux this uses `NET_SDK_SetDeviceIP` when available, otherwise the header-documented `NET_SDK_ModifyDeviceNetInfo(NET_SDK_DEVICE_IP_INFO*)`. On macOS the MonitorClient SDK exports the separate `NET_CLIENT_RequestModifyDeviceIp` capability. If the macOS SDK is x86_64-only on Apple Silicon, run an x86_64 Python under Rosetta, for example `arch -x86_64 python -m pytvt ...`, or supply a universal/arm64 SDK build.

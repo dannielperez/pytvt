@@ -88,7 +88,7 @@ class SiteValidationResult:
         """True when every declared expectation is satisfied."""
         return not self.error and not self.issues
 
-    # Backwards-compat alias so CLI/downstream application callers can use the same
+    # Backwards-compat alias so CLI/consumer callers can use the same
     # name (``success``) as other workflow results.
     @property
     def success(self) -> bool:
