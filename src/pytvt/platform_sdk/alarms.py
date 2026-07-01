@@ -4,7 +4,7 @@ Raw alarm data coming from the management server takes several shapes
 (alarm-zone ``stPlat_AlarmZoneListMsg`` rows, alarm-log entries when
 available, event callbacks).  This module maps all of them into a single
 neutral :class:`PlatformAlarmEvent` shape that downstream consumers
-(UniqueOS adapter, CLI) can treat uniformly.
+(a consumer's adapter, the CLI) can treat uniformly.
 """
 
 from __future__ import annotations

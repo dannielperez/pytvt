@@ -30,7 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ParsedAlarmFrame` owns the alarm push/listener **wire format** (the `b"TVT\0"` magic, the
   little-endian struct layout, the length-prefixed/HTTP/JSON variants, and the `TVT_ALARM_CODES`
   table) — vendor protocol logic that previously lived hand-rolled in a downstream Django app
-  (UniqueOS `alarm_receiver`), now consolidated at the SDK boundary (CLAUDE.md §4). Transport- and
+  (a consumer's `alarm_receiver`), now consolidated at the SDK boundary. Transport- and
   framework-agnostic: it returns wire fields only (`event_code`, `event_type`, `channel`,
   `device_id`, `parse_format`, `parsed`); source address / receive time / persistence stay with the
   caller. Never raises on malformed input (unparseable → `parse_format="unknown"` with a hex/ascii
@@ -44,14 +44,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `get_platform_inventory_snapshot()` now returns a `fetch_status` map alongside `capabilities`,
   reporting each section as `"ok"` / `"unavailable"` / `"failed"` via a new `_safe_call_status`
   helper. This lets a consumer distinguish a *confirmed-fetched empty* section from a *fetch
-  failure* — the SDK-boundary half of the UniqueOS #512 "don't sweep on a failed fetch" fix
-  (`tvt_platform/sync.py` already consumes it, with a backward-compatible fallback when the key is
-  absent). `_safe_call` is retained unchanged for other callers. Backward compatible (additive key).
+  failure* — the SDK-boundary half of a downstream consumer's "don't sweep on a failed fetch" fix
+  (the consumer's platform sync already consumes it, with a backward-compatible fallback when the key
+  is absent). `_safe_call` is retained unchanged for other callers. Backward compatible (additive key).
 - **`query_channels` signals unrecognized response shape** (`xml_api.py`). On a `success` status,
   `query_channels()` now raises the new `NvrApiResponseShapeError` (an `NvrApiError` subclass) when
   the `queryDevList` payload has no `<content>` container, or declares `total="N">0` yet parses zero
   channel items — i.e. firmware shape-drift. Previously the `<item>` regex silently matched zero and
-  returned `[]`, indistinguishable from a genuinely empty channel list (the residual #512-class risk).
+  returned `[]`, indistinguishable from a genuinely empty channel list (the residual false-empty risk).
   A genuine empty (`<content total="0">`) still returns `[]`. Callers can catch the subclass to treat
   shape-drift as a *fetch failure*, not a real empty.
 

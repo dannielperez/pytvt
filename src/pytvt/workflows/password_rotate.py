@@ -149,7 +149,7 @@ def rotate_nvr_channel_passwords(
     """Rotate native IPC admin password across an NVR's registered channels.
 
     The *client* must already be logged in (its ``login()`` method called by
-    the caller). This lets UniqueOS reuse an existing session.
+    the caller). This lets a downstream consumer reuse an existing session.
 
     Args:
         client: An authenticated :class:`~pytvt.NvrClient`.

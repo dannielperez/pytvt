@@ -1,8 +1,8 @@
 """Composite inventory snapshot API for the PlatformSDK backend.
 
 Stitches together topology, health, classification and alarm
-normalization into one JSON-safe dict suitable for export into UniqueOS
-or for CLI display.  Gracefully tolerates missing capabilities.
+normalization into one JSON-safe dict suitable for export into a downstream
+consumer or for CLI display.  Gracefully tolerates missing capabilities.
 """
 
 from __future__ import annotations
@@ -39,8 +39,8 @@ def _safe_call_status(fn: Any, default: Any) -> tuple[Any, str]:
     * ``"unavailable"`` — the capability is not supported by this client;
     * ``"failed"``      — the call raised (transport/parse error, etc.).
 
-    This lets a caller tell a *confirmed-empty* section from a *fetch failure*
-    (the durable half of issue #512): an empty list with ``"ok"`` is genuinely
+    This lets a caller tell a *confirmed-empty* section from a *fetch failure*:
+    an empty list with ``"ok"`` is genuinely
     empty and may be swept, while ``"failed"`` must never be treated as empty.
     """
     try:
@@ -125,7 +125,7 @@ def get_platform_inventory_snapshot(client: Any) -> dict[str, Any]:
 
     return {
         "capabilities": capabilities,
-        # Per-section fetch status (#512 durable signal, CLAUDE.md §4). Lets the
+        # Per-section fetch status. Lets the
         # consumer tell a confirmed-fetched empty section from a fetch failure.
         # devices/channels/areas all derive from `resources`, so they share it.
         "fetch_status": {
