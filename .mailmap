@@ -1,7 +1,7 @@
 # Mailmap to ensure consistent contributor attribution
 # https://git-scm.com/docs/gitmailmap
 
-# Danniel Perez primary mapping (all commits should map to this canonical identity)
-Danniel Perez <***REMOVED***> <***REMOVED***>
-Danniel Perez <***REMOVED***> Danniel Perez <danniel@example.com>
-Danniel Perez <***REMOVED***> dperez <***REMOVED***>
+# Canonical maintainer identity (GitHub noreply address; no personal email exposed)
+Danniel Perez <43552690+dannielperez@users.noreply.github.com> <43552690+dannielperez@users.noreply.github.com>
+Danniel Perez <43552690+dannielperez@users.noreply.github.com> Danniel Perez <danniel@example.com>
+Danniel Perez <43552690+dannielperez@users.noreply.github.com> dperez <43552690+dannielperez@users.noreply.github.com>

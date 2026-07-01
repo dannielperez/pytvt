@@ -442,9 +442,9 @@ def test_inventory_snapshot_handles_missing_capabilities() -> None:
 
 
 def test_inventory_snapshot_fetch_status_ok_failed_unavailable() -> None:
-    """#512 durable signal: per-section fetch_status distinguishes ok / failed /
+    """Durable signal: per-section fetch_status distinguishes ok / failed /
     unavailable so the consumer can tell a confirmed-empty section from a fetch
-    failure (the SDK-boundary half of the fix; see tvt_platform/sync.py)."""
+    failure (the SDK-boundary half of the fix)."""
 
     class _Client:
         def list_resources_normalized(self):
@@ -473,9 +473,9 @@ def test_inventory_snapshot_fetch_status_ok_failed_unavailable() -> None:
 
 
 def test_inventory_snapshot_fetch_status_keys_match_consumer_contract() -> None:
-    """fetch_status must carry every section uniqueos/tvt_platform/sync.py asks
-    _section_fetched_ok() about: resources, devices, channels, areas, servers,
-    alarm_zones (alarm_events provided too)."""
+    """fetch_status must carry every section a downstream platform-sync consumer
+    asks _section_fetched_ok() about: resources, devices, channels, areas,
+    servers, alarm_zones (alarm_events provided too)."""
 
     class _Minimal:
         def list_resources_normalized(self):

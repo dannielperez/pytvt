@@ -1,6 +1,6 @@
 """Progress reporting primitives for long-running workflows.
 
-Consumers (e.g. UniqueOS GUI) implement :class:`ProgressSink` to receive
+Consumers (e.g. a downstream GUI) implement :class:`ProgressSink` to receive
 real-time step updates. The library never calls ``print`` directly — all
 user-facing output flows through a sink.
 """
@@ -32,7 +32,7 @@ class ProgressEvent:
 
 
 class ProgressSink(Protocol):
-    """Interface that UniqueOS (or any caller) implements to observe progress."""
+    """Interface that a downstream consumer (or any caller) implements to observe progress."""
 
     def emit(self, event: ProgressEvent) -> None:
         """Handle a progress event. Must not raise."""

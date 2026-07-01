@@ -18,6 +18,8 @@ from .protocol import scan_nvr as _raw_protocol_scan
 logger = logging.getLogger(__name__)
 
 # Manufacturer names and MAC OUI prefixes recognised as TVT/compatible.
+# "UNIQUE" is a device-reported OEM-rebrand string some TVT units report as
+# their manufacturer; it is matched here purely for device recognition.
 _TVT_MANUFACTURERS: frozenset[str] = frozenset({"TVT", "UNIQUE"})
 _TVT_MAC_PREFIXES: tuple[str, ...] = ("58:5B:69",)
 

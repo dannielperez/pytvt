@@ -252,7 +252,7 @@ def change_site_subnet_via_nvr(
     """Migrate one NVR's registered IPCs from *old_subnet* to *new_subnet*.
 
     The *client* must already be logged in; callers reuse their own
-    :class:`~pytvt.NvrClient` session (including the UniqueOS GUI).
+    :class:`~pytvt.NvrClient` session (including a downstream GUI).
 
     Args:
         client: An authenticated :class:`~pytvt.NvrClient`.
