@@ -41,6 +41,17 @@ from .constants import (
     StreamType,
 )
 from .loader import NetSdkUnavailable, ensure_nat_support, is_netsdk_available
+from .model_capabilities import (
+    FEATURE_SMART_EVENTS,
+    MODEL_CAPABILITIES,
+    CameraFeature,
+    features_for_model,
+    is_known_model,
+    model_supports,
+    models_supporting,
+    normalize_model,
+    smart_events_for_model,
+)
 
 __all__ = [
     "NetSdkClient",
@@ -64,4 +75,13 @@ __all__ = [
     "SdkError",
     "SmartEventType",
     "StreamType",
+    "CameraFeature",
+    "MODEL_CAPABILITIES",
+    "FEATURE_SMART_EVENTS",
+    "normalize_model",
+    "is_known_model",
+    "features_for_model",
+    "model_supports",
+    "smart_events_for_model",
+    "models_supporting",
 ]
