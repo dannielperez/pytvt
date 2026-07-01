@@ -21,7 +21,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-          # 3.14 is the UniqueOS runtime; allow a prerelease build if a runner
+          # 3.14 is a target runtime; allow a prerelease build if a runner
           # image hasn't published the stable toolchain yet.
           allow-prereleases: true
       - name: Install dependencies

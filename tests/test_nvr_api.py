@@ -209,7 +209,7 @@ class TestDeleteNvrDevices:
         assert client.query_channels() == []
 
     def test_query_channels_missing_content_raises_shape_error(self):
-        # success status but NO <content> container → unrecognized shape (#512):
+        # success status but NO <content> container → unrecognized shape:
         # must raise, never return [] (which would look like a genuine empty).
         client = NvrClient("10.0.0.1", "admin", "pass")
         client._logged_in = True
@@ -234,7 +234,7 @@ class TestDeleteNvrDevices:
 
     def test_query_channels_shape_error_is_not_plain_genuine_empty(self):
         # NvrApiResponseShapeError must be an NvrApiError subclass so existing
-        # broad handlers still catch it, but distinguishable for #512 callers.
+        # broad handlers still catch it, but distinguishable for false-empty callers.
         assert issubclass(NvrApiResponseShapeError, NvrApiError)
 
     def test_delete_nvr_devices_builds_expected_request(self):
@@ -397,7 +397,7 @@ class TestPlatformAccess:
             '<content type="list" current="NVMS5000">'
             '<item id="NVMS5000">'
             "<switch>true</switch>"
-            "<serverAddr>***REMOVED***</serverAddr>"
+            "<serverAddr>nvr.example.com</serverAddr>"
             "<port>2009</port>"
             "<reportId>20251101</reportId>"
             "</item>"
@@ -408,7 +408,7 @@ class TestPlatformAccess:
         config = client.query_platform_access()
 
         assert config.enabled is True
-        assert config.server_address == "***REMOVED***"
+        assert config.server_address == "nvr.example.com"
         assert config.port == 2009
         assert config.report_id == "20251101"
 
@@ -447,7 +447,7 @@ class TestPlatformAccess:
 
         client.set_platform_access(
             enabled=True,
-            server_address="***REMOVED***",
+            server_address="nvr.example.com",
             port=2009,
             report_id="20251101",
         )
@@ -455,7 +455,7 @@ class TestPlatformAccess:
         assert posted[0][0] == "editPlatformCfg"
         body = posted[0][1]
         assert "<switch>true</switch>" in body
-        assert "<serverAddr>***REMOVED***</serverAddr>" in body
+        assert "<serverAddr>nvr.example.com</serverAddr>" in body
         assert "<port>2009</port>" in body
         assert "<reportId>20251101</reportId>" in body
 
@@ -514,7 +514,7 @@ class TestPlatformAccess:
         try:
             client.set_platform_access(
                 enabled=True,
-                server_address="***REMOVED***",
+                server_address="nvr.example.com",
                 report_id="20251101",
             )
         except PlatformAccessDisabledError as exc:

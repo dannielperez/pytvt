@@ -2,8 +2,7 @@
 
 pytvt 1.0 reorganises the package into a **seven-lane architecture**.
 This document maps every old import path to its new home and lists
-the renames that downstream consumers (UniqueOS, unique-audit, etc.)
-need to apply.
+the renames that downstream consumers need to apply.
 
 The migration is **mechanical** — no semantics changed.  Every public
 symbol still exists; only its dotted path may have moved.  Public

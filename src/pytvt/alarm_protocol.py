@@ -5,13 +5,13 @@ several shapes depending on firmware: JSON (modern), an HTTP POST wrapping JSON,
 a binary frame (``b"TVT\\0"`` magic + little-endian length + struct payload), or a
 length-prefixed JSON frame. This module owns the **vendor wire format** — the
 magic bytes, the struct layout, and the alarm-code table — so Django apps don't
-hand-parse it (CLAUDE.md §4: vendor protocol logic lives in pytvt).
+hand-parse it (vendor protocol logic lives in pytvt, not in the consumer app).
 
 It is transport- and framework-agnostic: :func:`parse_alarm_frame` takes the raw
 bytes of one frame and returns a neutral :class:`ParsedAlarmFrame`. Source IP/port,
 receive timestamp, rate-limiting, dedup and persistence are the *caller's* concern
-(e.g. UniqueOS' ``alarm_receiver`` keeps its security/ingest wrapper and only
-delegates the byte-level parse here).
+(e.g. a downstream consumer's ``alarm_receiver`` keeps its security/ingest
+wrapper and only delegates the byte-level parse here).
 """
 
 from __future__ import annotations

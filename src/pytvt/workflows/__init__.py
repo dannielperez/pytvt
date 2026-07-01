@@ -2,7 +2,7 @@
 
 This subpackage packages multi-step orchestrations we've validated in the
 field — subnet migrations, credential rotations, site-to-site validation —
-into explicit, composable building blocks that consumers such as UniqueOS
+into explicit, composable building blocks that a downstream consumer
 can expose in a GUI or CLI without having to re-derive the sequencing and
 recovery logic.
 

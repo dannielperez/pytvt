@@ -1,8 +1,9 @@
 # pytvt — Field Learnings (validated 2026-06-23)
 
-From a live WAN-outage response: pulled the NVMS platform inventory and repointed
-57 NVRs' Platform Access to a DDNS over AutoNAT. See also
-`src/pytvt/sdk/nat_capabilities.md` (detailed AutoNAT notes).
+Notes from field use: pulling the NVMS platform inventory and bulk-repointing
+NVRs' Platform Access to a DDNS over AutoNAT is a common recovery task (e.g.
+during a WAN outage). See also `src/pytvt/sdk/nat_capabilities.md` (detailed
+AutoNAT notes).
 
 ## PlatformSDK (management/transfer server)
 - `libPlatClientSDK.so` is **x86_64 Linux only** (no macOS build) → run in a container.

@@ -445,7 +445,7 @@ class NvrClient:
 
         channels: list[Channel] = []
         n_parsed = len(re.findall(r'<item\s+id="([^"]+)">', dev_data))
-        # #512-class robustness (T-0340, CLAUDE.md §4): a success status with an
+        # False-empty robustness: a success status with an
         # unrecognized payload shape must NOT silently look like a genuine-empty
         # channel list. A recognized queryDevList response always wraps results
         # in a <content ...> container; when present it carries total="N". Signal

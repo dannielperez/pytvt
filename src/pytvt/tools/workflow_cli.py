@@ -2,7 +2,7 @@
 
 Kept separate from :mod:`pytvt.cli` so that importing the main CLI does
 not force the workflow stack to load. Each workflow is its own argparse
-subcommand so UniqueOS can mirror the same invocation for testing.
+subcommand so a downstream consumer can mirror the same invocation for testing.
 """
 
 from __future__ import annotations
