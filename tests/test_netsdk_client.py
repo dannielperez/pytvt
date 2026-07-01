@@ -26,9 +26,9 @@ from pytvt.device_sdk.client import (
     NetSdkClient,
     NetSdkError,
     NodeEncodeInfo,
-    RecordSchedule,
     RecordingDateRange,
     RecordingFile,
+    RecordSchedule,
     SmartSupport,
     TVTClient,
 )
@@ -730,8 +730,15 @@ class TestNodeEncodeInfo:
         assert ch1.name == "Entrada Principal"
         assert ch1.codec == "h265p" and ch1.a_gop == 60 and ch1.m_gop == 60
         assert ch1.continuous == EncodeStream(
-            kind="continuous", resolution="2560x1440", fps=12, bitrate_type="VBR",
-            quality="medium", max_bitrate=3072, audio=True, codec="h265p")
+            kind="continuous",
+            resolution="2560x1440",
+            fps=12,
+            bitrate_type="VBR",
+            quality="medium",
+            max_bitrate=3072,
+            audio=True,
+            codec="h265p",
+        )
         assert ch1.event.fps == 15 and ch1.event.quality == "higher" and ch1.event.audio is False
         assert ch1.supported_resolutions == ("2560x1440", "1920x1080")
         assert ch1.allowed_bitrates == (1024, 2048, 3072, 4096)
@@ -770,12 +777,13 @@ class TestSetNodeEncode:
             return "<response><status>success</status></response>"
 
         with patch.object(session, "api_call", side_effect=fake):
-            session.set_node_encode(1, continuous={"max_bitrate": 2048, "audio": False},
-                                    event={"audio": False}, verify=False)
+            session.set_node_encode(
+                1, continuous={"max_bitrate": 2048, "audio": False}, event={"audio": False}, verify=False
+            )
         edit = next(req for url, req in calls if url == "editNodeEncodeInfo")
         # both an and ae written, as one item each, under editNodeEncodeInfo url
         assert 'url="editNodeEncodeInfo"' in edit
-        assert '<an ' in edit and '<ae ' in edit
+        assert "<an " in edit and "<ae " in edit
         # override applied
         assert 'QoI="2048"' in edit and 'audio="OFF"' in edit
         # untouched fields preserved from current config
