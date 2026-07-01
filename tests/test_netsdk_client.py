@@ -17,6 +17,7 @@ from pytvt.device_sdk.client import (
     DeviceSupport,
     DiscoveredDevice,
     DiskInfo,
+    EncodeStream,
     IpcInfo,
     LogEntry,
     NatLoginFailed,
@@ -24,6 +25,8 @@ from pytvt.device_sdk.client import (
     NatUnavailableError,
     NetSdkClient,
     NetSdkError,
+    NodeEncodeInfo,
+    RecordSchedule,
     RecordingDateRange,
     RecordingFile,
     SmartSupport,
@@ -677,3 +680,119 @@ class TestSessionApiCall:
         mock_lib.NET_SDK_GetLastError.return_value = 1
         with pytest.raises(NetSdkError, match="ApiInterface"):
             session.api_call("queryPlatformCfg")
+
+
+# ── Encode / record config (queryNodeEncodeInfo / editNodeEncodeInfo) ───────
+
+# Real device shape; note the '&' in a camera name — device XML is NOT well-formed,
+# so parsing must be lenient (regex), which is exactly what these tests lock in.
+_ENCODE_XML = """<?xml version="1.0" encoding="UTF-8"?>
+<response version="1.0" cmdUrl="queryNodeEncodeInfo">
+    <status>success</status>
+    <content type="list" total="2">
+        <item id="{00000001-0000-0000-0000-000000000000}" isRTSPChl="false">
+            <name>Entrada Principal</name>
+            <mainCaps supEnct="h264,h265,h265p" bitType="VBR,CBR"><res fps="30">2560x1440</res><res fps="30">1920x1080</res></mainCaps>
+            <main enct="h265p" aGOP="60" mGOP="60"></main>
+            <an res="2560x1440" fps="12" bitType="VBR" level="medium" QoI="3072" audio="ON" type="main"></an>
+            <ae res="2560x1440" fps="15" bitType="VBR" level="higher" QoI="4096" audio="OFF" type="main"></ae>
+            <mainStreamQualityNote>1024,2048,3072,4096</mainStreamQualityNote>
+        </item>
+        <item id="{0000000C-0000-0000-0000-000000000000}" isRTSPChl="false">
+            <name>Caja 1 & 2</name>
+            <main enct="h265" aGOP="60" mGOP="60"></main>
+            <an res="1920x1080" fps="10" bitType="VBR" level="low" QoI="2048" audio="OFF" type="main"></an>
+            <ae res="1920x1080" fps="12" bitType="VBR" level="medium" QoI="2048" audio="OFF" type="main"></ae>
+        </item>
+    </content>
+</response>"""
+
+_RECORD_XML = """<?xml version="1.0" encoding="UTF-8"?>
+<response cmdUrl="queryRecordScheduleList"><status>success</status>
+    <content type="list" total="1">
+        <item id="{00000001-0000-0000-0000-000000000000}">
+            <name><![CDATA[Entrada Principal]]></name>
+            <scheduleRec><switch>true</switch></scheduleRec>
+            <motionRec><switch>true</switch></motionRec>
+            <alarmRec><switch>false</switch></alarmRec>
+            <intelligentRec><switch>true</switch></intelligentRec>
+        </item>
+    </content>
+</response>"""
+
+
+class TestNodeEncodeInfo:
+    def test_parses_continuous_event_and_codec(self, session):
+        with patch.object(session, "api_call", return_value=_ENCODE_XML):
+            nodes = session.node_encode_info()
+        assert [n.channel for n in nodes] == [1, 12]
+        ch1 = nodes[0]
+        assert ch1.name == "Entrada Principal"
+        assert ch1.codec == "h265p" and ch1.a_gop == 60 and ch1.m_gop == 60
+        assert ch1.continuous == EncodeStream(
+            kind="continuous", resolution="2560x1440", fps=12, bitrate_type="VBR",
+            quality="medium", max_bitrate=3072, audio=True, codec="h265p")
+        assert ch1.event.fps == 15 and ch1.event.quality == "higher" and ch1.event.audio is False
+        assert ch1.supported_resolutions == ("2560x1440", "1920x1080")
+        assert ch1.allowed_bitrates == (1024, 2048, 3072, 4096)
+
+    def test_lenient_parse_of_malformed_name(self, session):
+        # '&' would break a strict XML parser; the channel must still parse.
+        with patch.object(session, "api_call", return_value=_ENCODE_XML):
+            nodes = session.node_encode_info()
+        assert nodes[1].name == "Caja 1 & 2"
+        assert nodes[1].codec == "h265" and nodes[1].continuous.audio is False
+
+    def test_non_success_status_raises(self, session):
+        with patch.object(session, "api_call", return_value="<response><status>fail</status></response>"):
+            with pytest.raises(NetSdkError, match="queryNodeEncodeInfo"):
+                session.node_encode_info()
+
+
+class TestRecordSchedule:
+    def test_parses_mode_switches(self, session):
+        with patch.object(session, "api_call", return_value=_RECORD_XML):
+            rows = session.record_schedule()
+        r = rows[0]
+        assert r.channel == 1 and r.name == "Entrada Principal"
+        assert r.schedule is True and r.motion is True
+        assert r.alarm is False and r.intelligent is True
+
+
+class TestSetNodeEncode:
+    def test_rmw_applies_overrides_and_preserves_rest(self, session):
+        calls = []
+
+        def fake(url, content="", *, request=None, buf_size=131072):
+            calls.append((url, request))
+            if url == "queryNodeEncodeInfo":
+                return _ENCODE_XML
+            return "<response><status>success</status></response>"
+
+        with patch.object(session, "api_call", side_effect=fake):
+            session.set_node_encode(1, continuous={"max_bitrate": 2048, "audio": False},
+                                    event={"audio": False}, verify=False)
+        edit = next(req for url, req in calls if url == "editNodeEncodeInfo")
+        # both an and ae written, as one item each, under editNodeEncodeInfo url
+        assert 'url="editNodeEncodeInfo"' in edit
+        assert '<an ' in edit and '<ae ' in edit
+        # override applied
+        assert 'QoI="2048"' in edit and 'audio="OFF"' in edit
+        # untouched fields preserved from current config
+        assert 'res="2560x1440"' in edit and 'fps="12"' in edit
+        assert 'enct="h265p"' in edit and 'aGOP="60"' in edit
+
+    def test_reject_raises(self, session):
+        def fake(url, content="", *, request=None, buf_size=131072):
+            if url == "queryNodeEncodeInfo":
+                return _ENCODE_XML
+            return "<response><status>fail</status></response>"
+
+        with patch.object(session, "api_call", side_effect=fake):
+            with pytest.raises(NetSdkError, match="rejected"):
+                session.set_node_encode(1, continuous={"fps": 15})
+
+    def test_unknown_channel_raises(self, session):
+        with patch.object(session, "api_call", return_value=_ENCODE_XML):
+            with pytest.raises(NetSdkError, match="channel 99 not found"):
+                session.set_node_encode(99, continuous={"fps": 12})

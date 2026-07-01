@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import ctypes as ct
 import logging
+import re
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -176,6 +177,89 @@ class AlarmOutStatus:
     name: str
     online: bool
     active: bool
+
+
+@dataclass(frozen=True, slots=True)
+class EncodeStream:
+    """One main-stream encode profile of an NVR channel.
+
+    NVMS-9000 exposes two main-stream record profiles per channel:
+    ``continuous`` (the ``<an>`` element — schedule / 24x7 recording) and
+    ``event`` (the ``<ae>`` element — motion / alarm / AI recording).
+    """
+
+    kind: str  # "continuous" | "event"
+    resolution: str  # e.g. "2560x1440"
+    fps: int
+    bitrate_type: str  # "VBR" | "CBR"
+    quality: str  # "low" | "medium" | "higher"
+    max_bitrate: int  # QoI cap, in kbps
+    audio: bool  # audio track on/off
+    codec: str  # "h264" | "h265" | "h265p" (channel-level, shared by both streams)
+
+
+@dataclass(frozen=True, slots=True)
+class NodeEncodeInfo:
+    """Per-channel main-stream encode config (``queryNodeEncodeInfo``)."""
+
+    channel: int  # 1-based channel number
+    node_id: str  # device node GUID, e.g. "{00000001-0000-0000-0000-000000000000}"
+    name: str
+    codec: str  # <main enct=...>
+    a_gop: int
+    m_gop: int
+    continuous: EncodeStream | None  # <an>
+    event: EncodeStream | None  # <ae>
+    supported_resolutions: tuple[str, ...]  # from <mainCaps>
+    allowed_bitrates: tuple[int, ...]  # from <mainStreamQualityNote>
+
+
+@dataclass(frozen=True, slots=True)
+class RecordSchedule:
+    """Per-channel record-mode switches (``queryRecordScheduleList``).
+
+    Together these describe the "Record Mode" the web UI shows: e.g. all four
+    on = "Always(24x7)+Motion+Sensor+AI Record".
+    """
+
+    channel: int  # 1-based channel number
+    node_id: str
+    name: str
+    schedule: bool  # scheduleRec — 24x7 continuous
+    motion: bool  # motionRec
+    alarm: bool  # alarmRec (sensor)
+    intelligent: bool  # intelligentRec — AI
+
+
+# ── Lenient XML helpers for api_call responses ──────────────────────
+# Device CGI XML is NOT guaranteed well-formed (camera names routinely contain
+# raw '&' and other chars that break strict parsers), so parse with regex.
+
+def _xml_status(xml: str) -> str:
+    m = re.search(r"<status>\s*([^<\s]+)\s*</status>", xml or "")
+    return m.group(1) if m else ""
+
+
+def _xml_attrs(tag_body: str) -> dict[str, str]:
+    return dict(re.findall(r'(\w+)="([^"]*)"', tag_body or ""))
+
+
+def _xml_items(xml: str):
+    """Yield (item_id, inner_body) for each ``<item id="...">...</item>``."""
+    for m in re.finditer(r'<item id="([^"]+)"[^>]*>(.*?)</item>', xml or "", re.S):
+        yield m.group(1), m.group(2)
+
+
+def _node_channel(node_id: str) -> int:
+    """"{0000000C-...}" -> 12 (1-based channel number)."""
+    try:
+        return int(node_id[1:9], 16)
+    except (ValueError, IndexError):
+        return 0
+
+
+def _node_guid(channel: int) -> str:
+    return "{%08X-0000-0000-0000-000000000000}" % channel
 
 
 @dataclass(frozen=True, slots=True)
@@ -744,6 +828,178 @@ class DeviceSession:
             for i in range(count.value)
         ]
 
+    # ── Encode / record config (web CGI over the SDK handle) ─────
+    # These drive the NVR "Encode Parameters" and "Record Mode" pages. There is
+    # no dedicated SDK struct for them, so they go over NET_SDK_ApiInterface
+    # (see api_call) using the NVMS-9000 XML CGI dialect — works LAN or NAT.
+
+    _ENCODE_REQ = (
+        '<?xml version="1.0" encoding="utf-8" ?>'
+        '<request version="1.0" systemType="NVMS-9000" clientType="WEB">'
+        "<requireField><name/><mainCaps/><main/><an/><ae/>"
+        "<mainStreamQualityNote/></requireField></request>"
+    )
+
+    @staticmethod
+    def _encode_stream(kind: str, attrs: dict, codec: str) -> EncodeStream | None:
+        if not attrs:
+            return None
+        return EncodeStream(
+            kind=kind,
+            resolution=attrs.get("res", ""),
+            fps=int(attrs.get("fps", 0) or 0),
+            bitrate_type=attrs.get("bitType", ""),
+            quality=attrs.get("level", ""),
+            max_bitrate=int(attrs.get("QoI", 0) or 0),
+            audio=(attrs.get("audio", "").upper() == "ON"),
+            codec=codec,
+        )
+
+    def node_encode_info(self) -> list[NodeEncodeInfo]:
+        """Read every channel's main-stream encode config (``queryNodeEncodeInfo``).
+
+        Returns the continuous (``<an>``) and event (``<ae>``) profiles per
+        channel, plus the channel codec, GOP, supported resolutions and the
+        allowed bitrate (QoI) values.
+        """
+        xml = self.api_call("queryNodeEncodeInfo", request=self._ENCODE_REQ)
+        if _xml_status(xml) != "success":
+            raise NetSdkError("queryNodeEncodeInfo", -1)
+        out: list[NodeEncodeInfo] = []
+        for node_id, body in _xml_items(xml):
+            nm = re.search(r"<name>(.*?)</name>", body, re.S)
+            name = re.sub(r"<!\[CDATA\[|\]\]>", "", nm.group(1) if nm else "").strip()
+            mn = re.search(r"<main\s+([^/>]*)/?>", body)
+            main = _xml_attrs(mn.group(1)) if mn else {}
+            codec = main.get("enct", "")
+
+            def _attrs(tag: str) -> dict:
+                t = re.search(rf"<{tag}\s+([^/>]*)/?>", body)
+                return _xml_attrs(t.group(1)) if t else {}
+
+            note = re.search(r"<mainStreamQualityNote>([^<]*)</mainStreamQualityNote>", body)
+            bitrates = tuple(
+                int(x) for x in (note.group(1).split(",") if note else []) if x.strip().isdigit()
+            )
+            out.append(
+                NodeEncodeInfo(
+                    channel=_node_channel(node_id),
+                    node_id=node_id,
+                    name=name,
+                    codec=codec,
+                    a_gop=int(main.get("aGOP", 0) or 0),
+                    m_gop=int(main.get("mGOP", 0) or 0),
+                    continuous=self._encode_stream("continuous", _attrs("an"), codec),
+                    event=self._encode_stream("event", _attrs("ae"), codec),
+                    supported_resolutions=tuple(re.findall(r"<res[^>]*>([^<]+)</res>", body)),
+                    allowed_bitrates=bitrates,
+                )
+            )
+        return out
+
+    def record_schedule(self) -> list[RecordSchedule]:
+        """Read each channel's record-mode switches (``queryRecordScheduleList``)."""
+        xml = self.api_call("queryRecordScheduleList")
+        if _xml_status(xml) != "success":
+            raise NetSdkError("queryRecordScheduleList", -1)
+        out: list[RecordSchedule] = []
+        for node_id, body in _xml_items(xml):
+            nm = re.search(r"<name>(.*?)</name>", body, re.S)
+            name = re.sub(r"<!\[CDATA\[|\]\]>", "", nm.group(1) if nm else "").strip()
+
+            def _sw(tag: str) -> bool:
+                b = re.search(rf"<{tag}>(.*?)</{tag}>", body, re.S)
+                s = re.search(r"<switch>(.*?)</switch>", b.group(1)) if b else None
+                return bool(s) and s.group(1).strip() == "true"
+
+            out.append(
+                RecordSchedule(
+                    channel=_node_channel(node_id),
+                    node_id=node_id,
+                    name=name,
+                    schedule=_sw("scheduleRec"),
+                    motion=_sw("motionRec"),
+                    alarm=_sw("alarmRec"),
+                    intelligent=_sw("intelligentRec"),
+                )
+            )
+        return out
+
+    def set_node_encode(
+        self,
+        channel: int,
+        *,
+        continuous: dict | None = None,
+        event: dict | None = None,
+        codec: str | None = None,
+        verify: bool = True,
+    ) -> NodeEncodeInfo:
+        """Patch one channel's main-stream encode config (``editNodeEncodeInfo``).
+
+        Read-modify-write: reads the channel's current profiles, applies only the
+        keys you pass, and writes both ``<an>`` and ``<ae>`` back (the device
+        edits them as a pair). ``continuous`` / ``event`` accept any of
+        :class:`EncodeStream`'s writable fields: ``resolution``, ``fps``,
+        ``quality``, ``max_bitrate``, ``bitrate_type``, ``audio`` (bool).
+
+        Example — cut the continuous bitrate cap and force audio off::
+
+            session.set_node_encode(3, continuous={"max_bitrate": 3072, "audio": False},
+                                       event={"audio": False})
+
+        Returns the re-read :class:`NodeEncodeInfo` (unless ``verify=False``).
+        Raises :class:`NetSdkError` if the device rejects the write.
+        """
+        node_id = _node_guid(channel)
+        current = {n.channel: n for n in self.node_encode_info()}
+        if channel not in current:
+            raise NetSdkError(f"editNodeEncodeInfo: channel {channel} not found", -1)
+        cur = current[channel]
+        enct = codec or cur.codec
+
+        def _merge(stream: EncodeStream | None, override: dict | None) -> dict:
+            base = {
+                "res": stream.resolution if stream else "",
+                "fps": stream.fps if stream else 0,
+                "bitType": stream.bitrate_type if stream else "VBR",
+                "level": stream.quality if stream else "medium",
+                "QoI": stream.max_bitrate if stream else 0,
+                "audio": "ON" if (stream and stream.audio) else "OFF",
+                "type": "main",
+            }
+            for k, v in (override or {}).items():
+                key = {
+                    "resolution": "res", "fps": "fps", "bitrate_type": "bitType",
+                    "quality": "level", "max_bitrate": "QoI", "audio": "audio",
+                }.get(k, k)
+                base[key] = "ON" if (k == "audio" and v) else "OFF" if k == "audio" else v
+            return base
+
+        an = _merge(cur.continuous, continuous)
+        ae = _merge(cur.event, event)
+
+        def _render(tag: str, a: dict) -> str:
+            order = ["res", "fps", "bitType", "level", "QoI", "audio", "type"]
+            body = " ".join(f'{k}="{a[k]}"' for k in order if a.get(k) not in (None, ""))
+            main = f'<main enct="{enct}"'
+            if cur.a_gop:
+                main += f' aGOP="{cur.a_gop}"'
+            if cur.m_gop:
+                main += f' mGOP="{cur.m_gop}"'
+            return f'<item id="{node_id}"><{tag} {body}/>{main}/></item>'
+
+        req = (
+            '<?xml version="1.0" encoding="utf-8" ?>'
+            '<request version="1.0" systemType="NVMS-9000" clientType="WEB" url="editNodeEncodeInfo">'
+            f'<content type="list" total="2">{_render("an", an)}{_render("ae", ae)}</content></request>'
+        )
+        resp = self.api_call("editNodeEncodeInfo", request=req)
+        if _xml_status(resp) != "success":
+            raise NetSdkError(f"editNodeEncodeInfo(ch{channel}) rejected: {resp[:160]}", -1)
+        if not verify:
+            return cur
+        return {n.channel: n for n in self.node_encode_info()}[channel]
+
     # ── Log search ──────────────────────────────────────────────
 
     def find_logs(
@@ -944,12 +1200,25 @@ class NetSdkClient:
     # ── Version info ────────────────────────────────────────────
 
     def sdk_version(self) -> str:
-        """Return SDK version as 'major.minor.patch' string."""
+        """Return the SDK's *internal API version* as a 'major.minor.patch' string.
+
+        This is decoded from ``NET_SDK_GetSDKVersion`` (a packed uint) and is
+        NOT the vendor's package/firmware version. For example the
+        ``1.3.2.202601161500`` device-SDK drop (build 90116) reports a packed
+        value of ``0x00010003`` here, i.e. ``"0.1.3"``. The vendor does not
+        document the encoding, so treat this string as an opaque internal
+        identifier only; use :meth:`sdk_build_version` (build number) or the
+        SDK package/manifest version to identify the actual release.
+        """
         v = self._lib.NET_SDK_GetSDKVersion()
         return f"{(v >> 24) & 0xFF}.{(v >> 16) & 0xFF}.{v & 0xFFFF}"
 
     def sdk_build_version(self) -> int:
-        """Return SDK build number."""
+        """Return the SDK build number (e.g. 90116 for the 1.3.2 device drop).
+
+        More reliable than :meth:`sdk_version` for distinguishing releases:
+        the 1.2.1.036 drop reports 60222, the 1.3.2 drop reports 90116.
+        """
         return self._lib.NET_SDK_GetSDKBuildVersion()
 
     # ── Logging ─────────────────────────────────────────────────
