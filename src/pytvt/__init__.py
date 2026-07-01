@@ -17,6 +17,10 @@ Public API:
     Scanner:   scan_single_nvr, load_devices, filter_tvt_devices
     Output:    save_csv, save_json, save_xlsx_per_site, save_failed_devices
     Diff:      diff_scans, load_scan_file, ScanDiff, DeviceDiff
+    StatusLog: parse_status_log, parse_node_name, classify_event_type,
+               StatusLogEvent, NodeIdentity — parse the NVMS Status Log
+               connectivity export (vocabulary + node-name grammar; severity
+               and correlation are the consumer's job)
 
 Native / vendor SDK note
 ------------------------
@@ -63,6 +67,13 @@ from .output import save_csv, save_failed_devices, save_json, save_xlsx_per_site
 from .platform_sdk import ManagementClient, ManagementError
 from .registry import resolve_execution_plan
 from .scanner import filter_tvt_devices, load_devices, scan_single_nvr
+from .status_log import (
+    NodeIdentity,
+    StatusLogEvent,
+    classify_event_type,
+    parse_node_name,
+    parse_status_log,
+)
 from .web_api import WebApiClient
 from .xml_api import NvrClient
 
@@ -149,6 +160,12 @@ __all__ = [
     "ScanDiff",
     "diff_scans",
     "load_scan_file",
+    # Status Log parser (NVMS connectivity export)
+    "NodeIdentity",
+    "StatusLogEvent",
+    "classify_event_type",
+    "parse_node_name",
+    "parse_status_log",
     # Workflows (Provisional)
     "workflows",
 ]
