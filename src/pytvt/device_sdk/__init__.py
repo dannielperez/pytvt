@@ -19,11 +19,15 @@ Platform: Linux x86-64 and aarch64 only ($TVT_SDK_PATH or sdk_path=... to overri
 """
 
 from .client import (
+    EncodeStream,
     NatLoginFailed,
     NatTimeoutError,
     NatUnavailableError,
     NetSdkCapabilityError,
     NetSdkClient,
+    NetSdkError,
+    NodeEncodeInfo,
+    RecordSchedule,
     TVTClient,
 )
 from .constants import (
@@ -56,8 +60,12 @@ from .model_capabilities import (
 __all__ = [
     "NetSdkClient",
     "TVTClient",
+    "NetSdkError",
     "NetSdkUnavailable",
     "NetSdkCapabilityError",
+    "EncodeStream",
+    "NodeEncodeInfo",
+    "RecordSchedule",
     "NatUnavailableError",
     "NatLoginFailed",
     "NatTimeoutError",

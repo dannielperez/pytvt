@@ -130,6 +130,35 @@ def test_parse_skips_header_and_blank_lines():
     assert list(parse_status_log(text)) == []
 
 
+def test_parse_ignores_leading_bom_on_header_row():
+    # A BOM-prefixed header must still be recognized as the header, not
+    # surface as a junk unrecognized event.
+    text = "\\ufeffNo.\tType\tRecord Time\tNode Name\tDetails\n"
+    text += "1\tMonitor offline\t2020-01-01 00:00:02\tNVR-0015_IP Camera\t"
+    (event,) = list(parse_status_log(text))
+    assert event.seq == 1
+    assert event.entity_layer == CHANNEL
+
+
+def test_parse_ignores_leading_bom_on_headerless_first_data_row():
+    text = "\\ufeff1\tServer online\t2020-01-01 00:00:00\tManagement Server\t"
+    (event,) = list(parse_status_log(text))
+    assert event.seq == 1
+    assert event.entity_layer == PLATFORM_SERVER
+
+
+def test_parse_ignores_leading_bom_from_streamed_lines():
+    lines = iter(
+        [
+            "\\ufeffNo.\tType\tRecord Time\tNode Name\tDetails\n",
+            "1\tDecoder offline\t2020-01-01 22:41:13\tDEC-15\n",
+        ]
+    )
+    (event,) = list(parse_status_log(lines))
+    assert event.seq == 1
+    assert event.entity_layer == DECODER
+
+
 def test_parse_row_populates_all_fields():
     text = "1\tMonitor offline\t2020-01-01 00:00:02\tNVR-0015_IP Camera\t"
     (event,) = list(parse_status_log(text))
