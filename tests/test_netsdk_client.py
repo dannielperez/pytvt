@@ -805,3 +805,20 @@ class TestSetNodeEncode:
         with patch.object(session, "api_call", return_value=_ENCODE_XML):
             with pytest.raises(NetSdkError, match="channel 99 not found"):
                 session.set_node_encode(99, continuous={"fps": 12})
+
+
+class TestPackageExports:
+    """The encode-config surface is part of the package's public API.
+
+    Consumers (e.g. UniqueOS's tvt_sdk boundary) import these from
+    ``pytvt.device_sdk`` — not by reaching into ``.client`` — so keep them
+    promoted in the package ``__init__``.
+    """
+
+    def test_encode_config_names_promoted_to_package(self):
+        import pytvt.device_sdk as pkg
+        from pytvt.device_sdk import client as client_mod
+
+        for name in ("EncodeStream", "NodeEncodeInfo", "RecordSchedule", "NetSdkError"):
+            assert name in pkg.__all__
+            assert getattr(pkg, name) is getattr(client_mod, name)
