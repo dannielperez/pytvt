@@ -167,12 +167,19 @@ _HEADER_FIRST_CELL = "no."
 
 def _iter_lines(source: str | Iterable[str]) -> Iterator[str]:
     if isinstance(source, str):
-        yield from source.splitlines()
+        lines: Iterator[str] = iter(source.splitlines())
     else:
         # Tolerate a streamed file object whose lines retain their terminators,
         # so the trailing newline never leaks into the Details cell.
-        for line in source:
-            yield line.rstrip("\r\n")
+        lines = (line.rstrip("\r\n") for line in source)
+    first = next(lines, None)
+    if first is None:
+        return
+    # NVMS exports (or Windows tooling that re-saved them) may carry a UTF-8
+    # BOM; a BOM-prefixed header row would dodge the header check and surface
+    # as a junk unrecognized event.
+    yield first.removeprefix("\\ufeff")
+    yield from lines
 
 
 def _parse_time(raw_time: str) -> datetime | None:
@@ -186,7 +193,9 @@ def parse_status_log(source: str | Iterable[str]) -> Iterator[StatusLogEvent]:
     """Parse a Status Log export into :class:`StatusLogEvent` records.
 
     ``source`` is the raw TSV text or an iterable of lines. Parsing is lenient:
-    the header row and blank lines are skipped, rows are split on tabs, a missing
+    a leading UTF-8 BOM is ignored (so a BOM-prefixed header row still reads as
+    the header), the header row and blank lines are skipped, rows are split on
+    tabs, a missing
     trailing ``Details`` cell is tolerated, an unparseable timestamp yields
     ``record_time=None`` (raw kept in ``raw_time``), and an unknown ``Type``
     yields ``entity_layer=None`` rather than being dropped — so a firmware-drift

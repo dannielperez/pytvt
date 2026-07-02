@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Encode-config surface promoted to the `pytvt.device_sdk` package API**
+  (`device_sdk/__init__.py`). `EncodeStream`, `NodeEncodeInfo`, `RecordSchedule`
+  and `NetSdkError` are now importable from `pytvt.device_sdk` (and listed in
+  `__all__`) instead of requiring a reach into `pytvt.device_sdk.client`.
+  Additive; existing `.client` imports keep working.
+
+### Fixed
+
+- **Status Log parser tolerates a leading UTF-8 BOM** (`status_log.py`).
+  A BOM-prefixed export (NVMS or Windows tooling that re-saved the TSV) made
+  the header cell read `U+FEFF` + `No.`, dodging the header check and surfacing the
+  header row as a junk unrecognized event. `parse_status_log()` now strips a
+  leading BOM from the first line for both string and streamed input.
+
 ## [1.2.1] — 2026-06-28
 
 ### Fixed
