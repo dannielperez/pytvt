@@ -42,7 +42,27 @@ From a live WAN-outage response: pulled the NVMS platform inventory and repointe
 - Platform-access XML: `<content type="list" current="NVMS5000"><item id="NVMS5000"><switch>…
   </switch><serverAddr>…</serverAddr><port>2009</port><reportId>…</reportId></item></content>`.
 
+## Encode & record config over the SDK handle (validated 2026-07-01, fleet-live)
+- The record/encode config pages are reachable via `api_call` (ApiInterface) — the CGI command
+  names were the missing piece (guessing gave `error=11`; recover them from `strings libdvrnetsdk.so`).
+  Now first-class `DeviceSession` methods:
+  - **`node_encode_info()`** → `queryNodeEncodeInfo` per channel. Two main-stream profiles:
+    `<an>` = **continuous** (schedule/24x7), `<ae>` = **event** (motion/alarm/AI). Attrs:
+    `res, fps, bitType(VBR|CBR), level(low|medium|higher), QoI(max kbps), audio(ON|OFF)`; codec in
+    sibling `<main enct=h264|h265|h265p aGOP mGOP>`. The list form returns **only `<name>`** unless
+    you pass `<requireField><name/><mainCaps/><main/><an/><ae/><mainStreamQualityNote/></requireField>`.
+  - **`set_node_encode(ch, continuous={…}, event={…}, codec=…)`** → `editNodeEncodeInfo` (read-modify-
+    write, verified). Writes `<an>` and `<ae>` as **one item each** under `url="editNodeEncodeInfo"`.
+  - **`record_schedule()`** → `queryRecordScheduleList`: per-channel `scheduleRec/motionRec/alarmRec/
+    intelligentRec` (=AI) switches. (Some NVMS-9000 report these all-false while still recording 24x7 —
+    record MODE is represented elsewhere on those; edit path for mode not yet mapped.)
+- **Device CGI XML is NOT well-formed** — camera names routinely contain raw `&` etc. Parse api_call
+  responses with the lenient regex helpers (`_xml_items/_xml_attrs/_xml_status`), NEVER ElementTree.
+- **Nominal encode ≠ storage:** effective bitrate is scene + codec driven; `h265p` ≫ `h265` for size.
+  Don't "clone a healthy NVR's profile" to save space — measure disk usage (`disk_info`+`recording_days`).
+
 ## TODO
 - Fix `list_devices_normalized` live-online merge (above).
 - First-class `api_interface()` / `query_platform_access()` / `set_platform_access()` over NAT.
 - Multi-NAT-endpoint helper (iterate `dev-nat20.autonatglb.com` / `.autonat.us`).
+- Map the record-**mode** edit path (24x7+AI radio) — `editManualRecord` seen; schedule-edit TBD.

@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Main-stream encode & record-mode config over the device SDK**
+  (`device_sdk/client.py`). New `DeviceSession` methods, validated fleet-live over
+  the WireGuard tunnel:
+  - `node_encode_info()` → per-channel `NodeEncodeInfo` with `continuous` (`<an>`)
+    and `event` (`<ae>`) `EncodeStream` profiles (resolution, fps, bitrate type,
+    quality, max bitrate/QoI, audio, codec), supported resolutions and allowed
+    bitrates. Reads `queryNodeEncodeInfo` with the required `<requireField>` set
+    (without it the device returns names only).
+  - `set_node_encode(channel, continuous=…, event=…, codec=…)` → read-modify-write
+    of `editNodeEncodeInfo`; only the fields you pass change, both streams are
+    written back, and the result is re-read and returned (verified).
+  - `record_schedule()` → per-channel `RecordSchedule` mode switches
+    (`schedule/motion/alarm/intelligent`) from `queryRecordScheduleList`.
+  - These use `NET_SDK_ApiInterface` (the `api_call` primitive), so they work
+    LAN-direct or NAT-tunneled. api_call XML responses are parsed leniently
+    (regex) because device CGI XML is not well-formed (camera names contain `&`).
+
 ## [1.2.1] — 2026-06-28
 
 ### Fixed
