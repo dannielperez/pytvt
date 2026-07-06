@@ -61,7 +61,16 @@ def aes_ecb_pkcs7_decrypt(b64: str | bytes, key: str | bytes) -> str:
 
 def login_password_hash(password: str, nonce: str) -> str:
     """Web-login password proof: ``sha256_hex(md5_hex(password) + nonce)``."""
-    return hashlib.sha256((_md5_hex(password) + nonce).encode("utf-8")).hexdigest()
+    return login_password_hash_from_md5(_md5_hex(password), nonce)
+
+
+def login_password_hash_from_md5(password_md5_hex: str, nonce: str) -> str:
+    """Web-login password proof from the pre-computed ``md5_hex(password)``.
+
+    The session layer keeps only this digest (never the plaintext) so it can
+    re-run the handshake on session expiry.
+    """
+    return hashlib.sha256((password_md5_hex + nonce).encode("utf-8")).hexdigest()
 
 
 def encrypt_username(username: str, nonce: str) -> str:
@@ -71,4 +80,9 @@ def encrypt_username(username: str, nonce: str) -> str:
 
 def decrypt_auth_id(b64: str | bytes, password: str) -> str:
     """Decrypt the server-issued auth id under ``md5_hex(password)[:16]``."""
-    return aes_ecb_pkcs7_decrypt(b64, _md5_hex(password)[:_BLOCK])
+    return decrypt_auth_id_from_md5(b64, _md5_hex(password))
+
+
+def decrypt_auth_id_from_md5(b64: str | bytes, password_md5_hex: str) -> str:
+    """Decrypt the server-issued auth id from the pre-computed ``md5_hex(password)``."""
+    return aes_ecb_pkcs7_decrypt(b64, password_md5_hex[:_BLOCK])
