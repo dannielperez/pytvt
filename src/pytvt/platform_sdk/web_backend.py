@@ -3,16 +3,18 @@
 Wires :class:`~pytvt.platform_sdk.web_session.WebSession` (TVT-2, the real
 reqLogin/doLogin handshake) into the :class:`BaseManagementBackend` contract.
 ``login``/``diagnostics``/``get_context``/``load_sdk``/``close`` are fully
-implemented; ``list_operation_logs``/``list_status_logs`` are implemented
-(TVT-9). Every other read method (device/channel/status/alarm listing)
-raises :class:`CapabilityNotAvailable` until its own PR
-(TVT-5, TVT-6, TVT-8, TVT-10, see ``docs/ai/backlog/tvt-mgmt-integration.md``)
+implemented; ``get_server_statuses``/``get_device_statuses``/
+``get_acs_statuses`` (TVT-6) and ``list_operation_logs``/``list_status_logs``
+(TVT-9) are implemented. Every other read method (device/channel
+enumeration, alarm listing) raises :class:`CapabilityNotAvailable` until its
+own PR (TVT-5, TVT-8, TVT-10, see ``docs/ai/backlog/tvt-mgmt-integration.md``)
 maps the real endpoint response.
 """
 
 from __future__ import annotations
 
 import platform
+from datetime import datetime
 from typing import Any
 
 from .base import BaseManagementBackend
@@ -25,7 +27,7 @@ from .exceptions import (
     TransportError,
 )
 from .models import AlarmSubscription, DeviceStatus, ManagedChannel, ManagedDevice, ServerInfo
-from .web_models import PlatformLogEntry
+from .web_models import PlatformAcsStatus, PlatformLogEntry, PlatformServerStatus
 from .web_session import DEFAULT_TIMEOUT, WebSession, WebTransport
 
 _READS_NOT_IMPLEMENTED_MSG = (
@@ -34,6 +36,24 @@ _READS_NOT_IMPLEMENTED_MSG = (
 )
 
 # Endpoints confirmed in docs/ai/knowledge/vendor-boundaries/tvt-nvms-web-service-api.md.
+_SERVER_STATUS_PATH = "/service/SystemStatus/getServerStatusList"
+_DEVICE_STATUS_PATH = "/service/SystemStatus/getDeviceStatusList"
+_ACS_STATUS_PATH = "/service/SystemStatus/getAcsSystemStatusList"
+
+# Server-status fields ARE confirmed (name/ip/port/type/stateType/last*Time), but no
+# `guid`-shaped field was observed — the guid/name lookup below falls back tolerantly.
+# Device/ACS-status item field names are NOT field-verified live (see the KB doc) —
+# try each candidate in order and fall back to "" so a shape surprise degrades to an
+# empty field rather than a KeyError.
+_GUID_KEYS = ("guid", "id", "serverGuid", "deviceGuid", "acsGuid")
+_NAME_KEYS = ("name",)
+_KIND_KEYS = ("type", "kind")
+_STATE_KEYS = ("stateType", "state", "status")
+_ONLINE_TRUE_VALUES = frozenset({"online", "1", "true"})
+_ONLINE_FALSE_VALUES = frozenset({"offline", "0", "false"})
+_DEVICE_ID_KEYS = ("id", "deviceId", "guid", "sn", "serialNumber")
+_LAST_SEEN_KEYS = ("lastOnLineTime", "lastSeenTime", "lastSeen", "time")
+_TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S"
 _OPERATION_LOG_PATH = "/service/SystemMaintain/getLog"
 _LOG_EVENT_DICTIONARY_PATH = "/service/SystemMaintain/getLogEventDictionary"
 _STATUS_LOG_PATH = "/service/SystemStatus/getStateLog"
@@ -56,6 +76,31 @@ def _first_present(item: dict[str, str], keys: tuple[str, ...]) -> str:
         if value:
             return value
     return ""
+
+
+def _derive_online(item: dict[str, str], keys: tuple[str, ...]) -> bool | None:
+    """Tolerant online/offline read of a state-like field; unknown codes -> None.
+
+    ``stateType``/``state``/``status`` values are not field-verified beyond the
+    confirmed presence of ``stateType`` on server-status rows — only the
+    unambiguous online/offline spellings are mapped; anything else stays
+    unknown rather than risk mis-classifying an unrecognized status code.
+    """
+    value = _first_present(item, keys).strip().lower()
+    if value in _ONLINE_TRUE_VALUES:
+        return True
+    if value in _ONLINE_FALSE_VALUES:
+        return False
+    return None
+
+
+def _parse_timestamp(value: str) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.strptime(value, _TIMESTAMP_FORMAT)
+    except ValueError:
+        return None
 
 
 class WebManagementBackend(BaseManagementBackend):
@@ -131,7 +176,8 @@ class WebManagementBackend(BaseManagementBackend):
             ),
             notes=[
                 "Web backend authenticates via the documented reqLogin/doLogin handshake (TVT-1/TVT-2).",
-                "Device/channel/status/alarm/log reads are not yet implemented — their own PRs add them.",
+                "Server/device/ACS status reads are implemented (TVT-6).",
+                "Device/channel enumeration, alarm, and log reads are not yet implemented — their own PRs add them.",
             ],
         )
 
@@ -197,6 +243,44 @@ class WebManagementBackend(BaseManagementBackend):
         if self._session is None:
             raise ManagementNotAuthenticatedError("call login() before issuing requests")
         return self._session
+
+    def _list_statuses(self, path: str) -> list[dict[str, str]]:
+        session = self._require_session()
+        envelope = session.request(path)
+        if not envelope.ok:
+            raise ProtocolError(f"{path} failed: status={envelope.status!r} errorCode={envelope.error_code!r}")
+        return envelope.items
+
+    def get_server_statuses(self) -> list[PlatformServerStatus]:
+        """List management-server/sub-server statuses (``SystemStatus/getServerStatusList``)."""
+        statuses = []
+        for index, item in enumerate(self._list_statuses(_SERVER_STATUS_PATH)):
+            guid = _first_present(item, _GUID_KEYS) or _first_present(item, _NAME_KEYS) or str(index)
+            statuses.append(
+                PlatformServerStatus(
+                    guid=guid,
+                    name=_first_present(item, _NAME_KEYS),
+                    kind=_first_present(item, _KIND_KEYS),
+                    online=_derive_online(item, _STATE_KEYS),
+                    raw_data=dict(item),
+                )
+            )
+        return statuses
+
+    def get_acs_statuses(self) -> list[PlatformAcsStatus]:
+        """List access-control-server statuses (``SystemStatus/getAcsSystemStatusList``)."""
+        statuses = []
+        for index, item in enumerate(self._list_statuses(_ACS_STATUS_PATH)):
+            guid = _first_present(item, _GUID_KEYS) or _first_present(item, _NAME_KEYS) or str(index)
+            statuses.append(
+                PlatformAcsStatus(
+                    guid=guid,
+                    name=_first_present(item, _NAME_KEYS),
+                    online=_derive_online(item, _STATE_KEYS),
+                    raw_data=dict(item),
+                )
+            )
+        return statuses
 
     def _log_event_dictionary(self, session: WebSession) -> dict[str, str]:
         """Best-effort code->text decode for log entries; empty on any failure.
@@ -296,7 +380,19 @@ class WebManagementBackend(BaseManagementBackend):
         raise CapabilityNotAvailable(_READS_NOT_IMPLEMENTED_MSG)
 
     def get_device_statuses(self) -> list[DeviceStatus]:
-        raise CapabilityNotAvailable(_READS_NOT_IMPLEMENTED_MSG)
+        """List managed-device statuses (``SystemStatus/getDeviceStatusList``)."""
+        statuses = []
+        for index, item in enumerate(self._list_statuses(_DEVICE_STATUS_PATH)):
+            device_id = _first_present(item, _DEVICE_ID_KEYS) or str(index)
+            statuses.append(
+                DeviceStatus(
+                    device_id=device_id,
+                    online=_derive_online(item, _STATE_KEYS),
+                    last_seen_at=_parse_timestamp(_first_present(item, _LAST_SEEN_KEYS)),
+                    raw_data=dict(item),
+                )
+            )
+        return statuses
 
     def subscribe_alarms(self) -> AlarmSubscription:
         raise CapabilityNotAvailable(_READS_NOT_IMPLEMENTED_MSG)
