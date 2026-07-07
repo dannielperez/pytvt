@@ -3,10 +3,12 @@
 Wires :class:`~pytvt.platform_sdk.web_session.WebSession` (TVT-2, the real
 reqLogin/doLogin handshake) into the :class:`BaseManagementBackend` contract.
 ``login``/``diagnostics``/``get_context``/``load_sdk``/``close`` are fully
-implemented; every read method beyond that (device/channel/status/alarm
-listing) raises :class:`CapabilityNotAvailable` until its own PR
-(TVT-5..TVT-10, see ``docs/ai/backlog/tvt-mgmt-integration.md``) maps the
-real endpoint response.
+implemented; ``list_alarm_events``/``list_active_alarms`` (TVT-5) are
+implemented. Every other read method (device/channel enumeration, status,
+operation/status logs) raises :class:`CapabilityNotAvailable` until its own
+PR (TVT-6, TVT-8, TVT-9, TVT-10, see
+``docs/ai/backlog/tvt-mgmt-integration.md``) maps the real endpoint
+response.
 """
 
 from __future__ import annotations
@@ -16,14 +18,39 @@ from typing import Any
 
 from .base import BaseManagementBackend
 from .context import CapabilityMap, PlatformIdentity, SDKContext, SDKIdentity
-from .exceptions import CapabilityNotAvailable
+from .exceptions import CapabilityNotAvailable, ManagementNotAuthenticatedError, ProtocolError
 from .models import AlarmSubscription, DeviceStatus, ManagedChannel, ManagedDevice, ServerInfo
+from .web_models import PlatformAlarmRecord
 from .web_session import DEFAULT_TIMEOUT, WebSession, WebTransport
 
 _READS_NOT_IMPLEMENTED_MSG = (
     "Web management-server read not implemented yet. "
     "See docs/ai/backlog/tvt-mgmt-integration.md (TVT-5..TVT-10) for the slice that adds it."
 )
+
+# Endpoints confirmed in docs/ai/knowledge/vendor-boundaries/tvt-nvms-web-service-api.md.
+_ALARM_LIST_PATH = "/service/Alarm/getAlarmInfoList"
+# The KB endpoint catalog pairs getNodeList with "active alarms" (vs. getAlarmInfoList
+# for the historical event log) — the node/zone list is the closest documented match
+# for "what's currently alarming" and is unpaginated (a live snapshot, not a log).
+_ALARM_NODE_LIST_PATH = "/service/Alarm/getNodeList"
+
+# Item field names are NOT field-verified live for the alarm endpoints (see the KB
+# doc) — try each candidate in order and fall back to "" so a shape surprise
+# degrades to an empty field rather than a KeyError.
+_ALARM_ID_KEYS = ("alarmId", "id", "no", "serialNo", "guid")
+_ALARM_TYPE_KEYS = ("type", "alarmType", "eventType")
+_ALARM_DEVICE_ID_KEYS = ("deviceId", "devId", "deviceGuid")
+_ALARM_CHANNEL_ID_KEYS = ("channelId", "chnId", "channel")
+_ALARM_TIME_KEYS = ("time", "alarmTime", "occurTime")
+
+
+def _first_present(item: dict[str, str], keys: tuple[str, ...]) -> str:
+    for key in keys:
+        value = item.get(key)
+        if value:
+            return value
+    return ""
 
 
 class WebManagementBackend(BaseManagementBackend):
@@ -99,7 +126,8 @@ class WebManagementBackend(BaseManagementBackend):
             ),
             notes=[
                 "Web backend authenticates via the documented reqLogin/doLogin handshake (TVT-1/TVT-2).",
-                "Device/channel/status/alarm/log reads are not yet implemented — their own PRs add them.",
+                "Alarm reads are implemented (TVT-5).",
+                "Device/channel enumeration, status, and log reads are not yet implemented — their own PRs add them.",
             ],
         )
 
@@ -160,6 +188,39 @@ class WebManagementBackend(BaseManagementBackend):
         session.login()
         self._session = session
         return session.authenticated
+
+    def _require_session(self) -> WebSession:
+        if self._session is None:
+            raise ManagementNotAuthenticatedError("call login() before issuing requests")
+        return self._session
+
+    @staticmethod
+    def _alarm_record_from_item(item: dict[str, str], index: int) -> PlatformAlarmRecord:
+        alarm_id = _first_present(item, _ALARM_ID_KEYS) or str(index)
+        return PlatformAlarmRecord(
+            alarm_id=alarm_id,
+            alarm_type=_first_present(item, _ALARM_TYPE_KEYS),
+            device_id=_first_present(item, _ALARM_DEVICE_ID_KEYS),
+            channel_id=_first_present(item, _ALARM_CHANNEL_ID_KEYS),
+            occurred_at=_first_present(item, _ALARM_TIME_KEYS),
+            raw_data=dict(item),
+        )
+
+    def _list_alarm_records(self, path: str, *, form: dict[str, str] | None) -> list[PlatformAlarmRecord]:
+        session = self._require_session()
+        envelope = session.request(path, form=form)
+        if not envelope.ok:
+            raise ProtocolError(f"{path} failed: status={envelope.status!r} errorCode={envelope.error_code!r}")
+        return [self._alarm_record_from_item(item, index) for index, item in enumerate(envelope.items)]
+
+    def list_alarm_events(self, *, page_index: int = 1, page_size: int = 100) -> list[PlatformAlarmRecord]:
+        """List historical alarm events (``Alarm/getAlarmInfoList``), paginated."""
+        form = {"pageIndex": str(page_index), "pageSize": str(page_size)}
+        return self._list_alarm_records(_ALARM_LIST_PATH, form=form)
+
+    def list_active_alarms(self) -> list[PlatformAlarmRecord]:
+        """List currently-active alarm nodes/zones (``Alarm/getNodeList``)."""
+        return self._list_alarm_records(_ALARM_NODE_LIST_PATH, form=None)
 
     def get_server_info(self) -> ServerInfo:
         raise CapabilityNotAvailable(_READS_NOT_IMPLEMENTED_MSG)
