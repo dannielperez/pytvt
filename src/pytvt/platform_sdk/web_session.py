@@ -19,6 +19,7 @@ sanitized envelopes with no network; the default transport is stdlib
 
 from __future__ import annotations
 
+import ssl
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -96,7 +97,17 @@ class WebTransport(Protocol):
 
 
 class UrllibTransport:
-    """Default stdlib transport (``urllib``), one request per call."""
+    """Default stdlib transport (``urllib``), one request per call.
+
+    Args:
+        verify_tls: When False, builds an unverified SSL context (no cert/
+            hostname check) for ``https`` requests — many NVR management
+            web UIs ship a self-signed cert with no way to install a trusted
+            CA. Ignored for ``http`` requests. Defaults to True (verify).
+    """
+
+    def __init__(self, *, verify_tls: bool = True) -> None:
+        self._ssl_context = None if verify_tls else ssl._create_unverified_context()
 
     def request(
         self,
@@ -109,7 +120,7 @@ class UrllibTransport:
     ) -> WebHttpResponse:
         req = urllib.request.Request(url, data=body, headers=dict(headers), method=method)
         try:
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
+            with self._open(req, timeout) as resp:
                 return WebHttpResponse(
                     status=resp.status,
                     headers=tuple((k, v) for k, v in resp.getheaders()),
@@ -126,6 +137,11 @@ class UrllibTransport:
         except OSError as exc:  # URLError, socket.timeout, ConnectionError
             raise TransportError(f"management web request to {url} failed: {exc}") from exc
 
+    def _open(self, req: urllib.request.Request, timeout: float):
+        if self._ssl_context is not None:
+            return urllib.request.urlopen(req, timeout=timeout, context=self._ssl_context)
+        return urllib.request.urlopen(req, timeout=timeout)
+
 
 class WebSession:
     """Authenticated ``/service/*`` session (handshake, token+cookie, re-auth).
@@ -137,6 +153,9 @@ class WebSession:
         scheme: ``http`` or ``https``.
         port: TCP port; defaults to the scheme's standard port.
         timeout: Per-request timeout in seconds (every request carries it).
+        verify_tls: When False, the default transport skips TLS cert/hostname
+            verification (self-signed NVR certs are common). Ignored when an
+            explicit ``transport`` is supplied — the caller owns that choice.
         transport: Optional :class:`WebTransport`; defaults to urllib.
     """
 
@@ -149,6 +168,7 @@ class WebSession:
         scheme: str = "http",
         port: int | None = None,
         timeout: float = DEFAULT_TIMEOUT,
+        verify_tls: bool = True,
         transport: WebTransport | None = None,
     ) -> None:
         if scheme not in ("http", "https"):
@@ -157,7 +177,7 @@ class WebSession:
         self._scheme = scheme
         self._port = port if port is not None else (443 if scheme == "https" else 80)
         self._timeout = float(timeout)
-        self._transport: WebTransport = transport if transport is not None else UrllibTransport()
+        self._transport: WebTransport = transport if transport is not None else UrllibTransport(verify_tls=verify_tls)
         self._username = username
         # Vendor protocol derives everything re-auth needs from md5_hex(password);
         # keep only that digest so the plaintext never lives on the instance.
