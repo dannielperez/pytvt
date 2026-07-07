@@ -3,18 +3,12 @@
 Wires :class:`~pytvt.platform_sdk.web_session.WebSession` (TVT-2, the real
 reqLogin/doLogin handshake) into the :class:`BaseManagementBackend` contract.
 ``login``/``diagnostics``/``get_context``/``load_sdk``/``close`` are fully
-implemented; ``list_alarm_events``/``list_active_alarms`` (TVT-5) and
-``list_operation_logs``/``list_status_logs`` (TVT-9) are implemented. Every
-other read method (device/channel enumeration, status) raises
-:class:`CapabilityNotAvailable` until its own PR (TVT-6, TVT-8, TVT-10, see
-``docs/ai/backlog/tvt-mgmt-integration.md``) maps the real endpoint
-response.
-implemented; ``get_server_statuses``/``get_device_statuses``/
-``get_acs_statuses`` (TVT-6) and ``list_operation_logs``/``list_status_logs``
-(TVT-9) are implemented. Every other read method (device/channel
-enumeration, alarm listing) raises :class:`CapabilityNotAvailable` until its
-own PR (TVT-5, TVT-8, TVT-10, see ``docs/ai/backlog/tvt-mgmt-integration.md``)
-maps the real endpoint response.
+implemented; ``list_alarm_events``/``list_active_alarms`` (TVT-5),
+``get_server_statuses``/``get_device_statuses``/``get_acs_statuses`` (TVT-6),
+and ``list_operation_logs``/``list_status_logs`` (TVT-9) are implemented.
+Every other read method (device/channel enumeration) raises
+:class:`CapabilityNotAvailable` until its own PR (TVT-8, TVT-10, see
+``docs/ai/backlog/tvt-mgmt-integration.md``) maps the real endpoint response.
 """
 
 from __future__ import annotations
@@ -33,8 +27,12 @@ from .exceptions import (
     TransportError,
 )
 from .models import AlarmSubscription, DeviceStatus, ManagedChannel, ManagedDevice, ServerInfo
-from .web_models import PlatformAlarmRecord, PlatformLogEntry
-from .web_models import PlatformAcsStatus, PlatformLogEntry, PlatformServerStatus
+from .web_models import (
+    PlatformAcsStatus,
+    PlatformAlarmRecord,
+    PlatformLogEntry,
+    PlatformServerStatus,
+)
 from .web_session import DEFAULT_TIMEOUT, WebSession, WebTransport
 
 _READS_NOT_IMPLEMENTED_MSG = (
@@ -198,9 +196,9 @@ class WebManagementBackend(BaseManagementBackend):
             notes=[
                 "Web backend authenticates via the documented reqLogin/doLogin handshake (TVT-1/TVT-2).",
                 "Alarm reads are implemented (TVT-5).",
-                "Device/channel enumeration, status, and log reads are not yet implemented — their own PRs add them.",
                 "Server/device/ACS status reads are implemented (TVT-6).",
-                "Device/channel enumeration, alarm, and log reads are not yet implemented — their own PRs add them.",
+                "Operation/status log reads are implemented (TVT-9).",
+                "Device/channel enumeration is not yet implemented — their own PRs add them.",
             ],
         )
 
@@ -294,6 +292,7 @@ class WebManagementBackend(BaseManagementBackend):
     def list_active_alarms(self) -> list[PlatformAlarmRecord]:
         """List currently-active alarm nodes/zones (``Alarm/getNodeList``)."""
         return self._list_alarm_records(_ALARM_NODE_LIST_PATH, form=None)
+
     def _list_statuses(self, path: str) -> list[dict[str, str]]:
         session = self._require_session()
         envelope = session.request(path)
