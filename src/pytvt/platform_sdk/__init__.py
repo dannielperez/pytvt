@@ -41,6 +41,14 @@ from .sdk import (
     inspect_sdk_library,
 )
 from .sidecar import SidecarManagementBackend
+from .web_backend import WebManagementBackend
+from .web_models import (
+    PlatformAcsStatus,
+    PlatformAlarmRecord,
+    PlatformDeviceStatus,
+    PlatformLogEntry,
+    PlatformServerStatus,
+)
 
 __all__ = [
     # Client
@@ -73,10 +81,16 @@ __all__ = [
     "ManagedDevice",
     "ManagementServerInfo",
     "ResolvedSymbol",
+    "PlatformAcsStatus",
+    "PlatformAlarmRecord",
+    "PlatformDeviceStatus",
+    "PlatformLogEntry",
+    "PlatformServerStatus",
     "PlatformSdkManagementBackend",
     "SidecarManagementBackend",
     "SdkDiagnostics",
     "ServerInfo",
+    "WebManagementBackend",
     "export_evidence_records",
     "export_evidence_schema",
     "inspect_sdk_library",
