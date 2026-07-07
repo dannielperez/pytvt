@@ -352,8 +352,197 @@ def bind(lib: ct.CDLL) -> None:
     lib.NET_SDK_UnlockAccessControl.restype = ct.c_bool
     lib.NET_SDK_UnlockAccessControl.argtypes = [ct.c_long, ct.c_long]
 
+    # ── NetSDK 1.3.2 additions ──────────────────────────────────
+    # All optional: older libdvrnetsdk.so drops (<1.3.2) do not export them, so
+    # each is bound only when present. Wrappers that call them raise
+    # NetSdkCapabilityError on libraries that lack the symbol.
+    _bind_v132(lib)
+
     # NET_CLIENT_* compatibility is intentionally not auto-aliased here because
     # call signatures differ from NET_SDK_* and can crash the process.
+
+
+def _bind_v132(lib: ct.CDLL) -> None:
+    """Bind function prototypes new in the TVT NetSDK 1.3.2 device drop.
+
+    Every symbol is guarded with ``hasattr`` so :func:`bind` stays compatible
+    with older SDK binaries that predate these calls.
+    """
+    # ── Access control (door / gate) ────────────────────────────
+    if hasattr(lib, "NET_SDK_UnlockAccessControlEx"):
+        # UNLOCK_PARAM is passed by value.
+        lib.NET_SDK_UnlockAccessControlEx.restype = ct.c_bool
+        lib.NET_SDK_UnlockAccessControlEx.argtypes = [ct.c_long, ct.c_long, t.UNLOCK_PARAM]
+
+    if hasattr(lib, "NET_SDK_RollingGateControl"):
+        # ROLLING_GATE_EXECUTE (unsigned int enum) passed by value.
+        lib.NET_SDK_RollingGateControl.restype = ct.c_bool
+        lib.NET_SDK_RollingGateControl.argtypes = [ct.c_long, ct.c_uint]
+
+    if hasattr(lib, "NET_SDK_GetCallLog"):
+        # queryParam / num / totalNum are C++ references -> pointers on the ABI.
+        lib.NET_SDK_GetCallLog.restype = ct.c_bool
+        lib.NET_SDK_GetCallLog.argtypes = [
+            ct.c_long,  # lUserID
+            ct.POINTER(t.CALL_RECORD_QUERY_PARAM),  # const queryParam&
+            ct.POINTER(t.CALL_RECORD),  # pRecord (out array)
+            ct.c_uint,  # maxNum
+            ct.POINTER(ct.c_uint),  # num& (out)
+            ct.POINTER(ct.c_uint),  # totalNum& (out)
+        ]
+
+    # ── User accounts ───────────────────────────────────────────
+    if hasattr(lib, "NET_SDK_GetDeviceUsers"):
+        lib.NET_SDK_GetDeviceUsers.restype = ct.c_bool
+        lib.NET_SDK_GetDeviceUsers.argtypes = [
+            ct.c_long,
+            ct.POINTER(t.NET_SDK_USER_INFO),
+            ct.POINTER(ct.c_long),  # pUserCount (in: capacity, out: count)
+        ]
+
+    if hasattr(lib, "NET_SDK_ModifyIntegrateUser"):
+        lib.NET_SDK_ModifyIntegrateUser.restype = ct.c_bool
+        lib.NET_SDK_ModifyIntegrateUser.argtypes = [ct.c_long, ct.c_char_p, ct.c_char_p]
+
+    # ── NVR channel enumeration ─────────────────────────────────
+    if hasattr(lib, "NET_SDK_GetNvrChlInfo"):
+        lib.NET_SDK_GetNvrChlInfo.restype = ct.c_bool
+        lib.NET_SDK_GetNvrChlInfo.argtypes = [
+            ct.c_long,
+            ct.c_char_p,  # chlId (GUID string)
+            ct.POINTER(t.NVRChlInfoStruct),
+        ]
+
+    if hasattr(lib, "NET_SDK_QueryOnlineChlList"):
+        lib.NET_SDK_QueryOnlineChlList.restype = ct.c_bool
+        lib.NET_SDK_QueryOnlineChlList.argtypes = [
+            ct.c_long,
+            ct.POINTER(t.NVRChlListStruct),
+            ct.POINTER(ct.c_int),  # outSize
+        ]
+
+    # ── Recording status / device ───────────────────────────────
+    if hasattr(lib, "NET_SDK_GetRecordStatus"):
+        lib.NET_SDK_GetRecordStatus.restype = ct.c_long  # count, <0 error
+        lib.NET_SDK_GetRecordStatus.argtypes = [
+            ct.c_long,
+            ct.POINTER(t.NET_SDK_RECORD_STATUS),
+            ct.c_long,  # maxNum
+        ]
+
+    if hasattr(lib, "NET_SDK_GetRecordStatusEx"):
+        lib.NET_SDK_GetRecordStatusEx.restype = ct.c_long  # count, <0 error
+        lib.NET_SDK_GetRecordStatusEx.argtypes = [
+            ct.c_long,
+            ct.POINTER(t.NET_SDK_RECORD_STATUS_EX),
+            ct.c_long,  # maxNum
+        ]
+
+    if hasattr(lib, "NET_SDK_GetRecordDevice"):
+        lib.NET_SDK_GetRecordDevice.restype = ct.c_uint  # count
+        lib.NET_SDK_GetRecordDevice.argtypes = [
+            ct.c_long,
+            ct.POINTER(t.NET_SDK_RECORD_DEVICE),
+            ct.c_uint,  # maxNum
+        ]
+
+    if hasattr(lib, "NET_SDK_GetPlayBackSyncHandle"):
+        lib.NET_SDK_GetPlayBackSyncHandle.restype = ct.c_longlong  # POINTERHANDLE
+        lib.NET_SDK_GetPlayBackSyncHandle.argtypes = [ct.c_long, ct.c_long]
+
+    # ── Thermal snapshot ────────────────────────────────────────
+    if hasattr(lib, "NET_SDK_CaptureThermalJpeg"):
+        lib.NET_SDK_CaptureThermalJpeg.restype = ct.c_bool
+        lib.NET_SDK_CaptureThermalJpeg.argtypes = [
+            ct.c_long,  # lUserID
+            ct.c_long,  # lChannel
+            ct.c_long,  # dwResolution
+            ct.c_char_p,  # sJpegPicBuffer
+            ct.c_uint,  # dwPicBufSize
+            ct.POINTER(ct.c_uint),  # lpSizeReturned
+        ]
+
+    # ── Cloud upgrade ───────────────────────────────────────────
+    if hasattr(lib, "NET_SDK_CloudUpgrade"):
+        lib.NET_SDK_CloudUpgrade.restype = ct.c_bool
+        lib.NET_SDK_CloudUpgrade.argtypes = [ct.c_long, ct.c_char_p]
+
+    if hasattr(lib, "NET_SDK_CloudUpgradeNode"):
+        lib.NET_SDK_CloudUpgradeNode.restype = ct.c_bool
+        lib.NET_SDK_CloudUpgradeNode.argtypes = [ct.c_long, ct.c_long, ct.c_char_p]
+
+    if hasattr(lib, "NET_SDK_GetCloudUpgradeInfo"):
+        lib.NET_SDK_GetCloudUpgradeInfo.restype = ct.c_bool
+        lib.NET_SDK_GetCloudUpgradeInfo.argtypes = [
+            ct.c_long,
+            ct.POINTER(t.CLOUD_UPGRADE_INFO),
+            ct.c_long,  # lBuffSize
+            ct.POINTER(ct.c_long),  # pCuiCount
+        ]
+
+    # ── Smart-event config ──────────────────────────────────────
+    if hasattr(lib, "NET_SDK_GetSmartEventConfig"):
+        lib.NET_SDK_GetSmartEventConfig.restype = ct.c_bool
+        lib.NET_SDK_GetSmartEventConfig.argtypes = [
+            ct.c_long,  # lUserID
+            ct.c_uint,  # dwCommand
+            ct.c_long,  # lChannel
+            ct.c_void_p,  # lpOutBuffer
+            ct.c_uint,  # dwOutBufferSize
+            ct.POINTER(ct.c_uint),  # lpBytesReturned
+        ]
+
+    if hasattr(lib, "NET_SDK_EditSmartEventConfig"):
+        lib.NET_SDK_EditSmartEventConfig.restype = ct.c_bool
+        lib.NET_SDK_EditSmartEventConfig.argtypes = [
+            ct.c_long,  # lUserID
+            ct.c_uint,  # dwCommand
+            ct.c_long,  # lChannel
+            ct.c_void_p,  # lpInBuffer
+            ct.c_uint,  # dwInBufferSize
+        ]
+
+    if hasattr(lib, "NET_SDK_EditSmartEventPoint"):
+        # size_t is 8 bytes on the 64-bit target; TripwireDirection is an int enum.
+        lib.NET_SDK_EditSmartEventPoint.restype = ct.c_bool
+        lib.NET_SDK_EditSmartEventPoint.argtypes = [
+            ct.c_long,  # lUserID
+            ct.c_uint,  # dwCommand
+            ct.c_long,  # lChannel
+            ct.POINTER(t.NET_DVR_IVE_POINT_T),  # const points
+            ct.c_size_t,  # pCounts
+            ct.c_int,  # TripwireDirection
+        ]
+
+    # ── On-screen rule overlay (needs a live/playback handle) ────
+    if hasattr(lib, "NET_SDK_ShowRule"):
+        lib.NET_SDK_ShowRule.restype = ct.c_bool
+        lib.NET_SDK_ShowRule.argtypes = [
+            ct.c_longlong,  # POINTERHANDLE lPlayHandle
+            ct.c_long,  # lUserID
+            ct.c_long,  # lChannel
+            ct.c_bool,  # bShow
+        ]
+
+    if hasattr(lib, "NET_SDK_ShowRuleBoxList"):
+        # RULE_POINT_LIST passed by value.
+        lib.NET_SDK_ShowRuleBoxList.restype = ct.c_bool
+        lib.NET_SDK_ShowRuleBoxList.argtypes = [ct.c_longlong, t.RULE_POINT_LIST]
+
+    # ── Two-way audio / subscription callbacks ──────────────────
+    if hasattr(lib, "NET_SDK_StartVoiceComTalk"):
+        lib.NET_SDK_StartVoiceComTalk.restype = ct.c_longlong  # POINTERHANDLE
+        lib.NET_SDK_StartVoiceComTalk.argtypes = [
+            ct.c_long,  # lUserID
+            ct.c_bool,  # bNeedCBNoEncData
+            t.TALK_DATA_CALLBACK,  # fVoiceDataCallBack
+            ct.c_void_p,  # pUser
+            ct.c_long,  # lChannel
+        ]
+
+    if hasattr(lib, "NET_SDK_SetSubscribCallBack_V2"):
+        lib.NET_SDK_SetSubscribCallBack_V2.restype = ct.c_bool
+        lib.NET_SDK_SetSubscribCallBack_V2.argtypes = [t.SUBSCRIBE_CALLBACK_V2, ct.c_void_p]
 
 
 def _create_net_client_compatibility_layer(lib: ct.CDLL) -> None:

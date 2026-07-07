@@ -211,6 +211,29 @@ class SmartEventType(IntEnum):
     THERMAL_AOI_LEAVE = 0x2A
 
 
+# ── Access control ──────────────────────────────────────────────────
+
+
+class RollingGateExecute(IntEnum):
+    """ROLLING_GATE_EXECUTE — rolling/roller gate control action."""
+
+    UP = 1
+    DOWN = 2
+    RIGHT = 3
+    LEFT = 4
+
+
+# ── Smart-event rule geometry ──────────────────────────────────────
+
+
+class TripwireDirection(IntEnum):
+    """TripwireDirection — allowed crossing direction for a tripwire rule."""
+
+    NONE = 0
+    RIGHT_OR_TOP = 1
+    LEFT_OR_BOTTOM = 2
+
+
 # ── Disk status / property ─────────────────────────────────────────
 
 

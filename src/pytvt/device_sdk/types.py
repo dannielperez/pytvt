@@ -537,3 +537,243 @@ class NET_SDK_ALRAM_OUT_STATUS(ct.Structure):
         ("bOnlineStatus", ct.c_int),
         ("bSwitch", ct.c_int),
     ]
+
+
+# ── GUID (channel node id) ──────────────────────────────────────────
+# The SDK's `BOOL` typedef resolves to C++ ``bool`` (1 byte) on the Linux
+# target — every BOOL-returning binding uses ``ct.c_bool``, so BOOL struct
+# fields use ``ct.c_bool`` too. ``LONG`` is 8 bytes here (see bindings.py).
+
+
+class GUID(ct.Structure):
+    """Windows-style GUID used for NVR channel node ids (``guid.h``)."""
+
+    _pack_ = 4
+    _fields_ = [
+        ("Data1", ct.c_uint),
+        ("Data2", ct.c_ushort),
+        ("Data3", ct.c_ushort),
+        ("Data4", ct.c_ubyte * 8),
+    ]
+
+    @property
+    def as_string(self) -> str:
+        """Render as ``{XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX}`` (channel-node form)."""
+        d4 = bytes(self.Data4)
+        clock = d4[:2].hex().upper()
+        node = d4[2:].hex().upper()
+        return f"{{{self.Data1:08X}-{self.Data2:04X}-{self.Data3:04X}-{clock}-{node}}}"
+
+    @property
+    def channel(self) -> int:
+        """1-based channel number encoded in Data1 (matches web-CGI node ids)."""
+        return self.Data1
+
+
+# ── User accounts ───────────────────────────────────────────────────
+
+
+class NET_SDK_USER_GROUP(ct.Structure):
+    """User group (``NET_SDK_USER_GROUP``)."""
+
+    _pack_ = 4
+    _fields_ = [
+        ("szGroupGuid", ct.c_char * 48),
+        ("szGroupName", ct.c_char * 128),
+    ]
+
+
+class NET_SDK_USER_INFO(ct.Structure):
+    """Device user account from NET_SDK_GetDeviceUsers."""
+
+    _pack_ = 4
+    _fields_ = [
+        ("m_szUserName", ct.c_char * 36),
+        ("szGroup", NET_SDK_USER_GROUP),
+        ("m_szEmail", ct.c_char * 64),
+        ("m_szEnabled", ct.c_bool),
+        ("m_szAllowModifyPassword", ct.c_bool),
+        ("m_szClosePermissionControl", ct.c_bool),
+    ]
+
+
+# ── NVR channel info ────────────────────────────────────────────────
+
+
+class NVRChlInfoStruct(ct.Structure):
+    """IPC info for one NVR channel from NET_SDK_GetNvrChlInfo."""
+
+    _pack_ = 4
+    _fields_ = [
+        ("softwareVersion", ct.c_int),
+        ("productType", ct.c_int),
+        ("deviceType", ct.c_int),
+        ("supportSoftEncrypt", ct.c_int),
+        ("detailedSoftwareVersion", ct.c_char * 64),
+        ("mac", ct.c_char * 32),
+    ]
+
+
+class NVRChlListStruct(ct.Structure):
+    """Online channel GUID list from NET_SDK_QueryOnlineChlList."""
+
+    _pack_ = 4
+    _fields_ = [
+        ("chlList", (ct.c_char * 64) * 256),
+    ]
+
+
+# ── Recording status / device ──────────────────────────────────────
+
+
+class NET_SDK_RECORD_STATUS(ct.Structure):
+    """Per-channel recording status from NET_SDK_GetRecordStatus."""
+
+    _pack_ = 4
+    _fields_ = [
+        ("dwRecordType", ct.c_uint),  # DD_RECORD_TYPE
+        ("dwChannel", ct.c_uint),  # 0-based
+    ]
+
+
+class NET_SDK_RECORD_STATUS_EX(ct.Structure):
+    """Extended recording status from NET_SDK_GetRecordStatusEx."""
+
+    _pack_ = 4
+    _fields_ = [
+        ("deviceName", ct.c_char * 128),
+        ("dwRecordType", ct.c_uint),  # DD_RECORD_TYPE
+        ("dwChannel", ct.c_uint),  # 0-based
+        ("dwRecordStatus", ct.c_uint),  # DD_RECORD_STATUS
+        ("dwStreamType", ct.c_uint),  # NET_SDK_STREAM_TYPE
+        ("dwResolution", ct.c_uint),  # hi16=width, lo16=height
+        ("dwFrameRate", ct.c_uint),
+        ("dwQuality", ct.c_uint),  # bitrate cap /Kbps
+        ("dwBitType", ct.c_uint),  # DD_VIDEO_ENCODE_MODE
+        ("dwLevel", ct.c_uint),  # DD_IMAGE_QUALITY
+    ]
+
+    @property
+    def resolution_str(self) -> str:
+        return f"{(self.dwResolution >> 16) & 0xFFFF}x{self.dwResolution & 0xFFFF}"
+
+
+class NET_SDK_RECORD_DEVICE(ct.Structure):
+    """Recording device (channel node) from NET_SDK_GetRecordDevice."""
+
+    _pack_ = 4
+    _fields_ = [
+        ("nodeChlID", GUID),
+        ("deviceName", ct.c_char * 36),
+    ]
+
+
+# ── Access control (door / gate / call log) ─────────────────────────
+
+
+class UNLOCK_PARAM(ct.Structure):
+    """Door-unlock parameters for NET_SDK_UnlockAccessControlEx (by value)."""
+
+    _pack_ = 4
+    _fields_ = [
+        ("lockID", ct.c_int),  # 1-based; 0/absent unlocks all locks
+        ("resv", ct.c_char * 64),
+    ]
+
+
+class CALL_RECORD(ct.Structure):
+    """Intercom call-log entry from NET_SDK_GetCallLog."""
+
+    _pack_ = 4
+    _fields_ = [
+        ("missedCall", ct.c_bool),
+        ("devName", ct.c_char * 32),
+        ("callType", ct.c_uint),  # ACCESS_CONTROL_CALL_TYPE
+        ("recordTime", DD_TIME),
+        ("startTime", DD_TIME),
+        ("endTime", DD_TIME),
+        ("chlId", GUID),
+        ("devType", ct.c_uint),  # ACCESS_CONTROL_DEVICE_TYPE
+        ("communityNo", ct.c_uint),
+        ("sectorNo", ct.c_uint),
+        ("buildingNo", ct.c_uint),
+        ("unitNo", ct.c_uint),
+        ("floorNo", ct.c_uint),
+        ("doorStationNo", ct.c_uint),
+        ("resv", ct.c_char * 32),
+    ]
+
+
+class CALL_RECORD_QUERY_PARAM(ct.Structure):
+    """Query window for NET_SDK_GetCallLog (passed by const ref)."""
+
+    _pack_ = 4
+    _fields_ = [
+        ("startTime", DD_TIME),
+        ("endTime", DD_TIME),
+        ("pageIndex", ct.c_uint),  # 1-based
+        ("pageSize", ct.c_uint),
+        ("resv", ct.c_char * 32),
+    ]
+
+
+# ── Cloud upgrade ───────────────────────────────────────────────────
+
+
+class CLOUD_UPGRADE_INFO(ct.Structure):
+    """Cloud-upgrade state from NET_SDK_GetCloudUpgradeInfo."""
+
+    _pack_ = 4
+    _fields_ = [
+        ("chlid", ct.c_int),  # -1 = NVR itself, else channel
+        ("state", ct.c_char * 32),
+        ("progress", ct.c_int),  # 0-10000 (basis points)
+        ("version", ct.c_char * 128),
+        ("newVersionGUID", ct.c_char * 128),
+    ]
+
+
+# ── Smart-event rule geometry ───────────────────────────────────────
+
+
+class NET_DVR_IVE_POINT_T(ct.Structure):
+    """A single rule/tripwire point (NET_DVR_IVE_POINT_T)."""
+
+    _pack_ = 4
+    _fields_ = [
+        ("X", ct.c_int),
+        ("Y", ct.c_int),
+    ]
+
+
+MAX_RULE_NUMBER = 4
+
+
+class RULE_POINT(ct.Structure):
+    """Up to six on-screen rule-box corners (``_rule_point``)."""
+
+    _pack_ = 4
+    _fields_ = [(f"m_RulePoint_{axis}{i}", ct.c_int) for i in range(1, 7) for axis in ("x", "y")]
+
+
+class RULE_POINT_LIST(ct.Structure):
+    """Rule-box overlay list for NET_SDK_ShowRuleBoxList (by value)."""
+
+    _pack_ = 4
+    _fields_ = [
+        ("rule_point", RULE_POINT * MAX_RULE_NUMBER),
+    ]
+
+
+# ── Callback prototypes ─────────────────────────────────────────────
+# CALLBACK is cdecl on Linux, so CFUNCTYPE (cdecl) matches. Binary buffers are
+# passed as c_void_p (not c_char_p) so embedded NULs survive; wrappers copy out
+# the requested length with ctypes.string_at.
+
+# void(POINTERHANDLE lVoiceComHandle, char* pRecvDataBuffer, DWORD dwBufSize,
+#      BYTE byAudioFlag, void* pUser)
+TALK_DATA_CALLBACK = ct.CFUNCTYPE(None, ct.c_longlong, ct.c_void_p, ct.c_uint, ct.c_ubyte, ct.c_void_p)
+
+# void(LONG lUserID, LONG channelID, DWORD dwCommand, char* pBuf, DWORD dwBufLen,
+#      void* pUser)
+SUBSCRIBE_CALLBACK_V2 = ct.CFUNCTYPE(None, ct.c_long, ct.c_long, ct.c_uint, ct.c_void_p, ct.c_uint, ct.c_void_p)
