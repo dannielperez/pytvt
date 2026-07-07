@@ -9,6 +9,7 @@ failure mapping, per-request timeout, and the no-plaintext-password rule.
 from __future__ import annotations
 
 import json
+import ssl
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
@@ -355,3 +356,46 @@ class TestUrllibTransport:
     def test_rejects_bad_scheme_via_session_ctor(self):
         with pytest.raises(ValueError, match="scheme"):
             WebSession("nvms.example", USERNAME, PASSWORD, scheme="ftp")
+
+    def test_https_scheme_selected_in_request_url(self, monkeypatch):
+        seen_urls = []
+
+        def capture(req, **kwargs):
+            seen_urls.append(req.full_url)
+            raise OSError("stop after capture")
+
+        monkeypatch.setattr(urllib.request, "urlopen", capture)
+        session = WebSession("nvms.example", USERNAME, PASSWORD, scheme="https")
+        with pytest.raises(TransportError):
+            session.login()
+        assert seen_urls and seen_urls[0].startswith("https://nvms.example:443/")
+
+    def test_verify_tls_true_passes_no_ssl_context(self, monkeypatch):
+        seen_kwargs = []
+
+        def capture(req, **kwargs):
+            seen_kwargs.append(kwargs)
+            raise OSError("stop after capture")
+
+        monkeypatch.setattr(urllib.request, "urlopen", capture)
+        with pytest.raises(TransportError):
+            UrllibTransport(verify_tls=True).request(
+                "POST", "https://nvms.example:443/service/login/reqLogin", headers={}, body=b"", timeout=1.0
+            )
+        assert "context" not in seen_kwargs[0]
+
+    def test_verify_tls_false_passes_unverified_ssl_context(self, monkeypatch):
+        seen_kwargs = []
+
+        def capture(req, **kwargs):
+            seen_kwargs.append(kwargs)
+            raise OSError("stop after capture")
+
+        monkeypatch.setattr(urllib.request, "urlopen", capture)
+        with pytest.raises(TransportError):
+            UrllibTransport(verify_tls=False).request(
+                "POST", "https://nvms.example:443/service/login/reqLogin", headers={}, body=b"", timeout=1.0
+            )
+        context = seen_kwargs[0]["context"]
+        assert context.verify_mode == ssl.CERT_NONE
+        assert context.check_hostname is False
