@@ -9,6 +9,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **NetSDK 1.3.2 device-drop coverage** (`device_sdk/{bindings,types,constants,client}.py`).
+  Binds the 22 functions new in the TVT NetSDK 1.3.2 native drop (headers vendored
+  as reference at `tvt/docs/include_v1.3.2/`), grouped by capability:
+  - _Access control:_ `unlock_door_ex` (`NET_SDK_UnlockAccessControlEx`, per-lock),
+    `rolling_gate_control` (`NET_SDK_RollingGateControl`), `call_log`
+    (`NET_SDK_GetCallLog`, intercom call history with pagination).
+  - _Users:_ `device_users` (`NET_SDK_GetDeviceUsers`), `modify_integrate_user`
+    (`NET_SDK_ModifyIntegrateUser`).
+  - _NVR channels:_ `online_channels` (`NET_SDK_QueryOnlineChlList`),
+    `nvr_channel_info` (`NET_SDK_GetNvrChlInfo`).
+  - _Recording status:_ `record_status` / `record_status_ex`
+    (`NET_SDK_GetRecordStatus[Ex]`), `record_devices` (`NET_SDK_GetRecordDevice`),
+    `playback_sync_handle` (`NET_SDK_GetPlayBackSyncHandle`).
+  - _Thermal:_ `capture_thermal_jpeg` (`NET_SDK_CaptureThermalJpeg`).
+  - _Cloud upgrade:_ `cloud_upgrade` / `cloud_upgrade_node` /
+    `cloud_upgrade_info` (`NET_SDK_CloudUpgrade[Node]`, `NET_SDK_GetCloudUpgradeInfo`).
+  - _Smart-event config:_ `get_smart_event_config` / `edit_smart_event_config` /
+    `edit_smart_event_point` (opaque device payload passthrough +
+    `NET_DVR_IVE_POINT_T` geometry).
+  - _Live/playback overlay + audio:_ `show_rule` / `show_rule_boxes`
+    (`NET_SDK_ShowRule[BoxList]`), `start_voice_talk` (`NET_SDK_StartVoiceComTalk`,
+    two-way audio), and client-level `subscribe_v2`
+    (`NET_SDK_SetSubscribCallBack_V2`, process-wide event push).
+
+  New result dataclasses (`CallLogEntry`, `CloudUpgradeStatus`, `DeviceUser`,
+  `NvrChannelInfo`, `RecordDevice`, `RecordStatus`, `RecordStatusEx`) and enums
+  (`RollingGateExecute`, `TripwireDirection`) are exported from
+  `pytvt.device_sdk`. Every 1.3.2 symbol is bound only when the loaded
+  `libdvrnetsdk.so` exports it; wrappers raise `NetSdkCapabilityError` on older
+  drops, so the module stays backward compatible. Additive — no breaking changes.
+  (The 3 functions removed in 1.3.2 — `NET_SDK_Find*VehiclePic*` — were never
+  bound.)
+
 - **Encode-config surface promoted to the `pytvt.device_sdk` package API**
   (`device_sdk/__init__.py`). `EncodeStream`, `NodeEncodeInfo`, `RecordSchedule`
   and `NetSdkError` are now importable from `pytvt.device_sdk` (and listed in
