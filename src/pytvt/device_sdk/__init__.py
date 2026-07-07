@@ -19,6 +19,9 @@ Platform: Linux x86-64 and aarch64 only ($TVT_SDK_PATH or sdk_path=... to overri
 """
 
 from .client import (
+    CallLogEntry,
+    CloudUpgradeStatus,
+    DeviceUser,
     EncodeStream,
     NatLoginFailed,
     NatTimeoutError,
@@ -27,7 +30,11 @@ from .client import (
     NetSdkClient,
     NetSdkError,
     NodeEncodeInfo,
+    NvrChannelInfo,
+    RecordDevice,
     RecordSchedule,
+    RecordStatus,
+    RecordStatusEx,
     TVTClient,
 )
 from .constants import (
@@ -40,9 +47,11 @@ from .constants import (
     ImageMode,
     PtzCommand,
     PtzSpeed,
+    RollingGateExecute,
     SdkError,
     SmartEventType,
     StreamType,
+    TripwireDirection,
 )
 from .loader import NetSdkUnavailable, ensure_nat_support, is_netsdk_available
 from .model_capabilities import (
@@ -66,6 +75,13 @@ __all__ = [
     "EncodeStream",
     "NodeEncodeInfo",
     "RecordSchedule",
+    "CallLogEntry",
+    "CloudUpgradeStatus",
+    "DeviceUser",
+    "NvrChannelInfo",
+    "RecordDevice",
+    "RecordStatus",
+    "RecordStatusEx",
     "NatUnavailableError",
     "NatLoginFailed",
     "NatTimeoutError",
@@ -80,9 +96,11 @@ __all__ = [
     "ImageMode",
     "PtzCommand",
     "PtzSpeed",
+    "RollingGateExecute",
     "SdkError",
     "SmartEventType",
     "StreamType",
+    "TripwireDirection",
     "CameraFeature",
     "MODEL_CAPABILITIES",
     "FEATURE_SMART_EVENTS",

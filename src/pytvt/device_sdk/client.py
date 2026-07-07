@@ -22,6 +22,7 @@ import ctypes as ct
 import logging
 import re
 import time
+from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
@@ -35,12 +36,18 @@ from .constants import (
     PtzCommand,
     PtzSpeed,
     RecordType,
+    RollingGateExecute,
     SdkError,
     StreamType,
+    TripwireDirection,
 )
 from .loader import NetSdkUnavailable, ensure_nat_support, load_sdk
 from .types import (
+    CALL_RECORD,
+    CALL_RECORD_QUERY_PARAM,
+    CLOUD_UPGRADE_INFO,
     DD_TIME,
+    NET_DVR_IVE_POINT_T,
     NET_SDK_ALRAM_OUT_STATUS,
     NET_SDK_CH_DEVICE_STATUS,
     NET_SDK_DEV_SUPPORT,
@@ -53,7 +60,18 @@ from .types import (
     NET_SDK_LOG,
     NET_SDK_NVR_DISKREC_DATE_ITEM,
     NET_SDK_REC_FILE,
+    NET_SDK_RECORD_DEVICE,
+    NET_SDK_RECORD_STATUS,
+    NET_SDK_RECORD_STATUS_EX,
     NET_SDK_SMART_SUPPORT,
+    NET_SDK_USER_INFO,
+    RULE_POINT,
+    RULE_POINT_LIST,
+    SUBSCRIBE_CALLBACK_V2,
+    TALK_DATA_CALLBACK,
+    UNLOCK_PARAM,
+    NVRChlInfoStruct,
+    NVRChlListStruct,
 )
 
 logger = logging.getLogger(__name__)
@@ -177,6 +195,95 @@ class AlarmOutStatus:
     name: str
     online: bool
     active: bool
+
+
+@dataclass(frozen=True, slots=True)
+class DeviceUser:
+    """A user account on the device (NET_SDK_GetDeviceUsers)."""
+
+    name: str
+    group_name: str
+    group_guid: str
+    email: str
+    enabled: bool
+    allow_modify_password: bool
+    close_permission_control: bool
+
+
+@dataclass(frozen=True, slots=True)
+class RecordStatus:
+    """Per-channel recording status (NET_SDK_GetRecordStatus)."""
+
+    channel: int
+    record_type: int
+
+
+@dataclass(frozen=True, slots=True)
+class RecordStatusEx:
+    """Extended per-channel recording status (NET_SDK_GetRecordStatusEx)."""
+
+    channel: int
+    device_name: str
+    record_type: int
+    record_status: int
+    stream_type: int
+    resolution: str
+    frame_rate: int
+    bitrate_cap_kbps: int
+    bitrate_type: int
+    quality_level: int
+
+
+@dataclass(frozen=True, slots=True)
+class RecordDevice:
+    """A recording channel node (NET_SDK_GetRecordDevice)."""
+
+    channel: int
+    node_id: str
+    name: str
+
+
+@dataclass(frozen=True, slots=True)
+class NvrChannelInfo:
+    """IPC details for one NVR channel (NET_SDK_GetNvrChlInfo)."""
+
+    software_version: int
+    detailed_software_version: str
+    product_type: int
+    device_type: int
+    supports_soft_encrypt: bool
+    mac: str
+
+
+@dataclass(frozen=True, slots=True)
+class CallLogEntry:
+    """Intercom call-log entry (NET_SDK_GetCallLog)."""
+
+    missed: bool
+    device_name: str
+    call_type: int
+    record_time: datetime
+    start_time: datetime
+    end_time: datetime
+    channel_id: str
+    device_type: int
+    community_no: int
+    sector_no: int
+    building_no: int
+    unit_no: int
+    floor_no: int
+    door_station_no: int
+
+
+@dataclass(frozen=True, slots=True)
+class CloudUpgradeStatus:
+    """Cloud-upgrade state for the NVR or one channel (NET_SDK_GetCloudUpgradeInfo)."""
+
+    channel: int  # -1 == the NVR itself
+    state: str
+    progress_pct: float  # 0.0-100.0 (device reports basis points)
+    version: str
+    new_version_guid: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -370,6 +477,9 @@ class DeviceSession:
         self._target = target
         self._identifier = identifier
         self._handshake_duration_ms = handshake_duration_ms
+        # Keep ctypes voice-talk callbacks alive while the SDK holds them
+        # (handle -> (ctypes thunk, python target)); see start_voice_talk.
+        self._voice_callbacks: dict[int, tuple[object, object]] = {}
 
     def __enter__(self) -> DeviceSession:
         return self
@@ -401,6 +511,19 @@ class DeviceSession:
         if not ok:
             code = sdk._lib.NET_SDK_GetLastError()  # type: ignore[union-attr]
             raise NetSdkError(action, SdkError(code) if code in SdkError._value2member_map_ else code)
+
+    @staticmethod
+    def _require(symbol: str):
+        """Return the bound SDK function, or raise if the library lacks it.
+
+        The 1.3.2 additions are absent from older ``libdvrnetsdk.so`` drops; a
+        wrapper that calls one must fail with a clear capability error rather
+        than an ``AttributeError`` from the mock/real library.
+        """
+        fn = getattr(sdk._lib, symbol, None)
+        if fn is None:
+            raise NetSdkCapabilityError(f"Loaded TVT NetSDK does not export {symbol} (needs the 1.3.2+ device SDK).")
+        return fn
 
     # ── Logout ──────────────────────────────────────────────────
 
@@ -1145,6 +1268,346 @@ class DeviceSession:
             "UnlockAccessControl",
         )
 
+    def unlock_door_ex(self, *, lock_id: int = 0, channel: int = 0) -> None:
+        """Trigger a specific door lock (``NET_SDK_UnlockAccessControlEx``, 1.3.2+).
+
+        ``lock_id`` is the 1-based lock number; ``0`` unlocks every lock on the
+        device. Prefer this over :meth:`unlock_door` on multi-door controllers.
+        """
+        fn = self._require("NET_SDK_UnlockAccessControlEx")
+        param = UNLOCK_PARAM(lockID=lock_id)
+        self._check(fn(self._handle, channel, param), "UnlockAccessControlEx")
+
+    def rolling_gate_control(self, action: RollingGateExecute) -> None:
+        """Drive a rolling/roller gate (``NET_SDK_RollingGateControl``, 1.3.2+)."""
+        fn = self._require("NET_SDK_RollingGateControl")
+        self._check(fn(self._handle, int(action)), "RollingGateControl")
+
+    def call_log(
+        self,
+        start: datetime,
+        stop: datetime,
+        *,
+        page: int = 1,
+        page_size: int = 100,
+    ) -> tuple[list[CallLogEntry], int]:
+        """Query the intercom call log (``NET_SDK_GetCallLog``, 1.3.2+).
+
+        Returns ``(entries, total)`` where ``total`` is the server-side count for
+        the time window (for pagination); ``entries`` is the current page.
+        """
+        fn = self._require("NET_SDK_GetCallLog")
+        query = CALL_RECORD_QUERY_PARAM(
+            startTime=DD_TIME.from_datetime(start),
+            endTime=DD_TIME.from_datetime(stop),
+            pageIndex=max(1, page),
+            pageSize=page_size,
+        )
+        buf = (CALL_RECORD * page_size)()
+        num = ct.c_uint(0)
+        total = ct.c_uint(0)
+        self._check(
+            fn(self._handle, ct.byref(query), buf, page_size, ct.byref(num), ct.byref(total)),
+            "GetCallLog",
+        )
+        entries = [
+            CallLogEntry(
+                missed=bool(buf[i].missedCall),
+                device_name=buf[i].devName.decode("utf-8", errors="replace"),
+                call_type=buf[i].callType,
+                record_time=buf[i].recordTime.to_datetime(),
+                start_time=buf[i].startTime.to_datetime(),
+                end_time=buf[i].endTime.to_datetime(),
+                channel_id=buf[i].chlId.as_string,
+                device_type=buf[i].devType,
+                community_no=buf[i].communityNo,
+                sector_no=buf[i].sectorNo,
+                building_no=buf[i].buildingNo,
+                unit_no=buf[i].unitNo,
+                floor_no=buf[i].floorNo,
+                door_station_no=buf[i].doorStationNo,
+            )
+            for i in range(min(num.value, page_size))
+        ]
+        return entries, total.value
+
+    # ── User accounts ───────────────────────────────────────────
+
+    def device_users(self, max_users: int = 64) -> list[DeviceUser]:
+        """List device user accounts (``NET_SDK_GetDeviceUsers``, 1.3.2+)."""
+        fn = self._require("NET_SDK_GetDeviceUsers")
+        buf = (NET_SDK_USER_INFO * max_users)()
+        count = ct.c_long(max_users)
+        self._check(fn(self._handle, buf, ct.byref(count)), "GetDeviceUsers")
+        return [
+            DeviceUser(
+                name=buf[i].m_szUserName.decode("utf-8", errors="replace"),
+                group_name=buf[i].szGroup.szGroupName.decode("utf-8", errors="replace"),
+                group_guid=buf[i].szGroup.szGroupGuid.decode("utf-8", errors="replace"),
+                email=buf[i].m_szEmail.decode("utf-8", errors="replace"),
+                enabled=bool(buf[i].m_szEnabled),
+                allow_modify_password=bool(buf[i].m_szAllowModifyPassword),
+                close_permission_control=bool(buf[i].m_szClosePermissionControl),
+            )
+            for i in range(min(count.value, max_users))
+        ]
+
+    def modify_integrate_user(self, username: str, password: str) -> None:
+        """Change the integration user's credentials (``NET_SDK_ModifyIntegrateUser``, 1.3.2+)."""
+        fn = self._require("NET_SDK_ModifyIntegrateUser")
+        self._check(
+            fn(self._handle, username.encode("utf-8"), password.encode("utf-8")),
+            "ModifyIntegrateUser",
+        )
+
+    # ── NVR channel enumeration ─────────────────────────────────
+
+    def online_channels(self) -> list[str]:
+        """List online channel GUIDs on an NVR (``NET_SDK_QueryOnlineChlList``, 1.3.2+)."""
+        fn = self._require("NET_SDK_QueryOnlineChlList")
+        chl_list = NVRChlListStruct()
+        out_size = ct.c_int(0)
+        self._check(fn(self._handle, ct.byref(chl_list), ct.byref(out_size)), "QueryOnlineChlList")
+        count = max(0, min(out_size.value, 256))
+        # chlList is a nested c_char array; elements expose bytes via `.value`.
+        out = []
+        for i in range(count):
+            guid = chl_list.chlList[i].value
+            if guid:
+                out.append(guid.decode("utf-8", errors="replace"))
+        return out
+
+    def nvr_channel_info(self, channel_guid: str) -> NvrChannelInfo:
+        """Read IPC details for one NVR channel (``NET_SDK_GetNvrChlInfo``, 1.3.2+)."""
+        fn = self._require("NET_SDK_GetNvrChlInfo")
+        info = NVRChlInfoStruct()
+        self._check(
+            fn(self._handle, channel_guid.encode("utf-8"), ct.byref(info)),
+            "GetNvrChlInfo",
+        )
+        return NvrChannelInfo(
+            software_version=info.softwareVersion,
+            detailed_software_version=info.detailedSoftwareVersion.decode("utf-8", errors="replace"),
+            product_type=info.productType,
+            device_type=info.deviceType,
+            supports_soft_encrypt=bool(info.supportSoftEncrypt),
+            mac=info.mac.decode("utf-8", errors="replace"),
+        )
+
+    # ── Recording status / devices ──────────────────────────────
+
+    def record_status(self, max_channels: int = 256) -> list[RecordStatus]:
+        """Per-channel recording status (``NET_SDK_GetRecordStatus``, 1.3.2+)."""
+        fn = self._require("NET_SDK_GetRecordStatus")
+        buf = (NET_SDK_RECORD_STATUS * max_channels)()
+        count = fn(self._handle, buf, max_channels)
+        if count < 0:
+            raise NetSdkError("GetRecordStatus", self._sdk_last_error())
+        return [
+            RecordStatus(channel=buf[i].dwChannel, record_type=buf[i].dwRecordType)
+            for i in range(min(count, max_channels))
+        ]
+
+    def record_status_ex(self, max_channels: int = 256) -> list[RecordStatusEx]:
+        """Extended per-channel recording status (``NET_SDK_GetRecordStatusEx``, 1.3.2+)."""
+        fn = self._require("NET_SDK_GetRecordStatusEx")
+        buf = (NET_SDK_RECORD_STATUS_EX * max_channels)()
+        count = fn(self._handle, buf, max_channels)
+        if count < 0:
+            raise NetSdkError("GetRecordStatusEx", self._sdk_last_error())
+        return [
+            RecordStatusEx(
+                channel=buf[i].dwChannel,
+                device_name=buf[i].deviceName.decode("utf-8", errors="replace"),
+                record_type=buf[i].dwRecordType,
+                record_status=buf[i].dwRecordStatus,
+                stream_type=buf[i].dwStreamType,
+                resolution=buf[i].resolution_str,
+                frame_rate=buf[i].dwFrameRate,
+                bitrate_cap_kbps=buf[i].dwQuality,
+                bitrate_type=buf[i].dwBitType,
+                quality_level=buf[i].dwLevel,
+            )
+            for i in range(min(count, max_channels))
+        ]
+
+    def record_devices(self, max_devices: int = 256) -> list[RecordDevice]:
+        """List recording channel nodes (``NET_SDK_GetRecordDevice``, 1.3.2+)."""
+        fn = self._require("NET_SDK_GetRecordDevice")
+        buf = (NET_SDK_RECORD_DEVICE * max_devices)()
+        count = fn(self._handle, buf, max_devices)
+        return [
+            RecordDevice(
+                channel=buf[i].nodeChlID.channel,
+                node_id=buf[i].nodeChlID.as_string,
+                name=buf[i].deviceName.decode("utf-8", errors="replace"),
+            )
+            for i in range(min(count, max_devices))
+        ]
+
+    def playback_sync_handle(self, channel: int) -> int:
+        """Get a synchronized-playback handle for a channel (``NET_SDK_GetPlayBackSyncHandle``, 1.3.2+)."""
+        fn = self._require("NET_SDK_GetPlayBackSyncHandle")
+        handle = fn(self._handle, channel)
+        if handle <= 0:
+            raise NetSdkError("GetPlayBackSyncHandle", self._sdk_last_error())
+        return handle
+
+    # ── Thermal snapshot ────────────────────────────────────────
+
+    def capture_thermal_jpeg(
+        self,
+        channel: int,
+        *,
+        resolution: int = 0,
+        buf_size: int = 2 * 1024 * 1024,
+    ) -> bytes:
+        """Capture a thermal JPEG snapshot (``NET_SDK_CaptureThermalJpeg``, 1.3.2+)."""
+        fn = self._require("NET_SDK_CaptureThermalJpeg")
+        buf = ct.create_string_buffer(buf_size)
+        returned = ct.c_uint(0)
+        self._check(
+            fn(self._handle, channel, resolution, buf, buf_size, ct.byref(returned)),
+            "CaptureThermalJpeg",
+        )
+        return buf.raw[: returned.value]
+
+    # ── Cloud upgrade ───────────────────────────────────────────
+
+    def cloud_upgrade(self, version_guid: str) -> None:
+        """Start a cloud firmware upgrade of the device (``NET_SDK_CloudUpgrade``, 1.3.2+)."""
+        fn = self._require("NET_SDK_CloudUpgrade")
+        self._check(fn(self._handle, version_guid.encode("utf-8")), "CloudUpgrade")
+
+    def cloud_upgrade_node(self, channel: int, version_guid: str) -> None:
+        """Start a cloud upgrade of one NVR channel (``NET_SDK_CloudUpgradeNode``, 1.3.2+)."""
+        fn = self._require("NET_SDK_CloudUpgradeNode")
+        self._check(
+            fn(self._handle, channel, version_guid.encode("utf-8")),
+            "CloudUpgradeNode",
+        )
+
+    def cloud_upgrade_info(self, max_items: int = 256) -> list[CloudUpgradeStatus]:
+        """Read cloud-upgrade state for the NVR and its channels (``NET_SDK_GetCloudUpgradeInfo``, 1.3.2+)."""
+        fn = self._require("NET_SDK_GetCloudUpgradeInfo")
+        buf = (CLOUD_UPGRADE_INFO * max_items)()
+        count = ct.c_long(0)
+        self._check(fn(self._handle, buf, max_items, ct.byref(count)), "GetCloudUpgradeInfo")
+        return [
+            CloudUpgradeStatus(
+                channel=buf[i].chlid,
+                state=buf[i].state.decode("utf-8", errors="replace"),
+                progress_pct=buf[i].progress / 100.0,
+                version=buf[i].version.decode("utf-8", errors="replace"),
+                new_version_guid=buf[i].newVersionGUID.decode("utf-8", errors="replace"),
+            )
+            for i in range(min(count.value, max_items))
+        ]
+
+    # ── Smart-event configuration (opaque device payloads) ──────
+    # These marshal raw device config buffers keyed by ``command`` (an
+    # IVM_rule_config_type value). The payload schema is the device's, not
+    # ours — callers own encoding/decoding; the wrapper only moves bytes.
+
+    def get_smart_event_config(
+        self,
+        command: int,
+        channel: int,
+        *,
+        buf_size: int = 64 * 1024,
+    ) -> bytes:
+        """Read a smart-event config blob (``NET_SDK_GetSmartEventConfig``, 1.3.2+)."""
+        fn = self._require("NET_SDK_GetSmartEventConfig")
+        buf = ct.create_string_buffer(buf_size)
+        returned = ct.c_uint(0)
+        self._check(
+            fn(self._handle, command, channel, buf, buf_size, ct.byref(returned)),
+            "GetSmartEventConfig",
+        )
+        return buf.raw[: returned.value]
+
+    def edit_smart_event_config(self, command: int, channel: int, data: bytes) -> None:
+        """Write a smart-event config blob (``NET_SDK_EditSmartEventConfig``, 1.3.2+)."""
+        fn = self._require("NET_SDK_EditSmartEventConfig")
+        buf = ct.create_string_buffer(bytes(data), len(data))
+        self._check(
+            fn(self._handle, command, channel, buf, len(data)),
+            "EditSmartEventConfig",
+        )
+
+    def edit_smart_event_point(
+        self,
+        command: int,
+        channel: int,
+        points: list[tuple[int, int]],
+        direction: TripwireDirection = TripwireDirection.NONE,
+    ) -> None:
+        """Set a smart-event rule's point geometry (``NET_SDK_EditSmartEventPoint``, 1.3.2+).
+
+        ``points`` are ``(x, y)`` pairs in device coordinates; ``direction``
+        applies to tripwire rules.
+        """
+        fn = self._require("NET_SDK_EditSmartEventPoint")
+        arr = (NET_DVR_IVE_POINT_T * len(points))(*(NET_DVR_IVE_POINT_T(X=x, Y=y) for x, y in points))
+        self._check(
+            fn(self._handle, command, channel, arr, len(points), int(direction)),
+            "EditSmartEventPoint",
+        )
+
+    # ── On-screen AI rule overlay (needs a live/playback handle) ─
+
+    def show_rule(self, play_handle: int, channel: int, show: bool = True) -> None:
+        """Toggle the AI rule overlay on a live/playback window (``NET_SDK_ShowRule``, 1.3.2+)."""
+        fn = self._require("NET_SDK_ShowRule")
+        self._check(fn(play_handle, self._handle, channel, show), "ShowRule")
+
+    def show_rule_boxes(self, play_handle: int, rules: list[list[int]]) -> None:
+        """Draw up to four rule boxes on a play window (``NET_SDK_ShowRuleBoxList``, 1.3.2+).
+
+        Each rule is a flat list of up to 12 ints (x1,y1..x6,y6); short lists are
+        zero-padded, extra rules past four are ignored (SDK ``MAX_RULE_NUMBER``).
+        """
+        fn = self._require("NET_SDK_ShowRuleBoxList")
+        rule_list = RULE_POINT_LIST()
+        for i, coords in enumerate(rules[:4]):
+            padded = (list(coords) + [0] * 12)[:12]
+            rule_list.rule_point[i] = RULE_POINT(*padded)
+        self._check(fn(play_handle, rule_list), "ShowRuleBoxList")
+
+    # ── Two-way audio ───────────────────────────────────────────
+
+    def start_voice_talk(
+        self,
+        on_audio: Callable[[bytes, int], None],
+        *,
+        channel: int = -1,
+        need_raw: bool = False,
+    ) -> int:
+        """Start two-way audio and stream device audio to ``on_audio`` (``NET_SDK_StartVoiceComTalk``, 1.3.2+).
+
+        ``on_audio`` is invoked as ``on_audio(pcm_or_encoded_bytes, audio_flag)``.
+        Returns the voice handle. The callback reference is retained on the
+        session for the life of the handle so it is not garbage-collected while
+        the SDK still holds it.
+        """
+        fn = self._require("NET_SDK_StartVoiceComTalk")
+
+        def _trampoline(_handle, buf_ptr, buf_size, audio_flag, _user):
+            data = ct.string_at(buf_ptr, buf_size) if buf_ptr and buf_size else b""
+            on_audio(data, audio_flag)
+
+        cb = TALK_DATA_CALLBACK(_trampoline)
+        handle = fn(self._handle, need_raw, cb, None, channel)
+        if handle <= 0:
+            raise NetSdkError("StartVoiceComTalk", self._sdk_last_error())
+        # Keep both the ctypes thunk and the Python target alive.
+        self._voice_callbacks[handle] = (cb, on_audio)
+        return handle
+
+    def _sdk_last_error(self) -> SdkError | int:
+        code = sdk._lib.NET_SDK_GetLastError()  # type: ignore[union-attr]
+        return SdkError(code) if code in SdkError._value2member_map_ else code
+
 
 # ── NetSdkClient ────────────────────────────────────────────────────
 
@@ -1170,6 +1633,8 @@ class NetSdkClient:
         self._connect_timeout = connect_timeout
         self._recv_timeout = recv_timeout
         self._reconnect_interval = reconnect_interval
+        # Retain the global subscription thunk (see subscribe_v2).
+        self._subscribe_callback: tuple[object, object] | None = None
         self._lib = load_sdk(sdk_path=sdk_path)
         sdk.bind(self._lib)
         if not self._lib.NET_SDK_Init():
@@ -1247,6 +1712,36 @@ class NetSdkClient:
     ) -> None:
         """Enable SDK file logging."""
         self._lib.NET_SDK_SetLogToFile(True, log_dir.encode("utf-8"), auto_delete, level)
+
+    # ── Event subscription (process-global) ─────────────────────
+
+    def subscribe_v2(self, on_event: Callable[[int, int, int, bytes], None] | None) -> None:
+        """Register the process-wide push callback (``NET_SDK_SetSubscribCallBack_V2``, 1.3.2+).
+
+        ``on_event`` is invoked as ``on_event(user_id, channel_id, command, payload)``
+        for each subscription push. Pass ``None`` to clear the callback. The thunk
+        is retained on the client; this is a single global slot, so the last
+        registration wins.
+        """
+        fn = getattr(self._lib, "NET_SDK_SetSubscribCallBack_V2", None)
+        if fn is None:
+            raise NetSdkCapabilityError(
+                "Loaded TVT NetSDK does not export NET_SDK_SetSubscribCallBack_V2 (needs the 1.3.2+ device SDK)."
+            )
+        if on_event is None:
+            self._subscribe_callback = None
+            if not fn(SUBSCRIBE_CALLBACK_V2(0), None):
+                raise NetSdkError("SetSubscribCallBack_V2", self._sdk_error(self._last_error()))
+            return
+
+        def _trampoline(user_id, channel_id, command, buf_ptr, buf_len, _user):
+            data = ct.string_at(buf_ptr, buf_len) if buf_ptr and buf_len else b""
+            on_event(user_id, channel_id, command, data)
+
+        cb = SUBSCRIBE_CALLBACK_V2(_trampoline)
+        if not fn(cb, None):
+            raise NetSdkError("SetSubscribCallBack_V2", self._sdk_error(self._last_error()))
+        self._subscribe_callback = (cb, on_event)
 
     # ── Discovery ───────────────────────────────────────────────
 
