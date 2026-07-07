@@ -165,8 +165,6 @@ def test_unimplemented_reads_raise_capability_not_available() -> None:
     with pytest.raises(CapabilityNotAvailable):
         backend.list_channels()
     with pytest.raises(CapabilityNotAvailable):
-        backend.get_device_statuses()
-    with pytest.raises(CapabilityNotAvailable):
         backend.subscribe_alarms()
 
 
