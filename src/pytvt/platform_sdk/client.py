@@ -8,7 +8,8 @@ ManagementClient selects exactly ONE backend at login time:
     2. platform_sdk     — NVMS PlatformSDK (Plat_* symbols, libPlatClientSDK.so)
     3. sidecar           — sidecar bridge backend
     4. native_protocol  — native protocol backend stub
-    5. auto             — SDK-first fallback to native_protocol
+    5. web               — NVMS web management API (``/service/*``, TVT-1..TVT-3)
+    6. auto             — SDK-first fallback to native_protocol
 
 A single session ALWAYS uses one backend.  SDK + native mixing is never allowed
 within the same session.
@@ -43,12 +44,14 @@ from .platform_models import (
 )
 from .sdk import SdkManagementBackend
 from .sidecar import SidecarManagementBackend
+from .web_backend import WebManagementBackend
+from .web_session import DEFAULT_TIMEOUT as WEB_DEFAULT_TIMEOUT
 
 logger = logging.getLogger(__name__)
 
 SdkLoginMode = Literal["login", "login_ex"]
 SdkConnectType = Literal["tcp", "nat", "nat20"]
-BackendMode = Literal["auto", "native_linux_sdk", "platform_sdk", "native_protocol", "sidecar"]
+BackendMode = Literal["auto", "native_linux_sdk", "platform_sdk", "native_protocol", "sidecar", "web"]
 
 
 class ManagementClient:
@@ -66,6 +69,10 @@ class ManagementClient:
         backend_mode: BackendMode = "auto",
         sidecar_command: str | None = None,
         platform_sdk_path: str | None = None,
+        web_scheme: str = "http",
+        web_port: int | None = None,
+        web_timeout: float = WEB_DEFAULT_TIMEOUT,
+        web_verify_tls: bool = True,
     ) -> None:
         self.host = host
         self.port = port
@@ -76,6 +83,10 @@ class ManagementClient:
         self.backend_mode: BackendMode = backend_mode
         self.sidecar_command = sidecar_command
         self.platform_sdk_path = platform_sdk_path
+        self.web_scheme = web_scheme
+        self.web_port = web_port
+        self.web_timeout = web_timeout
+        self.web_verify_tls = web_verify_tls
         self._backend: BaseManagementBackend | None = None
 
     # ------------------------------------------------------------------
@@ -123,6 +134,16 @@ class ManagementClient:
         if self.backend_mode == "native_protocol":
             logger.debug("ManagementClient: native_protocol backend forced for %s", self.host)
             return NativeManagementBackend(self.host, port=self.port)
+
+        if self.backend_mode == "web":
+            logger.debug("ManagementClient: web backend forced for %s", self.host)
+            return WebManagementBackend(
+                self.host,
+                scheme=self.web_scheme,
+                port=self.web_port,
+                timeout=self.web_timeout,
+                verify_tls=self.web_verify_tls,
+            )
 
         if self.prefer_sdk and self.sdk_path:
             sdk = SdkManagementBackend(
@@ -373,13 +394,23 @@ class ManagementClient:
     def list_active_alarms(self) -> list[object]:
         return self._platform_call("list_active_alarms")  # type: ignore[return-value]
 
+    # -- Web-backend read methods (TVT-6/TVT-9; CapabilityNotAvailable until shipped) --
+    def list_status_logs(self, **kwargs: object) -> list[object]:
+        return self._platform_call("list_status_logs", **kwargs)  # type: ignore[return-value]
+
+    def get_server_statuses(self) -> list[object]:
+        return self._platform_call("get_server_statuses")  # type: ignore[return-value]
+
+    def get_acs_statuses(self) -> list[object]:
+        return self._platform_call("get_acs_statuses")  # type: ignore[return-value]
+
     # ------------------------------------------------------------------
     # Capability probes (do not require a session)
     # ------------------------------------------------------------------
 
     def supports_sdk(self) -> bool:
         """Return True if the SDK backend would be usable for this configuration."""
-        if self.backend_mode == "sidecar":
+        if self.backend_mode in ("sidecar", "web"):
             return False
         if not self.sdk_path:
             return False
@@ -439,6 +470,8 @@ class ManagementClient:
             return "platform_sdk"
         if isinstance(self._backend, SidecarManagementBackend):
             return "sidecar"
+        if isinstance(self._backend, WebManagementBackend):
+            return "web"
         if isinstance(self._backend, NativeManagementBackend):
             return "native"
         return self._backend.__class__.__name__.lower()
