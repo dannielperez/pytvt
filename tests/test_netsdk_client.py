@@ -11,10 +11,13 @@ import pytest
 from pytvt.device_sdk import bindings as sdk
 from pytvt.device_sdk.client import (
     AlarmOutStatus,
+    CallLogEntry,
     ChannelStatus,
+    CloudUpgradeStatus,
     DeviceInfo,
     DeviceSession,
     DeviceSupport,
+    DeviceUser,
     DiscoveredDevice,
     DiskInfo,
     EncodeStream,
@@ -23,12 +26,17 @@ from pytvt.device_sdk.client import (
     NatLoginFailed,
     NatTimeoutError,
     NatUnavailableError,
+    NetSdkCapabilityError,
     NetSdkClient,
     NetSdkError,
     NodeEncodeInfo,
+    NvrChannelInfo,
+    RecordDevice,
     RecordingDateRange,
     RecordingFile,
     RecordSchedule,
+    RecordStatus,
+    RecordStatusEx,
     SmartSupport,
     TVTClient,
 )
@@ -39,8 +47,10 @@ from pytvt.device_sdk.constants import (
     PtzCommand,
     PtzSpeed,
     RecordType,
+    RollingGateExecute,
     SdkError,
     StreamType,
+    TripwireDirection,
 )
 from pytvt.device_sdk.loader import NetSdkUnavailable
 from pytvt.device_sdk.types import (
@@ -822,3 +832,346 @@ class TestPackageExports:
         for name in ("EncodeStream", "NodeEncodeInfo", "RecordSchedule", "NetSdkError"):
             assert name in pkg.__all__
             assert getattr(pkg, name) is getattr(client_mod, name)
+
+
+# ══════════════════════════════════════════════════════════════════
+# NetSDK 1.3.2 additions
+# ══════════════════════════════════════════════════════════════════
+
+
+class TestAccessControlV132:
+    def test_unlock_door_ex(self, session, mock_lib):
+        mock_lib.NET_SDK_UnlockAccessControlEx.return_value = True
+        session.unlock_door_ex(lock_id=3, channel=2)
+        args = mock_lib.NET_SDK_UnlockAccessControlEx.call_args.args
+        assert args[0] == 1  # handle
+        assert args[1] == 2  # channel
+        assert args[2].lockID == 3  # UNLOCK_PARAM by value
+
+    def test_unlock_door_ex_failure(self, session, mock_lib):
+        mock_lib.NET_SDK_UnlockAccessControlEx.return_value = False
+        mock_lib.NET_SDK_GetLastError.return_value = 16
+        with pytest.raises(NetSdkError, match="UnlockAccessControlEx"):
+            session.unlock_door_ex()
+
+    def test_rolling_gate_control(self, session, mock_lib):
+        mock_lib.NET_SDK_RollingGateControl.return_value = True
+        session.rolling_gate_control(RollingGateExecute.DOWN)
+        mock_lib.NET_SDK_RollingGateControl.assert_called_once_with(1, 2)
+
+    def test_missing_symbol_raises_capability_error(self, session, mock_lib):
+        # Simulate an older libdvrnetsdk.so that lacks the 1.3.2 symbol.
+        mock_lib.NET_SDK_RollingGateControl = None
+        with pytest.raises(NetSdkCapabilityError, match="RollingGateControl"):
+            session.rolling_gate_control(RollingGateExecute.UP)
+
+
+class TestCallLogV132:
+    def test_call_log(self, session, mock_lib):
+        def fill(handle, query_ptr, buf, max_num, num_ptr, total_ptr):
+            buf[0].missedCall = True
+            buf[0].devName = b"Door Panel 1"
+            buf[0].callType = 3
+            buf[0].recordTime = DD_TIME.from_datetime(datetime(2026, 6, 1, 9, 30, 0))
+            buf[0].startTime = DD_TIME.from_datetime(datetime(2026, 6, 1, 9, 30, 5))
+            buf[0].endTime = DD_TIME.from_datetime(datetime(2026, 6, 1, 9, 30, 20))
+            buf[0].buildingNo = 7
+            buf[0].unitNo = 402
+            num_ptr._obj.value = 1
+            total_ptr._obj.value = 58
+            return True
+
+        mock_lib.NET_SDK_GetCallLog.side_effect = fill
+        entries, total = session.call_log(datetime(2026, 6, 1), datetime(2026, 6, 2), page=1, page_size=10)
+        assert total == 58
+        assert len(entries) == 1
+        e = entries[0]
+        assert e.missed is True
+        assert e.device_name == "Door Panel 1"
+        assert e.call_type == 3
+        assert e.building_no == 7
+        assert e.unit_no == 402
+        assert e.record_time == datetime(2026, 6, 1, 9, 30, 0)
+
+
+class TestUserAccountsV132:
+    def test_device_users(self, session, mock_lib):
+        def fill(handle, buf, count_ptr):
+            buf[0].m_szUserName = b"admin"
+            buf[0].szGroup.szGroupName = b"Administrators"
+            buf[0].szGroup.szGroupGuid = b"{group-guid}"
+            buf[0].m_szEmail = b"soc@uniquesecpr.com"
+            buf[0].m_szEnabled = True
+            buf[0].m_szAllowModifyPassword = True
+            buf[0].m_szClosePermissionControl = False
+            count_ptr._obj.value = 1
+            return True
+
+        mock_lib.NET_SDK_GetDeviceUsers.side_effect = fill
+        users = session.device_users()
+        assert len(users) == 1
+        u = users[0]
+        assert u.name == "admin"
+        assert u.group_name == "Administrators"
+        assert u.enabled is True
+        assert u.close_permission_control is False
+
+    def test_modify_integrate_user(self, session, mock_lib):
+        mock_lib.NET_SDK_ModifyIntegrateUser.return_value = True
+        session.modify_integrate_user("integrator", "s3cret")
+        mock_lib.NET_SDK_ModifyIntegrateUser.assert_called_once_with(1, b"integrator", b"s3cret")
+
+
+class TestNvrChannelsV132:
+    def test_online_channels(self, session, mock_lib):
+        def fill(handle, list_ptr, size_ptr):
+            lst = list_ptr._obj if hasattr(list_ptr, "_obj") else list_ptr.contents
+            lst.chlList[0].value = b"{00000001-0000-0000-0000-000000000000}"
+            lst.chlList[1].value = b"{00000002-0000-0000-0000-000000000000}"
+            size_ptr._obj.value = 2
+            return True
+
+        mock_lib.NET_SDK_QueryOnlineChlList.side_effect = fill
+        chans = session.online_channels()
+        assert chans == [
+            "{00000001-0000-0000-0000-000000000000}",
+            "{00000002-0000-0000-0000-000000000000}",
+        ]
+
+    def test_nvr_channel_info(self, session, mock_lib):
+        def fill(handle, chl_id, info_ptr):
+            info = info_ptr._obj if hasattr(info_ptr, "_obj") else info_ptr.contents
+            info.softwareVersion = 5
+            info.detailedSoftwareVersion = b"V5.1.2-build90116"
+            info.productType = 42
+            info.deviceType = 2
+            info.supportSoftEncrypt = 1
+            info.mac = b"00:11:22:33:44:55"
+            return True
+
+        mock_lib.NET_SDK_GetNvrChlInfo.side_effect = fill
+        info = session.nvr_channel_info("{00000001-0000-0000-0000-000000000000}")
+        assert info.detailed_software_version == "V5.1.2-build90116"
+        assert info.supports_soft_encrypt is True
+        assert info.mac == "00:11:22:33:44:55"
+        # chlId passed as bytes
+        assert mock_lib.NET_SDK_GetNvrChlInfo.call_args.args[1] == (b"{00000001-0000-0000-0000-000000000000}")
+
+
+class TestRecordStatusV132:
+    def test_record_status(self, session, mock_lib):
+        def fill(handle, buf, max_num):
+            buf[0].dwChannel = 0
+            buf[0].dwRecordType = 4
+            buf[1].dwChannel = 1
+            buf[1].dwRecordType = 2
+            return 2
+
+        mock_lib.NET_SDK_GetRecordStatus.side_effect = fill
+        result = session.record_status()
+        assert result == [RecordStatus(channel=0, record_type=4), RecordStatus(channel=1, record_type=2)]
+
+    def test_record_status_error(self, session, mock_lib):
+        mock_lib.NET_SDK_GetRecordStatus.return_value = -1
+        mock_lib.NET_SDK_GetLastError.return_value = 26
+        with pytest.raises(NetSdkError, match="GetRecordStatus"):
+            session.record_status()
+
+    def test_record_status_ex(self, session, mock_lib):
+        def fill(handle, buf, max_num):
+            buf[0].deviceName = b"Front Cam"
+            buf[0].dwChannel = 0
+            buf[0].dwRecordType = 4
+            buf[0].dwRecordStatus = 1
+            buf[0].dwStreamType = 0
+            buf[0].dwResolution = (2560 << 16) | 1440
+            buf[0].dwFrameRate = 25
+            buf[0].dwQuality = 4096
+            return 1
+
+        mock_lib.NET_SDK_GetRecordStatusEx.side_effect = fill
+        result = session.record_status_ex()
+        assert len(result) == 1
+        r = result[0]
+        assert r.device_name == "Front Cam"
+        assert r.resolution == "2560x1440"
+        assert r.frame_rate == 25
+        assert r.bitrate_cap_kbps == 4096
+
+    def test_record_devices(self, session, mock_lib):
+        def fill(handle, buf, max_num):
+            buf[0].nodeChlID.Data1 = 3
+            buf[0].deviceName = b"Lobby"
+            return 1
+
+        mock_lib.NET_SDK_GetRecordDevice.side_effect = fill
+        devs = session.record_devices()
+        assert len(devs) == 1
+        assert devs[0].channel == 3
+        assert devs[0].name == "Lobby"
+        assert devs[0].node_id.startswith("{00000003-")
+
+    def test_playback_sync_handle(self, session, mock_lib):
+        mock_lib.NET_SDK_GetPlayBackSyncHandle.return_value = 7777
+        assert session.playback_sync_handle(2) == 7777
+        mock_lib.NET_SDK_GetPlayBackSyncHandle.assert_called_once_with(1, 2)
+
+    def test_playback_sync_handle_error(self, session, mock_lib):
+        mock_lib.NET_SDK_GetPlayBackSyncHandle.return_value = 0
+        mock_lib.NET_SDK_GetLastError.return_value = 31
+        with pytest.raises(NetSdkError, match="GetPlayBackSyncHandle"):
+            session.playback_sync_handle(0)
+
+
+class TestThermalCaptureV132:
+    def test_capture_thermal_jpeg(self, session, mock_lib):
+        jpeg = b"\xff\xd8\xff\xe1thermal"
+
+        def fill(handle, channel, resolution, buf, buf_size, returned_ptr):
+            ct.memmove(buf, jpeg, len(jpeg))
+            returned_ptr._obj.value = len(jpeg)
+            return True
+
+        mock_lib.NET_SDK_CaptureThermalJpeg.side_effect = fill
+        out = session.capture_thermal_jpeg(channel=1)
+        assert out == jpeg
+
+
+class TestCloudUpgradeV132:
+    def test_cloud_upgrade(self, session, mock_lib):
+        mock_lib.NET_SDK_CloudUpgrade.return_value = True
+        session.cloud_upgrade("{ver-guid}")
+        mock_lib.NET_SDK_CloudUpgrade.assert_called_once_with(1, b"{ver-guid}")
+
+    def test_cloud_upgrade_node(self, session, mock_lib):
+        mock_lib.NET_SDK_CloudUpgradeNode.return_value = True
+        session.cloud_upgrade_node(5, "{ver-guid}")
+        mock_lib.NET_SDK_CloudUpgradeNode.assert_called_once_with(1, 5, b"{ver-guid}")
+
+    def test_cloud_upgrade_info(self, session, mock_lib):
+        def fill(handle, buf, max_num, count_ptr):
+            buf[0].chlid = -1
+            buf[0].state = b"downloading"
+            buf[0].progress = 4250  # 42.50%
+            buf[0].version = b"V5.0.0"
+            buf[0].newVersionGUID = b"{new-guid}"
+            count_ptr._obj.value = 1
+            return True
+
+        mock_lib.NET_SDK_GetCloudUpgradeInfo.side_effect = fill
+        infos = session.cloud_upgrade_info()
+        assert len(infos) == 1
+        assert infos[0].channel == -1
+        assert infos[0].state == "downloading"
+        assert infos[0].progress_pct == 42.5
+        assert infos[0].new_version_guid == "{new-guid}"
+
+
+class TestSmartEventConfigV132:
+    def test_get_smart_event_config(self, session, mock_lib):
+        payload = b"<config>tripwire</config>"
+
+        def fill(handle, command, channel, buf, buf_size, returned_ptr):
+            ct.memmove(buf, payload, len(payload))
+            returned_ptr._obj.value = len(payload)
+            return True
+
+        mock_lib.NET_SDK_GetSmartEventConfig.side_effect = fill
+        out = session.get_smart_event_config(command=4, channel=0)
+        assert out == payload
+
+    def test_edit_smart_event_config(self, session, mock_lib):
+        mock_lib.NET_SDK_EditSmartEventConfig.return_value = True
+        session.edit_smart_event_config(4, 0, b"<config/>")
+        args = mock_lib.NET_SDK_EditSmartEventConfig.call_args.args
+        assert args[0] == 1 and args[1] == 4 and args[2] == 0
+        assert args[4] == len(b"<config/>")
+
+    def test_edit_smart_event_point(self, session, mock_lib):
+        mock_lib.NET_SDK_EditSmartEventPoint.return_value = True
+        session.edit_smart_event_point(4, 0, [(10, 20), (30, 40)], direction=TripwireDirection.RIGHT_OR_TOP)
+        args = mock_lib.NET_SDK_EditSmartEventPoint.call_args.args
+        assert args[4] == 2  # point count
+        assert args[5] == int(TripwireDirection.RIGHT_OR_TOP)
+        assert args[3][0].X == 10 and args[3][1].Y == 40
+
+
+class TestRuleOverlayV132:
+    def test_show_rule(self, session, mock_lib):
+        mock_lib.NET_SDK_ShowRule.return_value = True
+        session.show_rule(play_handle=555, channel=2, show=True)
+        mock_lib.NET_SDK_ShowRule.assert_called_once_with(555, 1, 2, True)
+
+    def test_show_rule_boxes(self, session, mock_lib):
+        mock_lib.NET_SDK_ShowRuleBoxList.return_value = True
+        session.show_rule_boxes(555, [[1, 2, 3, 4]])
+        args = mock_lib.NET_SDK_ShowRuleBoxList.call_args.args
+        assert args[0] == 555
+        assert args[1].rule_point[0].m_RulePoint_x1 == 1
+        assert args[1].rule_point[0].m_RulePoint_y2 == 4
+
+
+class TestVoiceTalkV132:
+    def test_start_voice_talk(self, session, mock_lib):
+        received = []
+
+        def fake(handle, need_raw, cb, user, channel):
+            # Simulate the SDK delivering one audio frame via the callback.
+            data = b"pcmframe"
+            b = (ct.c_char * len(data)).from_buffer_copy(data)
+            cb(9001, ct.cast(b, ct.c_void_p), len(data), 1, None)
+            return 9001
+
+        mock_lib.NET_SDK_StartVoiceComTalk.side_effect = fake
+        h = session.start_voice_talk(lambda d, flag: received.append((d, flag)), channel=0)
+        assert h == 9001
+        assert received == [(b"pcmframe", 1)]
+        # Callback retained to survive GC while the SDK holds it.
+        assert 9001 in session._voice_callbacks
+
+    def test_start_voice_talk_error(self, session, mock_lib):
+        mock_lib.NET_SDK_StartVoiceComTalk.return_value = -1
+        mock_lib.NET_SDK_GetLastError.return_value = 27
+        with pytest.raises(NetSdkError, match="StartVoiceComTalk"):
+            session.start_voice_talk(lambda d, flag: None)
+
+
+class TestSubscribeV2:
+    def test_subscribe_v2_registers_and_dispatches(self, client, mock_lib):
+        events = []
+
+        def fake(cb, user):
+            payload = b'{"evt":"motion"}'
+            b = (ct.c_char * len(payload)).from_buffer_copy(payload)
+            cb(1, 2, 0x2A, ct.cast(b, ct.c_void_p), len(payload), None)
+            return True
+
+        mock_lib.NET_SDK_SetSubscribCallBack_V2.side_effect = fake
+        client.subscribe_v2(lambda uid, ch, cmd, data: events.append((uid, ch, cmd, data)))
+        assert events == [(1, 2, 0x2A, b'{"evt":"motion"}')]
+        assert client._subscribe_callback is not None
+
+    def test_subscribe_v2_clear(self, client, mock_lib):
+        mock_lib.NET_SDK_SetSubscribCallBack_V2.return_value = True
+        client.subscribe_v2(None)
+        assert client._subscribe_callback is None
+        mock_lib.NET_SDK_SetSubscribCallBack_V2.assert_called_once()
+
+
+class TestPackageExportsV132:
+    def test_v132_names_promoted_to_package(self):
+        import pytvt.device_sdk as pkg
+
+        for name in (
+            "CallLogEntry",
+            "CloudUpgradeStatus",
+            "DeviceUser",
+            "NvrChannelInfo",
+            "RecordDevice",
+            "RecordStatus",
+            "RecordStatusEx",
+            "RollingGateExecute",
+            "TripwireDirection",
+        ):
+            assert name in pkg.__all__
+            assert hasattr(pkg, name)
