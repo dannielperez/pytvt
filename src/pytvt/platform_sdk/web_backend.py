@@ -3,17 +3,12 @@
 Wires :class:`~pytvt.platform_sdk.web_session.WebSession` (TVT-2, the real
 reqLogin/doLogin handshake) into the :class:`BaseManagementBackend` contract.
 ``login``/``diagnostics``/``get_context``/``load_sdk``/``close`` are fully
-implemented; ``list_alarm_events``/``list_active_alarms`` (TVT-5) are
-implemented. Every other read method (device/channel enumeration, status,
-operation/status logs) raises :class:`CapabilityNotAvailable` until its own
-PR (TVT-6, TVT-8, TVT-9, TVT-10, see
+implemented; ``list_alarm_events``/``list_active_alarms`` (TVT-5) and
+``list_operation_logs``/``list_status_logs`` (TVT-9) are implemented. Every
+other read method (device/channel enumeration, status) raises
+:class:`CapabilityNotAvailable` until its own PR (TVT-6, TVT-8, TVT-10, see
 ``docs/ai/backlog/tvt-mgmt-integration.md``) maps the real endpoint
 response.
-implemented; ``list_operation_logs``/``list_status_logs`` are implemented
-(TVT-9). Every other read method (device/channel/status/alarm listing)
-raises :class:`CapabilityNotAvailable` until its own PR
-(TVT-5, TVT-6, TVT-8, TVT-10, see ``docs/ai/backlog/tvt-mgmt-integration.md``)
-maps the real endpoint response.
 """
 
 from __future__ import annotations
@@ -23,9 +18,6 @@ from typing import Any
 
 from .base import BaseManagementBackend
 from .context import CapabilityMap, PlatformIdentity, SDKContext, SDKIdentity
-from .exceptions import CapabilityNotAvailable, ManagementNotAuthenticatedError, ProtocolError
-from .models import AlarmSubscription, DeviceStatus, ManagedChannel, ManagedDevice, ServerInfo
-from .web_models import PlatformAlarmRecord
 from .exceptions import (
     CapabilityNotAvailable,
     ManagementNotAuthenticatedError,
@@ -34,7 +26,7 @@ from .exceptions import (
     TransportError,
 )
 from .models import AlarmSubscription, DeviceStatus, ManagedChannel, ManagedDevice, ServerInfo
-from .web_models import PlatformLogEntry
+from .web_models import PlatformAlarmRecord, PlatformLogEntry
 from .web_session import DEFAULT_TIMEOUT, WebSession, WebTransport
 
 _READS_NOT_IMPLEMENTED_MSG = (
@@ -249,6 +241,7 @@ class WebManagementBackend(BaseManagementBackend):
     def list_active_alarms(self) -> list[PlatformAlarmRecord]:
         """List currently-active alarm nodes/zones (``Alarm/getNodeList``)."""
         return self._list_alarm_records(_ALARM_NODE_LIST_PATH, form=None)
+
     def _log_event_dictionary(self, session: WebSession) -> dict[str, str]:
         """Best-effort code->text decode for log entries; empty on any failure.
 
