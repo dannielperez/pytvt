@@ -39,8 +39,10 @@ from .native import NativeManagementBackend
 from .platform_backend import PlatformSdkManagementBackend
 from .platform_models import (
     PlatformAlarmZone,
+    PlatformPermissionGroup,
     PlatformResource,
     PlatformServer,
+    PlatformUser,
 )
 from .sdk import SdkManagementBackend
 from .sidecar import SidecarManagementBackend
@@ -367,10 +369,13 @@ class ManagementClient:
         return self._platform_call("add_device", dry_run=dry_run, **payload)  # type: ignore[return-value]
 
     # -- Not-yet-reachable APIs (raise CapabilityNotAvailable) --
-    def list_users(self) -> list[object]:
+    def list_users(self) -> list[PlatformUser]:
         return self._platform_call("list_users")  # type: ignore[return-value]
 
-    def list_permission_groups(self) -> list[object]:
+    def list_roles(self) -> list[PlatformPermissionGroup]:
+        return self._platform_call("list_roles")  # type: ignore[return-value]
+
+    def list_permission_groups(self) -> list[PlatformPermissionGroup]:
         return self._platform_call("list_permission_groups")  # type: ignore[return-value]
 
     def list_logs(self, **kwargs: object) -> list[object]:

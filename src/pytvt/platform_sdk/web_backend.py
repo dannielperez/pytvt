@@ -5,7 +5,8 @@ reqLogin/doLogin handshake) into the :class:`BaseManagementBackend` contract.
 ``login``/``diagnostics``/``get_context``/``load_sdk``/``close`` are fully
 implemented; ``list_alarm_events``/``list_active_alarms`` (TVT-5),
 ``get_server_statuses``/``get_device_statuses``/``get_acs_statuses`` (TVT-6),
-and ``list_operation_logs``/``list_status_logs`` (TVT-9) are implemented.
+``list_operation_logs``/``list_status_logs`` (TVT-9), and
+``list_users``/``list_roles``/``list_permission_groups`` (TVT-8) are implemented.
 Every other read method (device/channel enumeration) raises
 :class:`CapabilityNotAvailable` until its own PR (TVT-8, TVT-10, see
 ``docs/ai/backlog/tvt-mgmt-integration.md``) maps the real endpoint response.
@@ -27,6 +28,8 @@ from .exceptions import (
     TransportError,
 )
 from .models import AlarmSubscription, DeviceStatus, ManagedChannel, ManagedDevice, ServerInfo
+from .platform_constants import decode_area_rights, decode_system_rights, redact_sensitive
+from .platform_models import PlatformPermissionGroup, PlatformUser
 from .web_models import (
     PlatformAcsStatus,
     PlatformAlarmRecord,
@@ -76,6 +79,9 @@ _TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S"
 _OPERATION_LOG_PATH = "/service/SystemMaintain/getLog"
 _LOG_EVENT_DICTIONARY_PATH = "/service/SystemMaintain/getLogEventDictionary"
 _STATUS_LOG_PATH = "/service/SystemStatus/getStateLog"
+_USER_LIST_PATH = "/service/User/getUserList"
+_ROLE_LIST_PATH = "/service/User/getRoleList"
+_AUTH_GROUP_LIST_PATH = "/service/User/getAuthGroupList"
 
 # Item field names are NOT field-verified live for the log endpoints (see the KB doc) —
 # try each candidate in order and fall back to "" so a shape surprise degrades to an
@@ -87,6 +93,19 @@ _LOG_TIME_KEYS = ("time", "logTime", "occurTime", "operateTime")
 _LOG_OPERATOR_KEYS = ("user", "userName", "operator", "account")
 _DICTIONARY_CODE_KEYS = ("type", "id", "code")
 _DICTIONARY_TEXT_KEYS = ("name", "desc", "description", "text")
+_USER_NAME_KEYS = ("userName", "username", "name", "account")
+_USER_ENABLED_KEYS = ("enabled", "enable", "isEnabled", "status")
+_USER_GROUP_KEYS = ("permissionGroup", "authGroup", "roleName", "role", "groupName")
+_USER_MAC_BIND_KEYS = ("macBindStatus", "macBind", "bindMac", "macBound")
+_USER_MAC_KEYS = ("macAddress", "mac", "bindMacAddress")
+_USER_EMAIL_KEYS = ("email", "mail")
+_USER_DESCRIPTION_KEYS = ("description", "desc", "remark", "memo")
+_USER_ID_KEYS = ("userId", "id", "uid")
+_PASSWORD_KEYS = ("password", "passwd", "pwd")
+_GROUP_ID_KEYS = ("groupId", "roleId", "authGroupId", "id")
+_GROUP_NAME_KEYS = ("name", "groupName", "roleName", "authGroupName")
+_SYSTEM_PERMISSION_MASK_KEYS = ("systemAndOperateRright", "systemAndOperateRight", "systemPermission", "systemRight")
+_AREA_PERMISSION_MASK_KEYS = ("areaRight", "areaPermission", "areaPermissionMask")
 
 
 def _first_present(item: dict[str, str], keys: tuple[str, ...]) -> str:
@@ -120,6 +139,17 @@ def _parse_timestamp(value: str) -> datetime | None:
         return datetime.strptime(value, _TIMESTAMP_FORMAT)
     except ValueError:
         return None
+
+
+def _parse_int(value: str) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _parse_bool(value: str) -> bool:
+    return value.strip().lower() in {"1", "true", "yes", "enabled", "enable", "online"}
 
 
 class WebManagementBackend(BaseManagementBackend):
@@ -198,6 +228,7 @@ class WebManagementBackend(BaseManagementBackend):
                 "Alarm reads are implemented (TVT-5).",
                 "Server/device/ACS status reads are implemented (TVT-6).",
                 "Operation/status log reads are implemented (TVT-9).",
+                "Users/roles/permission-group reads are implemented (TVT-8); credentials are never returned.",
                 "Device/channel enumeration is not yet implemented — their own PRs add them.",
             ],
         )
@@ -418,6 +449,60 @@ class WebManagementBackend(BaseManagementBackend):
             page_index=page_index,
             page_size=page_size,
         )
+
+    def _list_authority_items(self, path: str) -> list[dict[str, str]]:
+        session = self._require_session()
+        envelope = session.request(path)
+        if not envelope.ok:
+            raise ProtocolError(f"{path} failed: status={envelope.status!r} errorCode={envelope.error_code!r}")
+        return envelope.items
+
+    @staticmethod
+    def _user_from_item(item: dict[str, str]) -> PlatformUser:
+        password_value = _first_present(item, _PASSWORD_KEYS)
+        return PlatformUser(
+            username=_first_present(item, _USER_NAME_KEYS),
+            enabled=_parse_bool(_first_present(item, _USER_ENABLED_KEYS)),
+            permission_group=_first_present(item, _USER_GROUP_KEYS),
+            mac_bind_status=_parse_bool(_first_present(item, _USER_MAC_BIND_KEYS)),
+            mac_address=_first_present(item, _USER_MAC_KEYS),
+            email=_first_present(item, _USER_EMAIL_KEYS),
+            description=_first_present(item, _USER_DESCRIPTION_KEYS),
+            user_id=_parse_int(_first_present(item, _USER_ID_KEYS)),
+            has_password=bool(password_value),
+        )
+
+    @staticmethod
+    def _permission_group_from_item(item: dict[str, str], index: int) -> PlatformPermissionGroup:
+        system_mask = _parse_int(_first_present(item, _SYSTEM_PERMISSION_MASK_KEYS))
+        area_mask = _parse_int(_first_present(item, _AREA_PERMISSION_MASK_KEYS))
+        return PlatformPermissionGroup(
+            group_id=_parse_int(_first_present(item, _GROUP_ID_KEYS)) or index,
+            name=_first_present(item, _GROUP_NAME_KEYS),
+            system_permission_mask=system_mask,
+            system_permissions=decode_system_rights(system_mask),
+            area_permission_mask=area_mask,
+            area_permissions=decode_area_rights(area_mask),
+            raw_data=redact_sensitive(dict(item)),
+        )
+
+    def list_users(self) -> list[PlatformUser]:
+        """List management-server users (``User/getUserList``), without credentials."""
+        return [self._user_from_item(item) for item in self._list_authority_items(_USER_LIST_PATH)]
+
+    def list_roles(self) -> list[PlatformPermissionGroup]:
+        """List role records (``User/getRoleList``) as permission-group DTOs."""
+        return [
+            self._permission_group_from_item(item, index)
+            for index, item in enumerate(self._list_authority_items(_ROLE_LIST_PATH))
+        ]
+
+    def list_permission_groups(self) -> list[PlatformPermissionGroup]:
+        """List authority groups (``User/getAuthGroupList``) as permission-group DTOs."""
+        return [
+            self._permission_group_from_item(item, index)
+            for index, item in enumerate(self._list_authority_items(_AUTH_GROUP_LIST_PATH))
+        ]
 
     def get_server_info(self) -> ServerInfo:
         raise CapabilityNotAvailable(_READS_NOT_IMPLEMENTED_MSG)
