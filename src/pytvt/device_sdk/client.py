@@ -339,6 +339,48 @@ class RecordSchedule:
     intelligent: bool  # intelligentRec — AI
 
 
+@dataclass(frozen=True, slots=True)
+class MotionConfig:
+    """Per-channel motion-detector configuration (``queryMotion``).
+
+    ``mask`` is the detector grid as binary row strings: ``"1"`` enables a
+    cell and ``"0"`` excludes it.  Sensitivity bounds and supported hold times
+    come from the device because they vary across camera firmware.
+    """
+
+    channel: int  # 1-based channel number
+    node_id: str
+    enabled: bool
+    sensitivity: int
+    sensitivity_min: int
+    sensitivity_max: int
+    hold_time_seconds: int | None
+    allowed_hold_times: tuple[int, ...]
+    mask: tuple[str, ...]
+    person_filter: bool | None
+    car_filter: bool | None
+
+    @property
+    def rows(self) -> int:
+        return len(self.mask)
+
+    @property
+    def columns(self) -> int:
+        return len(self.mask[0]) if self.mask else 0
+
+    @property
+    def active_cells(self) -> int:
+        return sum(row.count("1") for row in self.mask)
+
+    @property
+    def total_cells(self) -> int:
+        return self.rows * self.columns
+
+    @property
+    def coverage_percent(self) -> float:
+        return (self.active_cells / self.total_cells * 100.0) if self.total_cells else 0.0
+
+
 # ── Lenient XML helpers for api_call responses ──────────────────────
 # Device CGI XML is NOT guaranteed well-formed (camera names routinely contain
 # raw '&' and other chars that break strict parsers), so parse with regex.
@@ -1052,6 +1094,194 @@ class DeviceSession:
                 )
             )
         return out
+
+    def motion_config(self, channel: int) -> MotionConfig:
+        """Read one channel's motion detector settings (``queryMotion``).
+
+        The request is routed through :meth:`api_call`, so it works for direct
+        and NAT SDK sessions without opening or authenticating to the NVR's HTTP
+        service.
+        """
+        if channel < 1:
+            raise ValueError("channel must be a 1-based positive integer")
+        node_id = _node_guid(channel)
+        request = (
+            '<?xml version="1.0" encoding="utf-8" ?>'
+            '<request version="1.0" systemType="NVMS-9000" clientType="WEB">'
+            f"<condition><chlId>{node_id}</chlId></condition>"
+            "<requireField><param/></requireField></request>"
+        )
+        xml = self.api_call("queryMotion", request=request)
+        if _xml_status(xml) != "success":
+            raise NetSdkError(f"queryMotion(ch{channel}) rejected: {xml[:160]}", -1)
+
+        chl = re.search(r'<chl\s+id="([^"]+)"[^>]*>(.*?)</chl>', xml, re.S)
+        if not chl:
+            raise NetSdkError(f"queryMotion(ch{channel}) returned no channel config", -1)
+        response_id, body = chl.groups()
+        if response_id.upper() != node_id:
+            raise NetSdkError(f"queryMotion(ch{channel}) returned config for {response_id}", -1)
+        param = re.search(r"<param>(.*?)</param>", body, re.S)
+        if not param:
+            raise NetSdkError(f"queryMotion(ch{channel}) returned no param block", -1)
+        body = param.group(1)
+
+        switch = re.search(r"<switch>\s*(true|false)\s*</switch>", body)
+        sensitivity = re.search(r"<sensitivity\s+([^>]*)>\s*(\d+)\s*</sensitivity>", body)
+        area = re.search(r"<area\s+([^>]*)>(.*?)</area>", body, re.S)
+        if not switch or not sensitivity or not area:
+            raise NetSdkError(f"queryMotion(ch{channel}) returned an incomplete config", -1)
+
+        sensitivity_attrs = _xml_attrs(sensitivity.group(1))
+        try:
+            sensitivity_min = int(sensitivity_attrs["min"])
+            sensitivity_max = int(sensitivity_attrs["max"])
+            sensitivity_value = int(sensitivity.group(2))
+        except (KeyError, ValueError) as exc:
+            raise NetSdkError(f"queryMotion(ch{channel}) returned invalid sensitivity bounds", -1) from exc
+        if not sensitivity_min <= sensitivity_value <= sensitivity_max:
+            raise NetSdkError(f"queryMotion(ch{channel}) returned sensitivity outside its bounds", -1)
+
+        area_attrs = _xml_attrs(area.group(1))
+        item_type = re.search(r"<itemType\s+([^>]*)/?>", area.group(2))
+        item_attrs = _xml_attrs(item_type.group(1)) if item_type else {}
+        mask = tuple(x.strip() for x in re.findall(r"<item>\s*([^<]+?)\s*</item>", area.group(2), re.S))
+        try:
+            expected_rows = int(area_attrs["count"])
+            min_columns = int(item_attrs["minLen"])
+            max_columns = int(item_attrs["maxLen"])
+        except (KeyError, ValueError) as exc:
+            raise NetSdkError(f"queryMotion(ch{channel}) returned invalid area dimensions", -1) from exc
+        if (
+            not mask
+            or len(mask) != expected_rows
+            or min_columns != max_columns
+            or any(len(row) != max_columns or set(row) - {"0", "1"} for row in mask)
+        ):
+            raise NetSdkError(f"queryMotion(ch{channel}) returned an invalid area mask", -1)
+
+        hold = re.search(r"<holdTime(?:\s+[^>]*)?>\s*(\d+)\s*</holdTime>", body)
+        hold_note = re.search(r"<holdTimeNote>\s*([^<]*)\s*</holdTimeNote>", body)
+
+        def _object_filter(name: str) -> bool | None:
+            group = re.search(rf"<{name}>(.*?)</{name}>", body, re.S)
+            value = re.search(r"<switch>\s*(true|false)\s*</switch>", group.group(1)) if group else None
+            return (value.group(1) == "true") if value else None
+
+        return MotionConfig(
+            channel=channel,
+            node_id=response_id,
+            enabled=switch.group(1) == "true",
+            sensitivity=sensitivity_value,
+            sensitivity_min=sensitivity_min,
+            sensitivity_max=sensitivity_max,
+            hold_time_seconds=int(hold.group(1)) if hold else None,
+            allowed_hold_times=tuple(int(x) for x in re.findall(r"\d+", hold_note.group(1))) if hold_note else (),
+            mask=mask,
+            person_filter=_object_filter("person"),
+            car_filter=_object_filter("car"),
+        )
+
+    def set_motion_config(
+        self,
+        channel: int,
+        *,
+        enabled: bool | None = None,
+        sensitivity: int | None = None,
+        hold_time_seconds: int | None = None,
+        mask: tuple[str, ...] | list[str] | None = None,
+        person_filter: bool | None = None,
+        car_filter: bool | None = None,
+        verify: bool = True,
+    ) -> MotionConfig:
+        """Safely patch one channel's motion settings (``editMotion``).
+
+        This is a read-modify-write operation: unspecified values are preserved,
+        values are checked against the camera-reported bounds, and the effective
+        configuration is re-read by default.  A no-op request performs no write.
+        """
+        current = self.motion_config(channel)
+        new_enabled = current.enabled if enabled is None else enabled
+        new_sensitivity = current.sensitivity if sensitivity is None else sensitivity
+        if not current.sensitivity_min <= new_sensitivity <= current.sensitivity_max:
+            raise ValueError(f"sensitivity must be between {current.sensitivity_min} and {current.sensitivity_max}")
+
+        new_hold = current.hold_time_seconds if hold_time_seconds is None else hold_time_seconds
+        if hold_time_seconds is not None:
+            if current.hold_time_seconds is None:
+                raise ValueError("this channel does not expose a writable hold time")
+            if current.allowed_hold_times and hold_time_seconds not in current.allowed_hold_times:
+                raise ValueError(f"hold_time_seconds must be one of {current.allowed_hold_times}")
+
+        new_mask = current.mask if mask is None else tuple(mask)
+        if len(new_mask) != current.rows or any(
+            len(row) != current.columns or set(row) - {"0", "1"} for row in new_mask
+        ):
+            raise ValueError(f"mask must contain {current.rows} binary rows of {current.columns} columns")
+
+        def _filter(current_value: bool | None, override: bool | None, name: str) -> bool | None:
+            if override is not None and current_value is None:
+                raise ValueError(f"this channel does not expose a writable {name} filter")
+            return current_value if override is None else override
+
+        new_person = _filter(current.person_filter, person_filter, "person")
+        new_car = _filter(current.car_filter, car_filter, "car")
+        effective = (
+            new_enabled,
+            new_sensitivity,
+            new_hold,
+            new_mask,
+            new_person,
+            new_car,
+        )
+        original = (
+            current.enabled,
+            current.sensitivity,
+            current.hold_time_seconds,
+            current.mask,
+            current.person_filter,
+            current.car_filter,
+        )
+        if effective == original:
+            return current
+
+        filters = ""
+        if new_person is not None or new_car is not None:
+            filters = "<objectFilter>"
+            if new_car is not None:
+                filters += f"<car><switch>{str(new_car).lower()}</switch></car>"
+            if new_person is not None:
+                filters += f"<person><switch>{str(new_person).lower()}</switch></person>"
+            filters += "</objectFilter>"
+        hold_xml = f'<holdTime unit="s">{new_hold}</holdTime>' if new_hold is not None else ""
+        rows = "".join(f"<item>{row}</item>" for row in new_mask)
+        content = (
+            f'<content><chl id="{current.node_id}"><param>'
+            f"<switch>{str(new_enabled).lower()}</switch>{filters}"
+            f'<sensitivity min="{current.sensitivity_min}" max="{current.sensitivity_max}">'
+            f"{new_sensitivity}</sensitivity>{hold_xml}"
+            f'<area type="list" count="{current.rows}">'
+            f'<itemType minLen="{current.columns}" maxLen="{current.columns}"/>{rows}'
+            "</area></param></chl></content>"
+        )
+        response = self.api_call("editMotion", content=content)
+        if _xml_status(response) != "success":
+            raise NetSdkError(f"editMotion(ch{channel}) rejected: {response[:160]}", -1)
+        if not verify:
+            return current
+
+        updated = self.motion_config(channel)
+        actual = (
+            updated.enabled,
+            updated.sensitivity,
+            updated.hold_time_seconds,
+            updated.mask,
+            updated.person_filter,
+            updated.car_filter,
+        )
+        if actual != effective:
+            raise NetSdkError(f"editMotion(ch{channel}) verification mismatch", -1)
+        return updated
 
     def set_node_encode(
         self,
