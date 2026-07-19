@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ctypes as ct
+import re
 from datetime import datetime
 from unittest.mock import MagicMock, PropertyMock, patch
 
@@ -23,6 +24,7 @@ from pytvt.device_sdk.client import (
     EncodeStream,
     IpcInfo,
     LogEntry,
+    MotionConfig,
     NatLoginFailed,
     NatTimeoutError,
     NatUnavailableError,
@@ -730,6 +732,24 @@ _RECORD_XML = """<?xml version="1.0" encoding="UTF-8"?>
     </content>
 </response>"""
 
+_MOTION_XML = """<?xml version="1.0" encoding="UTF-8"?>
+<response cmdUrl="queryMotion"><status>success</status><content>
+    <chl id="{0000001C-0000-0000-0000-000000000000}"><param>
+        <switch>true</switch>
+        <objectFilter><car><switch>false</switch></car><person><switch>true</switch></person></objectFilter>
+        <sensitivity min="0" max="100">60</sensitivity>
+        <holdTime unit="s">20</holdTime><holdTimeNote>5,10,20,30</holdTimeNote>
+        <area type="list" count="3"><itemType minLen="4" maxLen="4"/>
+            <item>1111</item><item>1011</item><item>0001</item>
+        </area>
+    </param></chl>
+</content></response>"""
+
+_MOTION_XML_UPDATED = _MOTION_XML.replace(
+    '<sensitivity min="0" max="100">60</sensitivity>',
+    '<sensitivity min="0" max="100">40</sensitivity>',
+)
+
 
 class TestNodeEncodeInfo:
     def test_parses_continuous_event_and_codec(self, session):
@@ -775,6 +795,107 @@ class TestRecordSchedule:
         assert r.channel == 1 and r.name == "Entrada Principal"
         assert r.schedule is True and r.motion is True
         assert r.alarm is False and r.intelligent is True
+
+
+class TestMotionConfig:
+    def test_query_uses_channel_condition_and_parses_device_bounds(self, session):
+        with patch.object(session, "api_call", return_value=_MOTION_XML) as call:
+            config = session.motion_config(28)
+
+        assert config == MotionConfig(
+            channel=28,
+            node_id="{0000001C-0000-0000-0000-000000000000}",
+            enabled=True,
+            sensitivity=60,
+            sensitivity_min=0,
+            sensitivity_max=100,
+            hold_time_seconds=20,
+            allowed_hold_times=(5, 10, 20, 30),
+            mask=("1111", "1011", "0001"),
+            person_filter=True,
+            car_filter=False,
+        )
+        assert config.rows == 3 and config.columns == 4
+        assert config.active_cells == 8 and config.total_cells == 12
+        assert config.coverage_percent == pytest.approx(66.67, abs=0.01)
+        request = call.call_args.kwargs["request"]
+        assert "<chlId>{0000001C-0000-0000-0000-000000000000}</chlId>" in request
+        assert "<requireField><param/></requireField>" in request
+
+    def test_query_rejects_invalid_response(self, session):
+        broken = _MOTION_XML.replace('<itemType minLen="4" maxLen="4"/>', '<itemType minLen="5" maxLen="5"/>')
+        with patch.object(session, "api_call", return_value=broken):
+            with pytest.raises(NetSdkError, match="invalid area mask"):
+                session.motion_config(28)
+
+    def test_query_rejects_response_for_another_channel(self, session):
+        wrong_channel = _MOTION_XML.replace("{0000001C-", "{0000001B-")
+        with patch.object(session, "api_call", return_value=wrong_channel):
+            with pytest.raises(NetSdkError, match="returned config for"):
+                session.motion_config(28)
+
+    def test_optional_hold_time_and_filters_may_be_absent(self, session):
+        minimal = re.sub(r"\s*<objectFilter>.*?</objectFilter>", "", _MOTION_XML, flags=re.S)
+        minimal = re.sub(r"\s*<holdTime.*?</holdTime><holdTimeNote>.*?</holdTimeNote>", "", minimal)
+        with patch.object(session, "api_call", return_value=minimal):
+            config = session.motion_config(28)
+        assert config.hold_time_seconds is None and config.allowed_hold_times == ()
+        assert config.person_filter is None and config.car_filter is None
+
+    def test_query_non_success_status_raises(self, session):
+        with patch.object(session, "api_call", return_value="<response><status>fail</status></response>"):
+            with pytest.raises(NetSdkError, match="queryMotion"):
+                session.motion_config(28)
+
+
+class TestSetMotionConfig:
+    def test_rmw_preserves_mask_and_verifies_update(self, session):
+        calls = []
+        query_count = 0
+
+        def fake(url, content="", *, request=None, buf_size=131072):
+            nonlocal query_count
+            calls.append((url, content, request))
+            if url == "queryMotion":
+                query_count += 1
+                return _MOTION_XML if query_count == 1 else _MOTION_XML_UPDATED
+            return "<response><status>success</status></response>"
+
+        with patch.object(session, "api_call", side_effect=fake):
+            updated = session.set_motion_config(28, sensitivity=40)
+
+        assert updated.sensitivity == 40
+        edit = next(content for url, content, _ in calls if url == "editMotion")
+        assert '<chl id="{0000001C-0000-0000-0000-000000000000}">' in edit
+        assert '<sensitivity min="0" max="100">40</sensitivity>' in edit
+        assert "<item>1111</item><item>1011</item><item>0001</item>" in edit
+        assert "<person><switch>true</switch></person>" in edit
+        assert "<car><switch>false</switch></car>" in edit
+
+    def test_noop_does_not_write(self, session):
+        with patch.object(session, "api_call", return_value=_MOTION_XML) as call:
+            result = session.set_motion_config(28, sensitivity=60)
+        assert result.sensitivity == 60
+        assert [args.args[0] for args in call.call_args_list] == ["queryMotion"]
+
+    @pytest.mark.parametrize("value", [-1, 101])
+    def test_rejects_sensitivity_outside_reported_bounds(self, session, value):
+        with patch.object(session, "api_call", return_value=_MOTION_XML):
+            with pytest.raises(ValueError, match="sensitivity must be between 0 and 100"):
+                session.set_motion_config(28, sensitivity=value)
+
+    def test_rejects_wrong_mask_shape(self, session):
+        with patch.object(session, "api_call", return_value=_MOTION_XML):
+            with pytest.raises(ValueError, match="3 binary rows of 4 columns"):
+                session.set_motion_config(28, mask=("1111", "101x", "0001"))
+
+    def test_verification_mismatch_raises(self, session):
+        def fake(url, content="", *, request=None, buf_size=131072):
+            return _MOTION_XML if url == "queryMotion" else "<response><status>success</status></response>"
+
+        with patch.object(session, "api_call", side_effect=fake):
+            with pytest.raises(NetSdkError, match="verification mismatch"):
+                session.set_motion_config(28, sensitivity=40)
 
 
 class TestSetNodeEncode:
@@ -829,7 +950,7 @@ class TestPackageExports:
         import pytvt.device_sdk as pkg
         from pytvt.device_sdk import client as client_mod
 
-        for name in ("EncodeStream", "NodeEncodeInfo", "RecordSchedule", "NetSdkError"):
+        for name in ("EncodeStream", "MotionConfig", "NodeEncodeInfo", "RecordSchedule", "NetSdkError"):
             assert name in pkg.__all__
             assert getattr(pkg, name) is getattr(client_mod, name)
 

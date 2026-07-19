@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Typed motion-detector configuration over the device SDK**
+  (`device_sdk/client.py`). `motion_config()` reads `queryMotion` into a
+  `MotionConfig` with device-specific sensitivity bounds, optional hold time and
+  object filters, and the binary detector mask. `set_motion_config()` provides a
+  guarded read-modify-write `editMotion` path with bounds/mask validation, no-op
+  suppression, and read-back verification. Both direct and NAT sessions use
+  `NET_SDK_ApiInterface`; no device HTTP session is required.
+
 - **NetSDK 1.3.2 device-drop coverage** (`device_sdk/{bindings,types,constants,client}.py`).
   Binds the 22 functions new in the TVT NetSDK 1.3.2 native drop (headers vendored
   as reference at `tvt/docs/include_v1.3.2/`), grouped by capability:
