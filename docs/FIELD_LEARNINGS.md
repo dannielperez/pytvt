@@ -47,3 +47,22 @@ AutoNAT notes).
 - Fix `list_devices_normalized` live-online merge (above).
 - First-class `api_interface()` / `query_platform_access()` / `set_platform_access()` over NAT.
 - Multi-NAT-endpoint helper (iterate `dev-nat20.autonatglb.com` / `.autonat.us`).
+# Motion detector configuration is available through NetSDK CGI tunneling
+
+**Confirmed:** 2026-07-18 against two field NVR deployments. The web client uses the
+NVMS-9000 `queryMotion` / `editMotion` CGI pair, and the same commands can be
+routed through `NET_SDK_ApiInterface`. A query must include the channel node
+GUID in `<condition><chlId>...</chlId></condition>` plus
+`<requireField><param/></requireField>`; an empty request is rejected.
+
+The response is not uniform across camera firmware. Observed sensitivity bounds
+included both 0–100 and 1–8; `holdTime` and person/car object filters can be
+absent. Detector masks are binary row grids and must be preserved exactly in a
+read-modify-write unless the caller intentionally changes the region. Camera
+names can start with apparent channel numbers that do not match the physical
+NVR channel (for example, a display prefix of 21 mapped to channel 28, derived
+from node GUID `{0000001C-...}`). Always address motion
+configuration by inventory channel/node ID, never by parsing the display name.
+
+Live validation so far is read-only. No detector configuration was written
+during protocol discovery.
