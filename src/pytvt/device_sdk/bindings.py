@@ -544,6 +544,25 @@ def _bind_v132(lib: ct.CDLL) -> None:
         lib.NET_SDK_SetSubscribCallBack_V2.restype = ct.c_bool
         lib.NET_SDK_SetSubscribCallBack_V2.argtypes = [t.SUBSCRIBE_CALLBACK_V2, ct.c_void_p]
 
+    if hasattr(lib, "NET_SDK_SmartSubscrib"):
+        lib.NET_SDK_SmartSubscrib.restype = ct.c_bool
+        lib.NET_SDK_SmartSubscrib.argtypes = [
+            ct.c_long,  # lUserID
+            ct.c_uint,  # dwCommand
+            ct.c_long,  # lChannel
+            ct.POINTER(t.NET_DVR_SUBSCRIBE_REPLY),
+        ]
+
+    if hasattr(lib, "NET_SDK_UnSmartSubscrib"):
+        lib.NET_SDK_UnSmartSubscrib.restype = ct.c_bool
+        lib.NET_SDK_UnSmartSubscrib.argtypes = [
+            ct.c_long,  # lUserID
+            ct.c_uint,  # dwCommand
+            ct.c_long,  # lChannel
+            ct.c_char_p,  # subscription serverAddress token
+            ct.POINTER(ct.c_int),  # device result detail
+        ]
+
 
 def _create_net_client_compatibility_layer(lib: ct.CDLL) -> None:
     """Deprecated placeholder for NET_CLIENT support.
