@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Typed, bounded license-plate smart-event ingestion**
+  (`device_sdk/plate_events.py`, `DeviceSession.subscribe_plate_events`). Parses both
+  direct-IPC event 20 and NVR event 29 callback layouts into immutable `PlateEvent`
+  values with plate/confidence/direction, channel identity, original image, plate crop,
+  and explicit partial-data warnings. Smart subscriptions are atomic and compensated on
+  setup failure; callback buffers are copied within their native lifetime; malformed or
+  oversized payloads are rejected; and a bounded `PlateEventStream` exposes drop/error
+  telemetry instead of blocking the native callback. Additive and fixture-tested; no
+  live subscription is enabled automatically.
+
 - **Typed motion-detector configuration over the device SDK**
   (`device_sdk/client.py`). `motion_config()` reads `queryMotion` into a
   `MotionConfig` with device-specific sensitivity bounds, optional hold time and

@@ -1262,6 +1262,8 @@ class TestSubscribeV2:
         events = []
 
         def fake(cb, user):
+            if not cb:
+                return True
             payload = b'{"evt":"motion"}'
             b = (ct.c_char * len(payload)).from_buffer_copy(payload)
             cb(1, 2, 0x2A, ct.cast(b, ct.c_void_p), len(payload), None)
