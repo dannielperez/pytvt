@@ -21,8 +21,10 @@ from __future__ import annotations
 import ctypes as ct
 import logging
 import re
+import threading
 import time
-from collections.abc import Callable
+import weakref
+from collections.abc import Callable, Iterable
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
@@ -38,16 +40,29 @@ from .constants import (
     RecordType,
     RollingGateExecute,
     SdkError,
+    SmartEventType,
     StreamType,
     TripwireDirection,
 )
 from .loader import NetSdkUnavailable, ensure_nat_support, load_sdk
+from .plate_events import (
+    DEFAULT_MAX_BUFFER_BYTES,
+    DEFAULT_MAX_EVENTS,
+    DEFAULT_MAX_IMAGE_BYTES,
+    DEFAULT_MAX_PAYLOAD_BYTES,
+    DropPolicy,
+    PlateEventStream,
+    PlateSource,
+    PlateSubscriptionInfo,
+    _SmartSubscriptionToken,
+)
 from .types import (
     CALL_RECORD,
     CALL_RECORD_QUERY_PARAM,
     CLOUD_UPGRADE_INFO,
     DD_TIME,
     NET_DVR_IVE_POINT_T,
+    NET_DVR_SUBSCRIBE_REPLY,
     NET_SDK_ALRAM_OUT_STATUS,
     NET_SDK_CH_DEVICE_STATUS,
     NET_SDK_DEV_SUPPORT,
@@ -76,6 +91,13 @@ from .types import (
 
 logger = logging.getLogger(__name__)
 ConnectionMethod = Literal["direct", "nat"]
+
+# The TVT smart-event callback and SDK lifecycle are process-global. Track
+# ownership across every NetSdkClient instance, not just within one wrapper.
+_PROCESS_SDK_LOCK = threading.RLock()
+_PROCESS_SUBSCRIBE_OWNER: NetSdkClient | None = None
+_LIVE_CLIENTS: weakref.WeakSet[NetSdkClient] = weakref.WeakSet()
+_CALLBACK_DRAIN_TIMEOUT_SECONDS = 5.0
 
 
 # ── Result dataclasses ──────────────────────────────────────────────
@@ -522,6 +544,9 @@ class DeviceSession:
         # Keep ctypes voice-talk callbacks alive while the SDK holds them
         # (handle -> (ctypes thunk, python target)); see start_voice_talk.
         self._voice_callbacks: dict[int, tuple[object, object]] = {}
+        # Smart-event callback registration is process-global, so at most one
+        # plate stream may be owned by this session/client at a time.
+        self._plate_stream: PlateEventStream | None = None
 
     def __enter__(self) -> DeviceSession:
         return self
@@ -572,9 +597,20 @@ class DeviceSession:
     def logout(self) -> None:
         if self._handle < 0:
             return
-        sdk._lib.NET_SDK_Logout(self._handle)  # type: ignore[union-attr]
-        logger.debug("Logged out handle=%d", self._handle)
-        self._handle = -1
+        close_error: Exception | None = None
+        try:
+            if self._plate_stream is not None and not self._plate_stream.closed:
+                self._plate_stream.close()
+        except Exception as exc:
+            close_error = exc
+        handle = self._handle
+        try:
+            sdk._lib.NET_SDK_Logout(handle)  # type: ignore[union-attr]
+            logger.debug("Logged out handle=%d", handle)
+        finally:
+            self._handle = -1
+        if close_error is not None:
+            raise close_error
 
     # ── Device information ──────────────────────────────────────
 
@@ -862,6 +898,148 @@ class DeviceSession:
             sdk._lib.NET_SDK_CloseAlarmChan(alarm_handle),  # type: ignore[union-attr]
             "CloseAlarmChan",
         )
+
+    def subscribe_plate_events(
+        self,
+        channels: Iterable[int],
+        *,
+        commands: Iterable[SmartEventType] = (
+            SmartEventType.VEHICLE,
+            SmartEventType.NVR_VEHICLE,
+        ),
+        max_events: int = DEFAULT_MAX_EVENTS,
+        max_payload_bytes: int = DEFAULT_MAX_PAYLOAD_BYTES,
+        max_image_bytes: int = DEFAULT_MAX_IMAGE_BYTES,
+        max_buffer_bytes: int = DEFAULT_MAX_BUFFER_BYTES,
+        drop_policy: DropPolicy = DropPolicy.DROP_OLDEST,
+        experimental: bool = False,
+    ) -> PlateEventStream:
+        """Subscribe to typed IPC/NVR plate events for selected channels.
+
+        Registration is atomic: if any command/channel subscription fails, all
+        successful registrations are compensated and the global callback is
+        cleared. The returned stream is bounded and must be closed (or used as
+        a context manager) before another process-global callback is installed.
+        """
+        if not experimental:
+            raise NetSdkCapabilityError(
+                "Live plate subscriptions are provisional because vendor renewal timing is unvalidated; "
+                "pass experimental=True only for an approved read-only conformance pilot."
+            )
+        if self._handle < 0:
+            raise NetSdkError("subscribe_plate_events requires an active device session")
+        if self._plate_stream is not None and not self._plate_stream.closed:
+            raise NetSdkCapabilityError("This device session already owns an active plate-event stream.")
+        if self._client._active_plate_stream is not None and not self._client._active_plate_stream.closed:
+            raise NetSdkCapabilityError("The NetSDK client already has an active process-global plate-event stream.")
+        if self._client._subscribe_callback is not None:
+            raise NetSdkCapabilityError(
+                "The process-global smart-event callback is already occupied; clear it before plate subscription."
+            )
+
+        channel_ids = tuple(dict.fromkeys(int(channel) for channel in channels))
+        if not channel_ids or len(channel_ids) > 256 or any(channel < 0 for channel in channel_ids):
+            raise ValueError("channels must contain 1 to 256 non-negative channel ids")
+        command_values = tuple(dict.fromkeys(SmartEventType(int(command)) for command in commands))
+        allowed = {SmartEventType.VEHICLE, SmartEventType.NVR_VEHICLE}
+        if not command_values or any(command not in allowed for command in command_values):
+            raise ValueError("commands must contain VEHICLE and/or NVR_VEHICLE")
+
+        subscribe = self._require("NET_SDK_SmartSubscrib")
+        unsubscribe = self._require("NET_SDK_UnSmartSubscrib")
+        stream = PlateEventStream(
+            max_events=max_events,
+            max_payload_bytes=max_payload_bytes,
+            max_image_bytes=max_image_bytes,
+            max_buffer_bytes=max_buffer_bytes,
+            drop_policy=drop_policy,
+        )
+        tokens: list[_SmartSubscriptionToken] = []
+
+        def _close() -> None:
+            first_error: NetSdkError | None = None
+            remaining: list[_SmartSubscriptionToken] = []
+            for token in reversed(tokens):
+                result = ct.c_int(0)
+                ok = bool(
+                    unsubscribe(
+                        self._handle,
+                        int(token.command),
+                        token.info.channel_id,
+                        ct.c_char_p(token.server_address),
+                        ct.byref(result),
+                    )
+                )
+                if not ok:
+                    remaining.append(token)
+                    if first_error is None:
+                        first_error = NetSdkError(
+                            "UnSmartSubscrib",
+                            self._client._sdk_error(self._client._last_error()),
+                        )
+            tokens[:] = reversed(remaining)
+            stream._configure(subscriptions=tuple(tokens), closer=_close)
+            try:
+                self._client.subscribe_v2(None)
+            except NetSdkError as exc:
+                if first_error is None:
+                    first_error = exc
+            if first_error is not None:
+                # Even if callback deregistration succeeded, failed native
+                # unsubscribe tokens contaminate this process-global session.
+                # Reserve ownership so another client cannot start or clean up
+                # the shared SDK until this stream retries or its owner exits.
+                with _PROCESS_SDK_LOCK:
+                    global _PROCESS_SUBSCRIBE_OWNER
+                    _PROCESS_SUBSCRIBE_OWNER = self._client
+                raise first_error
+            if self._client._active_plate_stream is stream:
+                self._client._active_plate_stream = None
+            if self._plate_stream is stream:
+                self._plate_stream = None
+
+        stream._configure(subscriptions=(), closer=_close)
+        self._client.subscribe_v2(
+            stream.ingest,
+            max_payload_bytes=max_payload_bytes,
+            on_rejected=stream.reject_callback,
+        )
+        self._client._active_plate_stream = stream
+        self._plate_stream = stream
+        try:
+            for command in command_values:
+                for channel_id in channel_ids:
+                    reply = NET_DVR_SUBSCRIBE_REPLY()
+                    if not subscribe(self._handle, int(command), channel_id, ct.byref(reply)):
+                        raise NetSdkError(
+                            "SmartSubscrib",
+                            self._client._sdk_error(self._client._last_error()),
+                        )
+                    server_address = bytes(reply.serverAddress).split(b"\0", 1)[0]
+                    tokens.append(
+                        _SmartSubscriptionToken(
+                            command=command,
+                            info=PlateSubscriptionInfo(
+                                source=(PlateSource.IPC if command is SmartEventType.VEHICLE else PlateSource.NVR),
+                                channel_id=channel_id,
+                            ),
+                            server_address=server_address,
+                            current_time=int(reply.currentTime),
+                            termination_time=int(reply.terminationTime),
+                        )
+                    )
+                    if not server_address:
+                        raise NetSdkError("SmartSubscrib returned an empty unsubscribe token")
+        except Exception as setup_error:
+            try:
+                stream.close()
+            except Exception as rollback_error:
+                raise NetSdkError(
+                    f"Plate-event subscription setup failed ({setup_error}); rollback also failed ({rollback_error})"
+                ) from setup_error
+            raise
+        stream._configure(subscriptions=tuple(tokens), closer=_close)
+        return stream
 
     def alarm_out_status(self, max_outputs: int = 32) -> list[AlarmOutStatus]:
         """Query alarm relay output statuses."""
@@ -1859,22 +2037,32 @@ class NetSdkClient:
         recv_timeout: int = 5000,
         reconnect_interval: int = 0,
     ) -> None:
-        self._sdk_path = sdk_path
-        self._connect_timeout = connect_timeout
-        self._recv_timeout = recv_timeout
-        self._reconnect_interval = reconnect_interval
-        # Retain the global subscription thunk (see subscribe_v2).
-        self._subscribe_callback: tuple[object, object] | None = None
-        self._lib = load_sdk(sdk_path=sdk_path)
-        sdk.bind(self._lib)
-        if not self._lib.NET_SDK_Init():
-            raise NetSdkError("NET_SDK_Init failed")
-        self._lib.NET_SDK_SetConnectTime(connect_timeout, recv_timeout)
-        if reconnect_interval > 0:
-            self._lib.NET_SDK_SetReconnect(reconnect_interval, True)
-        else:
-            self._lib.NET_SDK_SetReconnect(0, False)
-        logger.debug("NetSDK initialized (v%s)", self.sdk_version())
+        with _PROCESS_SDK_LOCK:
+            if _PROCESS_SUBSCRIBE_OWNER is not None:
+                raise NetSdkCapabilityError(
+                    "Cannot initialize another NetSdkClient while a process-global subscription callback is active."
+                )
+            self._sdk_path = sdk_path
+            self._connect_timeout = connect_timeout
+            self._recv_timeout = recv_timeout
+            self._reconnect_interval = reconnect_interval
+            # Retain the global subscription thunk (see subscribe_v2).
+            self._subscribe_callback: tuple[object, object] | None = None
+            self._subscribe_callback_condition = threading.Condition()
+            self._subscribe_callback_inflight = 0
+            self._subscribe_callback_closing = False
+            self._active_plate_stream: PlateEventStream | None = None
+            self._lib = load_sdk(sdk_path=sdk_path)
+            sdk.bind(self._lib)
+            if not self._lib.NET_SDK_Init():
+                raise NetSdkError("NET_SDK_Init failed")
+            self._lib.NET_SDK_SetConnectTime(connect_timeout, recv_timeout)
+            if reconnect_interval > 0:
+                self._lib.NET_SDK_SetReconnect(reconnect_interval, True)
+            else:
+                self._lib.NET_SDK_SetReconnect(0, False)
+            _LIVE_CLIENTS.add(self)
+            logger.debug("NetSDK initialized (v%s)", self.sdk_version())
 
     def __enter__(self) -> NetSdkClient:
         return self
@@ -1885,9 +2073,37 @@ class NetSdkClient:
     def cleanup(self) -> None:
         """Release SDK resources."""
         if self._lib is not None:
-            self._lib.NET_SDK_Cleanup()
-            self._lib = None
-            logger.debug("NetSDK cleaned up")
+            if self._active_plate_stream is not None and not self._active_plate_stream.closed:
+                try:
+                    self._active_plate_stream.close()
+                except Exception:
+                    logger.exception("Failed to close plate-event stream during NetSDK cleanup")
+            if self._subscribe_callback is not None:
+                try:
+                    self.subscribe_v2(None)
+                except Exception:
+                    logger.exception("Failed to clear smart-event callback during NetSDK cleanup")
+            with _PROCESS_SDK_LOCK:
+                global _PROCESS_SUBSCRIBE_OWNER
+                self._lib.NET_SDK_Cleanup()
+                self._lib = None
+                with self._subscribe_callback_condition:
+                    self._subscribe_callback_condition.wait_for(
+                        lambda: self._subscribe_callback_inflight == 0,
+                        timeout=_CALLBACK_DRAIN_TIMEOUT_SECONDS,
+                    )
+                    if self._subscribe_callback_inflight == 0:
+                        self._subscribe_callback = None
+                    else:
+                        logger.error(
+                            "Retaining smart-event callback thunk after cleanup because %d callback(s) remain in flight",
+                            self._subscribe_callback_inflight,
+                        )
+                    self._subscribe_callback_closing = False
+                if _PROCESS_SUBSCRIBE_OWNER is self:
+                    _PROCESS_SUBSCRIBE_OWNER = None
+                _LIVE_CLIENTS.discard(self)
+                logger.debug("NetSDK cleaned up")
 
     def _last_error(self) -> int:
         return sdk._lib.NET_SDK_GetLastError()  # type: ignore[union-attr]
@@ -1945,33 +2161,96 @@ class NetSdkClient:
 
     # ── Event subscription (process-global) ─────────────────────
 
-    def subscribe_v2(self, on_event: Callable[[int, int, int, bytes], None] | None) -> None:
+    def subscribe_v2(
+        self,
+        on_event: Callable[[int, int, int, bytes], None] | None,
+        *,
+        max_payload_bytes: int = DEFAULT_MAX_PAYLOAD_BYTES,
+        on_rejected: Callable[[str], None] | None = None,
+    ) -> None:
         """Register the process-wide push callback (``NET_SDK_SetSubscribCallBack_V2``, 1.3.2+).
 
         ``on_event`` is invoked as ``on_event(user_id, channel_id, command, payload)``
         for each subscription push. Pass ``None`` to clear the callback. The thunk
-        is retained on the client; this is a single global slot, so the last
-        registration wins.
+        is retained on the owning client. The SDK exposes one process-global
+        callback slot, so replacement is rejected until the owner clears it.
         """
-        fn = getattr(self._lib, "NET_SDK_SetSubscribCallBack_V2", None)
-        if fn is None:
-            raise NetSdkCapabilityError(
-                "Loaded TVT NetSDK does not export NET_SDK_SetSubscribCallBack_V2 (needs the 1.3.2+ device SDK)."
-            )
-        if on_event is None:
-            self._subscribe_callback = None
-            if not fn(SUBSCRIBE_CALLBACK_V2(0), None):
+        global _PROCESS_SUBSCRIBE_OWNER
+        with _PROCESS_SDK_LOCK:
+            fn = getattr(self._lib, "NET_SDK_SetSubscribCallBack_V2", None)
+            if fn is None:
+                raise NetSdkCapabilityError(
+                    "Loaded TVT NetSDK does not export NET_SDK_SetSubscribCallBack_V2 (needs the 1.3.2+ device SDK)."
+                )
+            if max_payload_bytes < 1 or max_payload_bytes > 64 * 1024 * 1024:
+                raise ValueError("max_payload_bytes must be between 1 byte and 64 MiB")
+            if on_event is None:
+                if _PROCESS_SUBSCRIBE_OWNER not in (None, self):
+                    raise NetSdkCapabilityError("Only the process-global callback owner may clear the callback.")
+                with self._subscribe_callback_condition:
+                    self._subscribe_callback_closing = True
+                if not fn(SUBSCRIBE_CALLBACK_V2(0), None):
+                    with self._subscribe_callback_condition:
+                        self._subscribe_callback_closing = False
+                    raise NetSdkError("SetSubscribCallBack_V2", self._sdk_error(self._last_error()))
+                with self._subscribe_callback_condition:
+                    drained = self._subscribe_callback_condition.wait_for(
+                        lambda: self._subscribe_callback_inflight == 0,
+                        timeout=_CALLBACK_DRAIN_TIMEOUT_SECONDS,
+                    )
+                    if not drained:
+                        self._subscribe_callback_closing = False
+                        raise NetSdkError(
+                            "SetSubscribCallBack_V2 cleared, but in-flight callbacks did not quiesce within 5 seconds"
+                        )
+                # Clear only after the SDK confirms deregistration. Dropping the
+                # final ctypes reference first could leave a live native callback
+                # pointing at reclaimed Python memory.
+                self._subscribe_callback = None
+                self._subscribe_callback_closing = False
+                if _PROCESS_SUBSCRIBE_OWNER is self:
+                    _PROCESS_SUBSCRIBE_OWNER = None
+                return
+            if _PROCESS_SUBSCRIBE_OWNER is not None or self._subscribe_callback is not None:
+                raise NetSdkCapabilityError(
+                    "A process-global smart-event callback is already active; clear it before replacement."
+                )
+            if len(_LIVE_CLIENTS) != 1 or self not in _LIVE_CLIENTS:
+                raise NetSdkCapabilityError(
+                    "Smart-event callbacks require exactly one live NetSdkClient in the process."
+                )
+
+            def _trampoline(user_id, channel_id, command, buf_ptr, buf_len, _user):
+                with self._subscribe_callback_condition:
+                    self._subscribe_callback_inflight += 1
+                try:
+                    with self._subscribe_callback_condition:
+                        if self._subscribe_callback_closing:
+                            return
+                    if buf_len > max_payload_bytes:
+                        reason = f"subscription payload length {buf_len} exceeds limit {max_payload_bytes}"
+                        if on_rejected is not None:
+                            on_rejected(reason)
+                        else:
+                            logger.warning(reason)
+                        return
+                    data = ct.string_at(buf_ptr, buf_len) if buf_ptr and buf_len else b""
+                    on_event(user_id, channel_id, command, data)
+                except Exception:
+                    # ctypes callbacks must never leak exceptions across the C ABI.
+                    logger.exception("TVT subscription callback handler raised")
+                finally:
+                    with self._subscribe_callback_condition:
+                        self._subscribe_callback_inflight -= 1
+                        self._subscribe_callback_condition.notify_all()
+
+            cb = SUBSCRIBE_CALLBACK_V2(_trampoline)
+            if not fn(cb, None):
                 raise NetSdkError("SetSubscribCallBack_V2", self._sdk_error(self._last_error()))
-            return
-
-        def _trampoline(user_id, channel_id, command, buf_ptr, buf_len, _user):
-            data = ct.string_at(buf_ptr, buf_len) if buf_ptr and buf_len else b""
-            on_event(user_id, channel_id, command, data)
-
-        cb = SUBSCRIBE_CALLBACK_V2(_trampoline)
-        if not fn(cb, None):
-            raise NetSdkError("SetSubscribCallBack_V2", self._sdk_error(self._last_error()))
-        self._subscribe_callback = (cb, on_event)
+            self._subscribe_callback = (cb, on_event)
+            with self._subscribe_callback_condition:
+                self._subscribe_callback_closing = False
+            _PROCESS_SUBSCRIBE_OWNER = self
 
     # ── Discovery ───────────────────────────────────────────────
 

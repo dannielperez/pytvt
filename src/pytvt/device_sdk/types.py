@@ -539,6 +539,122 @@ class NET_SDK_ALRAM_OUT_STATUS(ct.Structure):
     ]
 
 
+# ── License-plate smart-event payloads ─────────────────────────────
+
+
+class NET_SDK_IVE_RECT_T(ct.Structure):
+    """Unsigned smart-event rectangle used by IPC analytics payloads."""
+
+    _pack_ = 4
+    _fields_ = [
+        ("X1", ct.c_uint),
+        ("Y1", ct.c_uint),
+        ("X2", ct.c_uint),
+        ("Y2", ct.c_uint),
+    ]
+
+
+class NET_SDK_IVE_POINT_T(ct.Structure):
+    """Signed smart-event point used by IPC analytics payloads."""
+
+    _pack_ = 4
+    _fields_ = [
+        ("X", ct.c_int),
+        ("Y", ct.c_int),
+    ]
+
+
+class NET_SDK_IVE_VEHICE_HEAD_INFO(ct.Structure):
+    """Header for ``NET_SDK_SMART_EVENT_TYPE_VEHICE`` callback data.
+
+    ``VEHICE`` is the spelling used by the vendor ABI and is retained for
+    source/header traceability.
+    """
+
+    _pack_ = 4
+    _fields_ = [
+        ("begin_flag", ct.c_uint),
+        ("item_cnt", ct.c_uint),
+        ("plate_cnt", ct.c_uint),
+        ("relativeTime", ct.c_longlong),
+        ("absoluteTime", ct.c_longlong),
+        ("softwareVersion", ct.c_uint),
+        ("softwareBuildDate", ct.c_uint),
+        ("testFlag", ct.c_ubyte),
+        ("expandInfoFlag", ct.c_ubyte),
+        ("resver1", ct.c_ubyte * 2),
+        ("resver", ct.c_uint * 1),
+        ("end_flag", ct.c_uint),
+    ]
+
+
+class NET_SDK_IVE_VEHICE_ITEM_INFO(ct.Structure):
+    """One image/plate item in an IPC vehicle-recognition callback."""
+
+    _pack_ = 4
+    _fields_ = [
+        ("begin_flag", ct.c_uint),
+        ("data_type", ct.c_uint),
+        ("image_type", ct.c_uint),
+        ("plateId", ct.c_uint),
+        ("plateCharCount", ct.c_uint),
+        ("plate", ct.c_char * 32),
+        ("plateCharConfid", ct.c_ubyte * 32),
+        ("ptPlateCharRect", NET_SDK_IVE_RECT_T * 32),
+        ("ptWidth", ct.c_uint),
+        ("ptHeight", ct.c_uint),
+        ("ptLeftTop", NET_SDK_IVE_POINT_T),
+        ("ptRightTop", NET_SDK_IVE_POINT_T),
+        ("ptLeftBottom", NET_SDK_IVE_POINT_T),
+        ("ptRightBottom", NET_SDK_IVE_POINT_T),
+        ("plateWidth", ct.c_ushort),
+        ("plateHeight", ct.c_ushort),
+        ("plateConfidence", ct.c_uint),
+        ("plateIntensity", ct.c_uint),
+        ("plateColor", ct.c_ubyte),
+        ("plateStyle", ct.c_ubyte),
+        ("PlateColorRate", ct.c_ubyte),
+        ("vehicleColor", ct.c_ubyte),
+        ("plateAngleH", ct.c_uint),
+        ("plateAngleV", ct.c_uint),
+        ("jpeg_len", ct.c_uint),
+        ("jpeg_vir_len", ct.c_uint),
+        ("owner", ct.c_char * 32),
+        ("listType", ct.c_int),
+        ("beginTime", ct.c_ulonglong),
+        ("endTime", ct.c_ulonglong),
+        ("cardNum", ct.c_uint),
+        ("endTimeValidForever", ct.c_ubyte),
+        ("iVehicleDirect", ct.c_ubyte),
+        ("resrv", ct.c_ubyte * 6),
+        ("end_flag", ct.c_uint),
+    ]
+
+
+class RECT_16(ct.Structure):
+    """Signed 16-bit rectangle used by NVR plate callbacks."""
+
+    _pack_ = 4
+    _fields_ = [
+        ("left", ct.c_short),
+        ("top", ct.c_short),
+        ("right", ct.c_short),
+        ("bottom", ct.c_short),
+    ]
+
+
+class NET_SDK_IVE_PICTURE_INFO(ct.Structure):
+    """Descriptor immediately preceding a smart-event image buffer."""
+
+    _pack_ = 4
+    _fields_ = [
+        ("iWidth", ct.c_int),
+        ("iHeight", ct.c_int),
+        ("iPicFormat", ct.c_int),
+        ("iPicSize", ct.c_int),
+    ]
+
+
 # ── GUID (channel node id) ──────────────────────────────────────────
 # The SDK's `BOOL` typedef resolves to C++ ``bool`` (1 byte) on the Linux
 # target — every BOOL-returning binding uses ``ct.c_bool``, so BOOL struct
@@ -568,6 +684,31 @@ class GUID(ct.Structure):
     def channel(self) -> int:
         """1-based channel number encoded in Data1 (matches web-CGI node ids)."""
         return self.Data1
+
+
+class VEHICE_PLATE_INFO(ct.Structure):
+    """NVR plate metadata for ``NET_SDK_SMART_EVENT_TYPE_NVR_VEHICLE``."""
+
+    _pack_ = 4
+    _fields_ = [
+        ("dwPlateID", ct.c_uint),
+        ("dwEncryptVer", ct.c_uint),
+        ("plateCharCount", ct.c_uint),
+        ("plate", ct.c_char * 64),
+        ("Rect16", RECT_16),
+        ("plateConfidence", ct.c_uint),
+        ("plateIntensity", ct.c_uint),
+        ("plateColor", ct.c_ubyte),
+        ("plateStyle", ct.c_ubyte),
+        ("PlateColorRate", ct.c_ubyte),
+        ("vehicleColor", ct.c_ubyte),
+        ("dwBrand", ct.c_uint),
+        ("owner", ct.c_char * 32),
+        ("listType", ct.c_int),
+        ("dwStartTime", ct.c_uint),
+        ("dwEndTime", ct.c_uint),
+        ("chlId", GUID),
+    ]
 
 
 # ── User accounts ───────────────────────────────────────────────────
@@ -777,3 +918,15 @@ TALK_DATA_CALLBACK = ct.CFUNCTYPE(None, ct.c_longlong, ct.c_void_p, ct.c_uint, c
 # void(LONG lUserID, LONG channelID, DWORD dwCommand, char* pBuf, DWORD dwBufLen,
 #      void* pUser)
 SUBSCRIBE_CALLBACK_V2 = ct.CFUNCTYPE(None, ct.c_long, ct.c_long, ct.c_uint, ct.c_void_p, ct.c_uint, ct.c_void_p)
+
+
+class NET_DVR_SUBSCRIBE_REPLY(ct.Structure):
+    """Opaque renewal/unsubscribe token returned by ``NET_SDK_SmartSubscrib``."""
+
+    _pack_ = 4
+    _fields_ = [
+        ("serverAddress", ct.c_char * 256),
+        ("currentTime", ct.c_longlong),
+        ("terminationTime", ct.c_longlong),
+        ("resv", ct.c_char * 64),
+    ]

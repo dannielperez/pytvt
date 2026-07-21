@@ -153,6 +153,8 @@ For downstream code, the package now centers around a few clear entrypoints:
 - `NvrClient` and `WebApiClient` for direct device configuration and data access
 - `DeviceManager` for unified per-device operations across SDK-backed runtimes
 - `ManagementClient` for management-server sessions and platform inventory analysis
+- `pytvt.device_sdk.PlateEvent` parsers and bounded streams for consuming TVT-produced
+  IPC/NVR license-plate events; see [`docs/LPR_EVENT_INGESTION.md`](docs/LPR_EVENT_INGESTION.md)
 
 ## Stability and Scope
 
@@ -162,6 +164,11 @@ provisional management-server package.
 **Stable:**
 - Scanner, discovery, `NvrClient`, `WebApiClient`, `DeviceManager`,
   connection-pool helpers, and netsdk-backed device operations
+- Typed plate-event DTOs and pure IPC/NVR payload parsers
+
+**Provisional live device behavior:**
+- `DeviceSession.subscribe_plate_events()` registration/renewal timing until a
+  read-only 1.3.2 fleet conformance pilot validates firmware behavior
 
 **Provisional (`pytvt.platform_sdk`):**
 - Management-server backend family and related validation tooling in `tools/`
