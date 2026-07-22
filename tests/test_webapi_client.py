@@ -121,6 +121,36 @@ class TestGetSupportedAPIs:
 
 
 class TestGetDeviceInfo:
+    def test_legacy_positional_constructor_order_is_preserved(self):
+        info = DeviceInfo(
+            "name",
+            "id",
+            "model",
+            "serial",
+            "mac",
+            "firmware",
+            "release-date",
+            "boot",
+            "hardware",
+            "NVR",
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+        )
+
+        assert info.p2p_security_code == ""
+        assert info.telecontrol_id == 11
+        assert info.video_input_num == 12
+        assert info.video_output_num == 13
+        assert info.audio_input_num == 14
+        assert info.audio_output_num == 15
+        assert info.alarm_input_num == 16
+        assert info.alarm_output_num == 17
+
     @patch("pytvt.web_api.client.http.client.HTTPConnection")
     def test_parses_device_info(self, mock_conn_cls, client):
         body = _xml_ok(
