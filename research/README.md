@@ -31,6 +31,7 @@ The findings from this research are implemented as production code in
 | `parse_pcap.py` | Python | Extract init/login packets from a pcap for manual inspection |
 | `verify_pw.py` | Python | Connect to a lab NVR, capture nonce, verify encryption scheme |
 | `verify_capture.py` | Python | Inspect captured pcap data to validate the observed hash/encryption scheme |
+| `backup_crypto_probe.py` | Python | Diff deterministic config-backup exports and rank salt/IV/key/checksum candidates in the header (covered by `tests/test_backup_crypto_probe.py`) |
 
 ## Typical workflow (for reference)
 
