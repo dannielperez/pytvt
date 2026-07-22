@@ -23,7 +23,6 @@ class DeviceInfo:
     boot_version: str = ""
     hardware_version: str = ""
     device_type: str = ""  # IPC, NVR, DVR, etc.
-    p2p_security_code: str = field(default="", repr=False)
     telecontrol_id: int = 0
     video_input_num: int = 0
     video_output_num: int = 0
@@ -31,6 +30,9 @@ class DeviceInfo:
     audio_output_num: int = 0
     alarm_input_num: int = 0
     alarm_output_num: int = 0
+    # Additive fields must remain after the original positional constructor
+    # surface so older callers do not silently bind values to the wrong names.
+    p2p_security_code: str = field(default="", repr=False)
 
 
 @dataclass
