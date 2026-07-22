@@ -149,6 +149,30 @@ class TestGetDeviceInfo:
         assert info.video_input_num == 16
         assert info.audio_input_num == 1
 
+    @pytest.mark.parametrize(
+        "element_name",
+        [
+            "natSecurityCode",
+            "nat_security_code",
+            "securityCode",
+            "security_code",
+            "verifyCode",
+            "verify_code",
+            "verificationCode",
+        ],
+    )
+    @patch("pytvt.web_api.client.http.client.HTTPConnection")
+    def test_parses_p2p_security_code_aliases(self, mock_conn_cls, client, element_name):
+        body = _xml_ok(f"<DeviceInfo>  <{element_name}>P2P-CODE-1</{element_name}></DeviceInfo>")
+        mock_conn = MagicMock()
+        mock_conn_cls.return_value = mock_conn
+        mock_conn.getresponse.return_value = _ok_response(body)
+
+        info = client.get_device_info()
+
+        assert info.p2p_security_code == "P2P-CODE-1"
+        assert "P2P-CODE-1" not in repr(info)
+
 
 # ── get_channel_info ─────────────────────────────────────────────────
 

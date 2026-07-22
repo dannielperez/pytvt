@@ -23,6 +23,7 @@ class DeviceInfo:
     boot_version: str = ""
     hardware_version: str = ""
     device_type: str = ""  # IPC, NVR, DVR, etc.
+    p2p_security_code: str = field(default="", repr=False)
     telecontrol_id: int = 0
     video_input_num: int = 0
     video_output_num: int = 0
