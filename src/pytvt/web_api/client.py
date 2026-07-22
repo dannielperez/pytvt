@@ -298,6 +298,15 @@ class WebApiClient:
             boot_version=xml.find_text(di, "bootVersion"),
             hardware_version=xml.find_text(di, "hardwareVersion"),
             device_type=xml.find_text(di, "deviceType"),
+            p2p_security_code=(
+                xml.find_text(di, "natSecurityCode")
+                or xml.find_text(di, "nat_security_code")
+                or xml.find_text(di, "securityCode")
+                or xml.find_text(di, "security_code")
+                or xml.find_text(di, "verifyCode")
+                or xml.find_text(di, "verify_code")
+                or xml.find_text(di, "verificationCode")
+            ),
             telecontrol_id=xml.find_int(di, "telecontrolID"),
             video_input_num=xml.find_int(di, "videoInputNum"),
             video_output_num=xml.find_int(di, "videoOutputNum"),
