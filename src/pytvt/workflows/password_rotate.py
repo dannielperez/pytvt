@@ -57,7 +57,11 @@ class ChannelRotationResult:
         dev_id: NVR-internal device UUID (e.g. ``{0000000A-0000-...}``).
         ip: Camera IP as registered on the NVR at entry.
         status: One of:
-            * ``already-in-sync`` — channel was online before we started.
+            * ``already-in-sync`` — channel was online before we started (and
+              ``include_online`` was not set, so we left it untouched).
+            * ``already-ours`` — force pass found the camera already on the
+              target password (idempotent no-op).
+            * ``rotated-via-force`` — force pass changed an online camera's password.
             * ``synced-via-pass-a`` — camera was pre-rotated; NVR cred refreshed.
             * ``rotated-via-pass-b`` — camera password was changed by us.
             * ``skipped`` — channel not eligible (filtered by subnet etc.).
@@ -134,6 +138,70 @@ def _filter_channels(
     return out
 
 
+def _force_rotate_online(
+    client: NvrClient,
+    channels: Sequence[Channel],
+    *,
+    username: str,
+    new_password: str,
+    sink: ProgressSink,
+) -> tuple[int, int, list[ChannelRotationResult]]:
+    """Force-rotate channels the NVR is already authenticated to (online).
+
+    Because an online channel means the NVR's stored credential already matches
+    the camera, we can push a new camera password without knowing the old one:
+    ``editIPChlPassword`` then re-sync the NVR-stored credential. Uses
+    :meth:`NvrClient.edit_ipc_password_status` so a camera already on the target
+    password (errorCode ``536870962``) is recorded as ``already-ours`` rather
+    than a failure. Returns ``(rotated, already_ours, results)``.
+    """
+    rotated = 0
+    already = 0
+    out: list[ChannelRotationResult] = []
+    for ch in channels:
+        label = f"ch{ch.chl_num} {ch.ip}"
+        try:
+            status = client.edit_ipc_password_status(ch.dev_id, new_password=new_password)
+        except Exception as exc:
+            out.append(
+                ChannelRotationResult(ch.chl_num, ch.dev_id, ch.ip, "failed",
+                                      f"editIPChlPassword (force) failed: {exc}")
+            )
+            sink.emit(ProgressEvent("error", "force.editIPChlPassword_failed", f"{label}: {exc}"))
+            continue
+        try:
+            client.update_device_credentials(
+                dev_ids=[ch.dev_id], username=username, password=new_password
+            )
+        except Exception as exc:
+            out.append(
+                ChannelRotationResult(ch.chl_num, ch.dev_id, ch.ip, "failed",
+                                      f"editDevList(new) after force rotate failed: {exc}")
+            )
+            sink.emit(
+                ProgressEvent("warning", "force.editDevList_failed",
+                              f"{label}: camera changed but NVR cred NOT updated — {exc}")
+            )
+            continue
+        if status == "changed":
+            rotated += 1
+            out.append(ChannelRotationResult(ch.chl_num, ch.dev_id, ch.ip, "rotated-via-force"))
+            sink.emit(
+                ProgressEvent("success", "channel.rotated",
+                              f"{label}: force-rotated and NVR cred synced",
+                              context={"chl_num": ch.chl_num, "ip": ch.ip})
+            )
+        else:  # already-set
+            already += 1
+            out.append(ChannelRotationResult(ch.chl_num, ch.dev_id, ch.ip, "already-ours"))
+            sink.emit(
+                ProgressEvent("info", "channel.already_ours",
+                              f"{label}: already on target password (NVR cred re-synced)",
+                              context={"chl_num": ch.chl_num, "ip": ch.ip})
+            )
+    return rotated, already, out
+
+
 def rotate_nvr_channel_passwords(
     client: NvrClient,
     *,
@@ -143,6 +211,7 @@ def rotate_nvr_channel_passwords(
     subnet: str | None = None,
     channel_ids: Sequence[str] | None = None,
     apply: bool = False,
+    include_online: bool = False,
     settle_seconds: float = _SETTLE_SECONDS,
     progress: ProgressSink | None = None,
 ) -> PasswordRotateResult:
@@ -162,6 +231,12 @@ def rotate_nvr_channel_passwords(
         channel_ids: Optional explicit list of NVR device IDs to target.
             When set, overrides ``subnet``.
         apply: If False (default), probe and report but make no changes.
+        include_online: If True, also force-rotate channels the NVR currently
+            reports ONLINE (the NVR is already authenticated to them). Without
+            this, online channels are assumed already in sync and left untouched
+            — which cannot move an all-online site that is still on the default
+            password onto the target. Cameras already on the target report
+            ``already-ours`` (idempotent), so this is safe to re-run.
         settle_seconds: Wait after each ``editDevList`` call before re-reading
             online status. Lower only for testing; 6 s matches field observations.
         progress: Optional sink for real-time events. Defaults to a null sink.
@@ -227,10 +302,16 @@ def rotate_nvr_channel_passwords(
     )
 
     results: list[ChannelRotationResult] = []
-    already_ok = [c for c in candidates if c.online]
+    online = [c for c in candidates if c.online]
     offline = [c for c in candidates if not c.online]
+    # With include_online, online channels are force-rotated (the NVR is already
+    # authenticated to them). Otherwise an online channel is assumed in sync.
+    force_online = list(online) if include_online else []
+    already_ok = [] if include_online else online
+    forced_rotated = 0
+    forced_already = 0
 
-    # Channels that are already online are assumed in sync — record as such.
+    # Channels assumed already in sync (only when not force-rotating online).
     for ch in already_ok:
         results.append(
             ChannelRotationResult(
@@ -241,7 +322,7 @@ def rotate_nvr_channel_passwords(
             )
         )
 
-    if not offline:
+    if not offline and not force_online:
         sink.emit(
             ProgressEvent(
                 level="success",
@@ -259,6 +340,24 @@ def rotate_nvr_channel_passwords(
 
     if not apply:
         # Dry-run: list candidates but take no action.
+        for ch in force_online:
+            sink.emit(
+                ProgressEvent(
+                    level="info",
+                    code="channel.candidate",
+                    message=f"[DRY-RUN] ch{ch.chl_num} {ch.ip} — force-rotate (online)",
+                    context={"chl_num": ch.chl_num, "ip": ch.ip, "dev_id": ch.dev_id},
+                )
+            )
+            results.append(
+                ChannelRotationResult(
+                    chl_num=ch.chl_num,
+                    dev_id=ch.dev_id,
+                    ip=ch.ip,
+                    status="skipped",
+                    error="dry-run (force-online)",
+                )
+            )
         for ch in offline:
             sink.emit(
                 ProgressEvent(
@@ -283,6 +382,40 @@ def rotate_nvr_channel_passwords(
             channels_total=len(candidates),
             channels_already_ok=len(already_ok),
             channels_failed=0,
+            results=results,
+        )
+
+    # --- Force pass: rotate online channels when include_online is set ---
+    if force_online:
+        sink.emit(
+            ProgressEvent(
+                level="info",
+                code="force.start",
+                message=f"Force pass: rotating {len(force_online)} online channel(s)",
+            )
+        )
+        forced_rotated, forced_already, forced_results = _force_rotate_online(
+            client, force_online, username=username, new_password=new_password, sink=sink
+        )
+        results.extend(forced_results)
+
+    if not offline:
+        # include_online with no offline channels — force pass is the whole job.
+        failed = sum(1 for r in results if r.status == "failed")
+        sink.emit(
+            ProgressEvent(
+                "success" if failed == 0 else "warning",
+                "workflow.done",
+                f"Done: rotated={forced_rotated} already-ours={forced_already} failed={failed}",
+            )
+        )
+        return PasswordRotateResult(
+            nvr_host=host,
+            dry_run=False,
+            channels_total=len(candidates),
+            channels_already_ok=len(already_ok) + forced_already,
+            channels_rotated=forced_rotated,
+            channels_failed=failed,
             results=results,
         )
 
@@ -359,9 +492,10 @@ def rotate_nvr_channel_passwords(
             nvr_host=host,
             dry_run=False,
             channels_total=len(candidates),
-            channels_already_ok=len(already_ok),
+            channels_already_ok=len(already_ok) + forced_already,
             channels_synced=len(synced),
-            channels_rotated=0,
+            channels_rotated=forced_rotated,
+            channels_failed=sum(1 for r in results if r.status == "failed"),
             results=results,
         )
 
@@ -477,11 +611,14 @@ def rotate_nvr_channel_passwords(
         ProgressEvent(
             "success" if failed == 0 else "warning",
             "workflow.done",
-            (f"Done: already={len(already_ok)} synced={len(synced)} rotated={len(rotated)} failed={failed}"),
+            (
+                f"Done: already={len(already_ok) + forced_already} synced={len(synced)} "
+                f"rotated={len(rotated) + forced_rotated} failed={failed}"
+            ),
             context={
-                "already": len(already_ok),
+                "already": len(already_ok) + forced_already,
                 "synced": len(synced),
-                "rotated": len(rotated),
+                "rotated": len(rotated) + forced_rotated,
                 "failed": failed,
             },
         )
@@ -491,9 +628,9 @@ def rotate_nvr_channel_passwords(
         nvr_host=host,
         dry_run=False,
         channels_total=len(candidates),
-        channels_already_ok=len(already_ok),
+        channels_already_ok=len(already_ok) + forced_already,
         channels_synced=len(synced),
-        channels_rotated=len(rotated),
+        channels_rotated=len(rotated) + forced_rotated,
         channels_failed=failed,
         results=results,
     )
