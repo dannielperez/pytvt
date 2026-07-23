@@ -40,6 +40,7 @@ __version__ = "1.2.0"
 
 from . import workflows  # Provisional — technician-facing workflow orchestrations.
 from .alarm_protocol import ParsedAlarmFrame, parse_alarm_frame
+from .alarm_server import AlarmServer
 from .config import load_config
 from .connection_pool import ConnectionPool, PoolStats, SessionMetrics, SessionResult, connect_many
 from .constants import BackendFamily, CompositeStrategy, ExecutionPlan, IntegrationMode, resolve_backend
@@ -48,13 +49,18 @@ from .device_sdk.manager import Backend, DeviceManager, NoBackendAvailable, avai
 from .diff import DeviceDiff, ScanDiff, diff_scans, load_scan_file
 from .exceptions import BackendError, PytvtError, RegistryError
 from .models import (
+    AiResource,
+    AiResourceChannel,
     ApiServerConfig,
     CameraInfo,
     Channel,
     DeviceEntry,
+    FaceDbGroup,
+    FaceEvent,
     LanFreeDevice,
     NvrApiError,
     NvrApiResponseShapeError,
+    NvrFaceDetectionConfig,
     NvrLanFreeDevice,
     PlatformAccessConfig,
     PlatformAccessDisabledError,
@@ -94,6 +100,7 @@ __all__ = [
     # Alarm-server wire protocol
     "ParsedAlarmFrame",
     "parse_alarm_frame",
+    "AlarmServer",
     # Constants / enums
     "BackendFamily",
     "CompositeStrategy",
@@ -106,10 +113,15 @@ __all__ = [
     "PytvtError",
     "RegistryError",
     # Models
+    "AiResource",
+    "AiResourceChannel",
     "ApiServerConfig",
     "CameraInfo",
     "Channel",
     "DeviceEntry",
+    "FaceDbGroup",
+    "FaceEvent",
+    "NvrFaceDetectionConfig",
     "NvrLanFreeDevice",
     "LanFreeDevice",
     "NvrApiError",
