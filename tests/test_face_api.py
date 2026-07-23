@@ -9,6 +9,7 @@ codes, and an end-to-end :class:`~pytvt.alarm_server.AlarmServer` round-trip.
 from __future__ import annotations
 
 import json
+import re
 import socket
 import threading
 
@@ -110,6 +111,65 @@ class TestQueryFaceDbGroups:
         assert [g.name for g in groups] == ["VIP", "Blocklist"]
         assert groups[0].group_type == "allow" and groups[0].face_count == 3
         assert groups[1].group_type == "reject" and groups[1].face_count == 7
+
+
+class TestSearchFaceEvents:
+    def test_decodes_records(self):
+        client = _client()
+        # searchImageByImageV2 compact <i> records: _,calTimeS,calTimeNS,imgId,channel,... (hex)
+        client._post = lambda path, body: (
+            '<response cmdUrl="searchImageByImageV2"><status>success</status>'
+            '<content type="list" total="2">'
+            "<i>0,6a619cb3,335afe,24d1,9,0,6a619cb1,6a619cb8,{G},19,576,2c,0,1</i>"
+            "<i>0,6a6198fc,000001,24be,9,0,6a6198fa,6a619901,{G},19,576,24,0,1</i>"
+            "</content></response>"
+        )
+        evs = client.search_face_events(9, "2026-07-23 04:00:00", "2026-07-24 03:59:59")
+        assert len(evs) == 2
+        assert evs[0].img_id == 0x24D1 == 9425
+        assert evs[0].channel == 9
+        # frame time = "YYYY-MM-DD HH:MM:SS:NNNNNNN" (7-digit sub-second from calTimeNS)
+        assert evs[0].frame_time.endswith(":3365630")  # 0x335afe
+        assert re.match(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}:\d{7}", evs[0].frame_time)
+        assert evs[1].frame_time.endswith(":0000001")
+
+    def test_sends_searchimagebyimagev2_payload(self):
+        sent = {}
+        client = _client()
+
+        def fake_post(path, body):
+            sent["path"] = path
+            sent["body"] = body
+            return '<response><status>success</status><content type="list" total="0"></content></response>'
+
+        client._post = fake_post
+        client.search_face_events(9, "2026-07-23 04:00:00", "2026-07-24 03:59:59", similarity=80)
+        assert sent["path"] == "searchImageByImageV2"
+        assert "<resultLimit>" in sent["body"]
+        assert '<item id="{00000009-0000-0000-0000-000000000000}">' in sent["body"]
+        assert "<eventType>byAll</eventType>" in sent["body"]
+        assert "<similarity>80</similarity>" in sent["body"]
+
+
+class TestGetFaceSnapshot:
+    def test_decodes_cdata_jpeg(self):
+        import base64 as _b64
+
+        jpeg = b"\xff\xd8\xff\xe0FAKEJPEG"
+        client = _client()
+        sent = {}
+
+        def fake_post(path, body):
+            sent["path"] = path
+            sent["body"] = body
+            return f"<response><status>success</status><content><![CDATA[{_b64.b64encode(jpeg).decode()}]]></content><grade>63</grade></response>"
+
+        client._post = fake_post
+        out = client.get_face_snapshot(9, 9425, "2026-07-23 04:46:43:3365630")
+        assert out == jpeg
+        assert sent["path"] == "requestChSnapFaceImage"
+        assert "<imgId>9425</imgId>" in sent["body"]
+        assert "<frameTime>2026-07-23 04:46:43:3365630</frameTime>" in sent["body"]
 
 
 class TestAlarmServerConfig:

@@ -114,6 +114,7 @@ import http.client
 import re
 import subprocess
 import sys
+from datetime import datetime, timezone
 from xml.sax.saxutils import escape
 
 from ._crypto import aes_ecb_zeropad
@@ -1455,58 +1456,88 @@ class NvrClient:
         start: str,
         end: str,
         *,
-        max_results: int = 100,
+        similarity: int = 75,
+        result_limit: int = 10000,
+        fetch_snapshots: bool = False,
     ) -> list[FaceEvent]:
-        """Search recorded NVR-side face events for a channel and time window.
+        """Search recorded NVR-side face-detection events for a channel + window.
 
-        ``start``/``end`` are device-local ``YYYY-MM-DD HH:MM:SS`` strings.
-        Face crops (``snapshot``) and background frames (``background``) are
-        decoded from the device's inline base64 into JPEG bytes.
+        ``start``/``end`` are ``YYYY-MM-DD HH:MM:SS`` strings (UTC, matching the
+        web client's "By Event" face search). Returns the event index — each
+        :class:`FaceEvent` carries ``channel``, ``img_id`` and ``frame_time``;
+        pass those to :meth:`get_face_snapshot` for the cropped-face JPEG (stored
+        separately on the recorder). Set ``fetch_snapshots=True`` to eagerly
+        populate ``FaceEvent.snapshot`` (one extra request per event).
 
-        CGI endpoint: ``searchSmartTarget`` (the face record search).
+        CGI endpoint: ``searchImageByImageV2``. The compact ``<i>`` records are
+        decoded per the web client: field layout
+        ``[_, calTimeS, calTimeNS, imgId, channel, …]`` (all hex).
+        """
+        self._require_login()
+        chl_id = self.channel_guid(channel)
+        content = (
+            f"<resultLimit>{int(result_limit)}</resultLimit>"
+            "<condition>"
+            f"<startTime>{escape(start)}</startTime>"
+            f"<endTime>{escape(end)}</endTime>"
+            f'<chls type="list"><item id="{chl_id}"></item></chls>'
+            "<event><eventType>byAll</eventType></event>"
+            f"<similarity>{int(similarity)}</similarity>"
+            "</condition>"
+        )
+        data = self._post("searchImageByImageV2", self._build_request_with_content(content))
+        self._check_response(data, "searchImageByImageV2")
+        events: list[FaceEvent] = []
+        for rec in re.findall(r"<i>(.*?)</i>", data, re.DOTALL):
+            f = rec.split(",")
+            if len(f) < 5:
+                continue
+            try:
+                cal_time_s = int(f[1], 16)  # epoch seconds
+                cal_time_ns = int(f[2], 16)  # sub-second, 7 digits
+                img_id = int(f[3], 16)
+                ch = int(f[4], 16)
+            except ValueError:
+                continue
+            frame_time = (
+                datetime.fromtimestamp(cal_time_s, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+                + f":{cal_time_ns:07d}"
+            )
+            ev = FaceEvent(
+                chl_id=chl_id,
+                channel=ch,
+                timestamp=frame_time,
+                img_id=img_id,
+                frame_time=frame_time,
+            )
+            if fetch_snapshots:
+                ev.snapshot = self.get_face_snapshot(ch, img_id, frame_time)
+            events.append(ev)
+        return events
 
-        .. warning::
-           **Provisional.** The ``searchSmartTarget`` command is confirmed
-           present, but its exact condition schema is firmware-specific and not
-           yet captured — current firmware rejects the common form below with
-           ``errorCode=536870942`` (bad parameter). Until the real payload is
-           captured from the web client's Intelligent-Analysis face search, this
-           method may raise :class:`NvrApiError`. The response parsing is
-           defensive and will work once the request body is corrected.
+    def get_face_snapshot(self, channel: int, img_id: int, frame_time: str) -> bytes:
+        """Fetch one face snapshot JPEG by ``img_id`` + ``frame_time``.
+
+        ``img_id`` and ``frame_time`` come from a :class:`FaceEvent` returned by
+        :meth:`search_face_events`. Returns the cropped-face JPEG bytes (decoded
+        from the device's base64), or ``b""`` if unavailable.
+
+        CGI endpoint: ``requestChSnapFaceImage``.
         """
         self._require_login()
         chl_id = self.channel_guid(channel)
         content = (
             "<condition>"
+            f"<imgId>{int(img_id)}</imgId>"
             f"<chlId>{chl_id}</chlId>"
-            "<eventType>faceMatch</eventType>"
-            f"<startTime>{escape(start)}</startTime>"
-            f"<endTime>{escape(end)}</endTime>"
-            f"<maxCount>{int(max_results)}</maxCount>"
+            f"<frameTime>{escape(frame_time)}</frameTime>"
+            "<featureStatus>false</featureStatus>"
             "</condition>"
         )
-        data = self._post("searchSmartTarget", self._build_request_with_content(content))
-        self._check_response(data, "searchSmartTarget")
-        events: list[FaceEvent] = []
-        for m in re.finditer(r"<item(\s+[^>]*)?>(.*?)</item>", data, re.DOTALL):
-            block = m.group(2)
-            face_b64 = self._parse_xml_field(block, "snapImg") or self._parse_xml_field(block, "faceImg") or ""
-            bg_b64 = self._parse_xml_field(block, "panorama") or self._parse_xml_field(block, "backgroundImg") or ""
-            group = self._parse_xml_field(block, "groupName") or ""
-            events.append(
-                FaceEvent(
-                    chl_id=chl_id,
-                    channel=channel,
-                    timestamp=self._parse_xml_field(block, "time") or self._parse_xml_field(block, "startTime") or "",
-                    matched=bool(group),
-                    group_name=group,
-                    person_name=self._parse_xml_field(block, "name") or "",
-                    similarity=float(self._parse_xml_field(block, "similarity") or 0.0),
-                    snapshot=_maybe_b64(face_b64),
-                    background=_maybe_b64(bg_b64),
-                )
-            )
-        return events
+        data = self._post("requestChSnapFaceImage", self._build_request_with_content(content))
+        self._check_response(data, "requestChSnapFaceImage")
+        cdata = re.search(r"<content>\s*<!\[CDATA\[(.*?)\]\]>\s*</content>", data, re.DOTALL)
+        return _maybe_b64(cdata.group(1).strip()) if cdata else b""
 
     # ── Alarm Server (event push target) ─────────────────────────────
 
