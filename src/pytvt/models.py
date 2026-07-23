@@ -289,6 +289,7 @@ class Channel:
     chl_type: str = ""
     access_type: str = ""
     auto_report_id: str = ""
+    guid: str = ""  # channel GUID ({0000000N-...}) used by per-channel AI commands
 
 
 @dataclass
@@ -339,3 +340,84 @@ class PasswordSecurity:
     min_strength: str  # weak, medium, strong, stronger
     expiration_days: int  # 0 = never expires
     allowed_levels: list[str] = field(default_factory=list)  # available strength tiers
+
+
+# ── AI / Face models (Function Panel → AI Event → Face Recognition) ───
+#
+# TVT NVRs can run *back-end* (NVR-side) analytics on an ordinary camera —
+# the web UI's "Enable Detection by NVR" toggle — by allocating a slice of the
+# recorder's finite AI-compute pool to a channel. These models cover the
+# HTTP-CGI surface that drives that page: the resource pool, the per-channel
+# face-detection switch, the face database, and retrieved face events.
+
+
+@dataclass
+class AiResourceChannel:
+    """One channel's slice of the NVR AI-compute pool (``queryAIResourceDetail``)."""
+
+    chl_id: str  # channel GUID ({0000000N-...})
+    name: str = ""
+    event_types: list[str] = field(default_factory=list)  # e.g. ['faceMatch', 'faceDetect']
+    connect_state: str = ""
+    resource: int = 0  # resource units this channel currently occupies
+
+
+@dataclass
+class AiResource:
+    """NVR AI-analytics compute pool (``queryAIResourceDetail``).
+
+    ``supported_event_types`` is what the recorder can run at all (e.g.
+    ``faceMatch``, ``faceDetect``, ``tripwire``, ``perimeter``);
+    ``total_occupancy`` is how much of the pool is already spoken for.
+    """
+
+    supported_event_types: list[str] = field(default_factory=list)
+    total_occupancy: float = 0.0  # percent of the AI pool already allocated
+    channels: list[AiResourceChannel] = field(default_factory=list)
+
+
+@dataclass
+class NvrFaceDetectionConfig:
+    """NVR-side ("Enable Detection by NVR") face detection for one channel.
+
+    From ``queryBackFaceMatch``. ``enabled`` is the page's Detection checkbox;
+    ``schedule_id`` is the arming schedule GUID (e.g. the 24x7 schedule).
+    """
+
+    chl_id: str
+    enabled: bool
+    schedule_id: str = ""
+
+
+@dataclass
+class FaceDbGroup:
+    """A face-database group (``queryFacePersonnalInfoGroupList``).
+
+    ``group_type`` is one of ``allow`` / ``reject`` / ``limited`` (the match
+    lists the recognition engine compares detected faces against).
+    """
+
+    group_id: str
+    name: str = ""
+    group_type: str = ""
+    face_count: int = 0
+
+
+@dataclass
+class FaceEvent:
+    """A detected/recognized face, from a search or the real-time stream.
+
+    ``snapshot`` is the cropped face JPEG and ``background`` the wide/panorama
+    frame — both returned inline as bytes (decoded from the device's base64).
+    ``matched`` is True when the face hit a database group.
+    """
+
+    chl_id: str
+    channel: int = 0
+    timestamp: str = ""  # device-local time string
+    matched: bool = False
+    group_name: str = ""
+    person_name: str = ""
+    similarity: float = 0.0
+    snapshot: bytes = b""
+    background: bytes = b""

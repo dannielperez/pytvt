@@ -118,10 +118,15 @@ from xml.sax.saxutils import escape
 
 from ._crypto import aes_ecb_zeropad
 from .models import (
+    AiResource,
+    AiResourceChannel,
     ApiServerConfig,
     Channel,
+    FaceDbGroup,
+    FaceEvent,
     NvrApiError,
     NvrApiResponseShapeError,
+    NvrFaceDetectionConfig,
     NvrLanFreeDevice,
     PasswordSecurity,
     PlatformAccessConfig,
@@ -475,9 +480,10 @@ class NvrClient:
         for m in re.finditer(r'<item\s+id="([^"]+)">(.*?)</item>', dev_data, re.DOTALL):
             dev_id = m.group(1)
             block = m.group(2)
+            chl_num = int(self._parse_xml_field(block, "chlNum") or 0)
             channels.append(
                 Channel(
-                    chl_num=int(self._parse_xml_field(block, "chlNum") or 0),
+                    chl_num=chl_num,
                     name=self._parse_xml_field(block, "name") or "",
                     ip=self._parse_xml_field(block, "ip") or "",
                     port=int(self._parse_xml_field(block, "port") or 9008),
@@ -491,6 +497,7 @@ class NvrClient:
                     chl_type=self._parse_xml_field(block, "chlType") or "",
                     access_type=self._parse_xml_field(block, "AccessType") or "",
                     auto_report_id=self._parse_xml_field(block, "autoReportID") or "",
+                    guid=self.channel_guid(chl_num),
                 )
             )
         return channels
@@ -1274,6 +1281,243 @@ class NvrClient:
         """
         url = self.get_rtsp_url(channel, stream_type)
         return rtsp_snapshot(url, output_path, timeout=timeout)
+
+    # ── AI / Face Recognition ────────────────────────────────────────
+    #
+    # NVR-side ("back-end") face analytics: the Function Panel → AI Event →
+    # Face Recognition page. Per-channel commands key off the channel GUID
+    # ({0000000N-...}); use :meth:`channel_guid` (or ``Channel.guid``) to build
+    # it from a 1-indexed channel number.
+
+    @staticmethod
+    def channel_guid(channel: int) -> str:
+        """Return the NVR channel GUID for a 1-indexed channel number.
+
+        The AI/face CGI commands identify a channel by a fixed-format GUID —
+        e.g. channel 9 → ``{00000009-0000-0000-0000-000000000000}`` — rather
+        than by the ``chlNum`` used elsewhere.
+        """
+        if channel < 1:
+            raise ValueError("channel must be >= 1")
+        return "{" + f"{channel:08d}" + "-0000-0000-0000-000000000000}"
+
+    def query_ai_resource(self) -> AiResource:
+        """Query the NVR's AI-compute pool and per-channel allocation.
+
+        This is what lets an NVR run analytics on an ordinary camera: the
+        recorder has a finite pool of AI resource and allocates slices to
+        channels. Returns the supported event types (``faceMatch``,
+        ``faceDetect``, ``tripwire``, ``perimeter``), the total occupancy, and
+        each channel's current allocation.
+
+        CGI endpoint: ``queryAIResourceDetail``
+        """
+        self._require_login()
+        data = self._post("queryAIResourceDetail", self._build_request())
+        self._check_response(data, "queryAIResourceDetail")
+
+        supported = re.findall(r"<eventType>(.*?)</eventType>", data, re.DOTALL)
+        supported_types: list[str] = []
+        if supported:
+            supported_types = re.findall(r"<enum>(.*?)</enum>", supported[0])
+        total = float(self._parse_xml_field(data, "totalResourceOccupancy") or 0)
+
+        content = re.search(r"<content\b[^>]*>(.*?)</content>", data, re.DOTALL)
+        channels: list[AiResourceChannel] = []
+        if content:
+            for m in re.finditer(r"<item(\s+[^>]*)?>(.*?)</item>", content.group(1), re.DOTALL):
+                attrs = m.group(1) or ""
+                block = m.group(2)
+                guid = re.search(r'(?:id|guid|chlId)="([^"]+)"', attrs)
+                channels.append(
+                    AiResourceChannel(
+                        chl_id=(guid.group(1) if guid else self._parse_xml_field(block, "chlId") or ""),
+                        name=self._parse_xml_field(block, "name") or "",
+                        event_types=re.findall(r"<enum>(.*?)</enum>", block)
+                        or ([self._parse_xml_field(block, "eventType")] if "<eventType>" in block else []),
+                        connect_state=self._parse_xml_field(block, "connectState") or "",
+                        resource=int(float(self._parse_xml_field(block, "resource") or 0)),
+                    )
+                )
+        return AiResource(
+            supported_event_types=supported_types,
+            total_occupancy=total,
+            channels=channels,
+        )
+
+    def query_nvr_face_detection(self, channel: int) -> NvrFaceDetectionConfig:
+        """Query the NVR-side face detection ("Enable Detection by NVR") state.
+
+        This is the Detection tab of Function Panel → AI Event → Face
+        Recognition — the back-end face detector the recorder runs on the
+        selected channel (as opposed to camera-side ``queryVfd``).
+
+        CGI endpoint: ``queryBackFaceMatch``
+        """
+        self._require_login()
+        chl_id = self.channel_guid(channel)
+        content = f"<condition><chlId>{chl_id}</chlId></condition><requireField><param/></requireField>"
+        data = self._post("queryBackFaceMatch", self._build_request_with_content(content))
+        # queryBackFaceMatch omits <status> on success and returns <content>
+        # directly; only an explicit fail/errorCode is an error here.
+        if "<status>fail</status>" in data or "<errorCode>" in data:
+            self._check_response(data, "queryBackFaceMatch")
+        item = re.search(r"<item\s+([^>]*)>(.*?)</item>", data, re.DOTALL)
+        schedule = ""
+        if item:
+            sched_m = re.search(r'scheduleGuid="([^"]+)"', item.group(1))
+            schedule = sched_m.group(1) if sched_m else ""
+        switch = self._parse_xml_field(data, "switch")
+        return NvrFaceDetectionConfig(
+            chl_id=chl_id,
+            enabled=(switch == "true"),
+            schedule_id=schedule,
+        )
+
+    def set_nvr_face_detection(
+        self,
+        channel: int,
+        enabled: bool,
+        *,
+        schedule_id: str | None = None,
+    ) -> None:
+        """Enable/disable NVR-side face detection on a channel.
+
+        Writes back the same structure :meth:`query_nvr_face_detection` reads.
+        When ``schedule_id`` is omitted the channel's current arming schedule is
+        preserved.
+
+        CGI endpoint: ``editBackFaceMatch``
+        """
+        self._require_login()
+        chl_id = self.channel_guid(channel)
+        if schedule_id is None:
+            schedule_id = self.query_nvr_face_detection(channel).schedule_id
+        sched_attr = f' scheduleGuid="{escape(schedule_id, {chr(34): "&quot;"})}"' if schedule_id else ""
+        content = (
+            "<content><param><chls>"
+            f'<item guid="{chl_id}"{sched_attr}>'
+            f"<switch>{'true' if enabled else 'false'}</switch>"
+            "</item></chls></param></content>"
+        )
+        data = self._post("editBackFaceMatch", self._build_request_with_content(content))
+        self._check_response(data, "editBackFaceMatch")
+
+    def query_face_match_config(self, channel: int) -> str:
+        """Query the face *recognition* (match) config for a channel.
+
+        Returns the raw ``<content>`` XML (match groups, similarity threshold,
+        trigger actions) — the shape is firmware-dependent and richer than a
+        flat dataclass, so it is returned verbatim for the caller to parse.
+
+        CGI endpoint: ``queryFaceMatchConfig``
+        """
+        self._require_login()
+        chl_id = self.channel_guid(channel)
+        content = f"<condition><chlId>{chl_id}</chlId></condition>"
+        data = self._post("queryFaceMatchConfig", self._build_request_with_content(content))
+        self._check_response(data, "queryFaceMatchConfig")
+        body = re.search(r"<content\b[^>]*>.*?</content>", data, re.DOTALL)
+        return body.group(0) if body else data
+
+    def query_face_db_groups(self) -> list[FaceDbGroup]:
+        """List the face-database groups (allow / reject / limited).
+
+        CGI endpoint: ``queryFacePersonnalInfoGroupList``
+        """
+        self._require_login()
+        data = self._post("queryFacePersonnalInfoGroupList", self._build_request())
+        self._check_response(data, "queryFacePersonnalInfoGroupList")
+        groups: list[FaceDbGroup] = []
+        content = re.search(r"<content\b[^>]*>(.*?)</content>", data, re.DOTALL)
+        if content:
+            for m in re.finditer(r"<item(\s+[^>]*)?>(.*?)</item>", content.group(1), re.DOTALL):
+                attrs = m.group(1) or ""
+                block = m.group(2)
+                gid = re.search(r'id="([^"]+)"', attrs)
+                groups.append(
+                    FaceDbGroup(
+                        group_id=(gid.group(1) if gid else self._parse_xml_field(block, "id") or ""),
+                        name=self._parse_xml_field(block, "name") or "",
+                        group_type=self._parse_xml_field(block, "property")
+                        or self._parse_xml_field(block, "groupType")
+                        or "",
+                        face_count=int(self._parse_xml_field(block, "faceNum") or 0),
+                    )
+                )
+        return groups
+
+    def search_face_events(
+        self,
+        channel: int,
+        start: str,
+        end: str,
+        *,
+        max_results: int = 100,
+    ) -> list[FaceEvent]:
+        """Search recorded NVR-side face events for a channel and time window.
+
+        ``start``/``end`` are device-local ``YYYY-MM-DD HH:MM:SS`` strings.
+        Face crops (``snapshot``) and background frames (``background``) are
+        decoded from the device's inline base64 into JPEG bytes.
+
+        CGI endpoint: ``searchSmartTarget`` (the face record search).
+
+        .. warning::
+           **Provisional.** The ``searchSmartTarget`` command is confirmed
+           present, but its exact condition schema is firmware-specific and not
+           yet captured — current firmware rejects the common form below with
+           ``errorCode=536870942`` (bad parameter). Until the real payload is
+           captured from the web client's Intelligent-Analysis face search, this
+           method may raise :class:`NvrApiError`. The response parsing is
+           defensive and will work once the request body is corrected.
+        """
+        self._require_login()
+        chl_id = self.channel_guid(channel)
+        content = (
+            "<condition>"
+            f"<chlId>{chl_id}</chlId>"
+            "<eventType>faceMatch</eventType>"
+            f"<startTime>{escape(start)}</startTime>"
+            f"<endTime>{escape(end)}</endTime>"
+            f"<maxCount>{int(max_results)}</maxCount>"
+            "</condition>"
+        )
+        data = self._post("searchSmartTarget", self._build_request_with_content(content))
+        self._check_response(data, "searchSmartTarget")
+        events: list[FaceEvent] = []
+        for m in re.finditer(r"<item(\s+[^>]*)?>(.*?)</item>", data, re.DOTALL):
+            block = m.group(2)
+            face_b64 = self._parse_xml_field(block, "snapImg") or self._parse_xml_field(block, "faceImg") or ""
+            bg_b64 = self._parse_xml_field(block, "panorama") or self._parse_xml_field(block, "backgroundImg") or ""
+            group = self._parse_xml_field(block, "groupName") or ""
+            events.append(
+                FaceEvent(
+                    chl_id=chl_id,
+                    channel=channel,
+                    timestamp=self._parse_xml_field(block, "time")
+                    or self._parse_xml_field(block, "startTime")
+                    or "",
+                    matched=bool(group),
+                    group_name=group,
+                    person_name=self._parse_xml_field(block, "name") or "",
+                    similarity=float(self._parse_xml_field(block, "similarity") or 0.0),
+                    snapshot=_maybe_b64(face_b64),
+                    background=_maybe_b64(bg_b64),
+                )
+            )
+        return events
+
+
+def _maybe_b64(value: str) -> bytes:
+    """Decode a base64 image field to bytes; empty/invalid → ``b""``."""
+    if not value:
+        return b""
+    try:
+        # binascii.Error (raised on bad base64) subclasses ValueError.
+        return base64.b64decode(value, validate=False)
+    except (ValueError, TypeError):
+        return b""
 
 
 def _ffmpeg_rtsp_frame_args(rtsp_url: str, timeout: int) -> list[str]:
