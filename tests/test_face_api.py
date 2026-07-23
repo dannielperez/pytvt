@@ -113,6 +113,66 @@ class TestQueryFaceDbGroups:
         assert groups[1].group_type == "reject" and groups[1].face_count == 7
 
 
+class TestFaceDatabase:
+    def test_query_persons_empty_errorcode_is_zero(self):
+        # 536870942/536870947 mean "0 people", not a failure.
+        client = _client()
+        client._post = lambda path, body: (
+            '<response cmdUrl="queryFacePersonnalInfoList"><status>fail</status>'
+            "<errorCode>536870942</errorCode></response>"
+        )
+        assert client.query_face_persons("{G}") == []
+
+    def test_query_persons_parses_items(self):
+        client = _client()
+        client._post = lambda path, body: (
+            '<response cmdUrl="queryFacePersonnalInfoList"><status>success</status>'
+            '<content type="list" total="1">'
+            '<item id="{P1}"><name>Ada</name><gender>2</gender></item>'
+            "</content></response>"
+        )
+        ps = client.query_face_persons("{G}")
+        assert len(ps) == 1
+        assert ps[0].person_id == "{P1}" and ps[0].name == "Ada" and ps[0].group_id == "{G}"
+        assert ps[0].extra.get("gender") == "2"
+
+    def test_create_group_payload(self):
+        sent = {}
+        client = _client()
+        client._post = lambda path, body: (
+            sent.update(path=path, body=body) or "<response><status>success</status></response>"
+        )
+        client.create_face_group("VIPs", group_type="allow")
+        assert sent["path"] == "createFacePersonnalInfoGroup"
+        assert "<name><![CDATA[VIPs]]></name>" in sent["body"]
+        assert '<property type="property">allow</property>' in sent["body"]
+
+    def test_delete_groups_payload(self):
+        sent = {}
+        client = _client()
+        client._post = lambda path, body: (
+            sent.update(path=path, body=body) or "<response><status>success</status></response>"
+        )
+        client.delete_face_groups(["{G1}", "{G2}"])
+        assert sent["path"] == "delFacePersonnalInfoGroups"
+        assert '<item id="{G1}"></item><item id="{G2}"></item>' in sent["body"]
+
+    def test_get_person_image_decodes_cdata(self):
+        import base64 as _b64
+
+        jpeg = b"\xff\xd8\xff\xe0PIC"
+        client = _client()
+        sent = {}
+        client._post = lambda path, body: (
+            sent.update(path=path, body=body)
+            or f"<response><status>success</status><content><![CDATA[{_b64.b64encode(jpeg).decode()}]]></content></response>"
+        )
+        out = client.get_face_person_image("{P1}", index=0)
+        assert out == jpeg
+        assert sent["path"] == "requestFacePersonnalInfoImage"
+        assert "<id>{P1}</id>" in sent["body"] and "<index>0</index>" in sent["body"]
+
+
 class TestSearchFaceEvents:
     def test_decodes_records(self):
         client = _client()

@@ -35,6 +35,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stays transport-agnostic in `alarm_protocol`).
 - **CLI face/AI subcommands** (`xml_api.py`): `ai-resource`, `face-detection <ch>`,
   `face-db`, and `alarm-server`.
+- **Face-database group & person management** (`xml_api.py`, `models.py`).
+  `create_face_group()` / `delete_face_groups()` (create/delete allow·reject·limited
+  groups), `query_face_persons(group)` (people in a group; treats errorCode
+  `536870942`/`536870947` as "0 people"), and `get_face_person_image()` (enrolled
+  face JPEG). New `FacePerson` model. Group create→delete round-trip and person
+  listing validated live; person *enrollment* (`createFacePersonnalInfo`, needs
+  image+feature) and the WebSocket bulk import/export remain follow-ups.
 - **Face-event search + snapshot retrieval** (`xml_api.py`, `models.py`).
   `search_face_events()` (now `searchImageByImageV2`, replacing the earlier
   provisional `searchSmartTarget` guess) returns the "By Event" face-event index —
