@@ -51,6 +51,7 @@ from .exceptions import BackendError, PytvtError, RegistryError
 from .models import (
     AiResource,
     AiResourceChannel,
+    AlarmServerConfig,
     ApiServerConfig,
     CameraInfo,
     Channel,
@@ -115,6 +116,7 @@ __all__ = [
     # Models
     "AiResource",
     "AiResourceChannel",
+    "AlarmServerConfig",
     "ApiServerConfig",
     "CameraInfo",
     "Channel",

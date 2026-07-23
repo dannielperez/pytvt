@@ -404,6 +404,31 @@ class FaceDbGroup:
 
 
 @dataclass
+class AlarmServerConfig:
+    """NVR "Alarm Server" push configuration (``queryAlarmServerParam``).
+
+    The Alarm Server action makes the NVR push alarm frames — including AI/face
+    events — to ``address``:``port`` (optionally at ``url``) in ``data_format``
+    (``XML``/``JSON``). ``alarm_types`` is the decimal list of alarm-type codes
+    that get pushed (e.g. ``16`` = face match; see
+    :data:`~pytvt.alarm_protocol.TVT_ALARM_CODES`). Pair with
+    :class:`~pytvt.alarm_server.AlarmServer` to receive the pushes.
+    """
+
+    enabled: bool
+    address: str = ""
+    url: str = ""
+    port: int = 80
+    data_format: str = "XML"
+    schedule_id: str = ""
+    alarm_types: list[int] = field(default_factory=list)
+    device_id: str = ""
+    token: str = ""
+    heartbeat_enabled: bool = False
+    heartbeat_interval: int = 10
+
+
+@dataclass
 class FaceEvent:
     """A detected/recognized face, from a search or the real-time stream.
 

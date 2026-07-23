@@ -76,7 +76,7 @@ class TestQueryNvrFaceDetection:
             '<response cmdUrl="queryBackFaceMatch"><content><param><chls>'
             '<item guid="{00000009-0000-0000-0000-000000000000}" '
             'scheduleGuid="{7C21E998-8B89-4D19-8669-457C26181F76}">'
-            "<switch>true</switch><mutexList type=\"list\"/>"
+            '<switch>true</switch><mutexList type="list"/>'
             "</item></chls></param></content></response>"
         )
         cfg = client.query_nvr_face_detection(9)
@@ -89,8 +89,7 @@ class TestQueryNvrFaceDetection:
 
         client = _client()
         client._post = lambda path, body: (
-            '<response cmdUrl="queryBackFaceMatch"><status>fail</status>'
-            "<errorCode>536870923</errorCode></response>"
+            '<response cmdUrl="queryBackFaceMatch"><status>fail</status><errorCode>536870923</errorCode></response>'
         )
         with pytest.raises(NvrApiError):
             client.query_nvr_face_detection(9)
@@ -111,6 +110,82 @@ class TestQueryFaceDbGroups:
         assert [g.name for g in groups] == ["VIP", "Blocklist"]
         assert groups[0].group_type == "allow" and groups[0].face_count == 3
         assert groups[1].group_type == "reject" and groups[1].face_count == 7
+
+
+class TestAlarmServerConfig:
+    def test_query_parses_config(self):
+        client = _client()
+        client._post = lambda path, body: (
+            '<response cmdUrl="queryAlarmServerParam"><status>success</status>'
+            "<types><dataFormat><enum>XML</enum></dataFormat></types>"
+            "<content>"
+            "<switch>false</switch><deviceId>dev1</deviceId><token>tok</token>"
+            "<address>10.0.0.5</address><url>/push</url><port>9010</port>"
+            "<alarmServerSchedule>{SCHED}</alarmServerSchedule>"
+            "<alarmServerAlarmTypes>1,2,16</alarmServerAlarmTypes>"
+            '<dataFormat type="dataFormat">XML</dataFormat>'
+            "<heartbeat><switch>true</switch><interval>30</interval></heartbeat>"
+            "</content></response>"
+        )
+        cfg = client.query_alarm_server()
+        assert cfg.enabled is False
+        assert cfg.address == "10.0.0.5" and cfg.port == 9010 and cfg.url == "/push"
+        assert cfg.data_format == "XML"
+        assert cfg.schedule_id == "{SCHED}"
+        assert cfg.alarm_types == [1, 2, 16]  # 16 == face match
+        assert cfg.device_id == "dev1" and cfg.token == "tok"
+        assert cfg.heartbeat_enabled is True and cfg.heartbeat_interval == 30
+
+    def test_set_builds_payload_and_omits_types_for_json(self):
+        from pytvt import AlarmServerConfig
+
+        sent = {}
+        client = _client()
+
+        def fake_post(path, body):
+            sent["path"] = path
+            sent["body"] = body
+            return "<response><status>success</status></response>"
+
+        client._post = fake_post
+        client.set_alarm_server(
+            AlarmServerConfig(
+                enabled=True,
+                address="10.0.0.5",
+                port=9010,
+                data_format="XML",
+                schedule_id="{SCHED}",
+                alarm_types=[1, 16],
+                heartbeat_enabled=True,
+                heartbeat_interval=15,
+            )
+        )
+        assert sent["path"] == "editAlarmServerParam"
+        assert "<switch>true</switch>" in sent["body"]
+        assert "<port>9010</port>" in sent["body"]
+        assert "<alarmServerAlarmTypes>1,16</alarmServerAlarmTypes>" in sent["body"]
+        assert "<interval>15</interval>" in sent["body"]
+        # JSON format omits the XML-only alarm-types element
+        client.set_alarm_server(AlarmServerConfig(enabled=False, data_format="JSON", alarm_types=[1, 16]))
+        assert "alarmServerAlarmTypes" not in sent["body"]
+
+
+class TestSetNvrFaceDetection:
+    def test_uses_editrealfacematch_with_switch(self):
+        sent = {}
+        client = _client()
+
+        def fake_post(path, body):
+            sent["path"] = path
+            sent["body"] = body
+            return "<response><status>success</status></response>"
+
+        client._post = fake_post
+        client.set_nvr_face_detection(9, True, schedule_id="{SCHED}")
+        assert sent["path"] == "editRealFaceMatch"
+        assert 'guid="{00000009-0000-0000-0000-000000000000}"' in sent["body"]
+        assert 'scheduleGuid="{SCHED}"' in sent["body"]
+        assert "<switch>true</switch>" in sent["body"]
 
 
 class TestAlarmCodes:
