@@ -142,6 +142,12 @@ from .models import (
 XML_HEADER = '<?xml version="1.0" encoding="utf-8" ?>'
 SYSTEM_TYPE = "NVMS-9000"
 
+#: ``editIPChlPassword`` errorCode returned when the new password already equals
+#: the camera's current password — an idempotent no-op, not a failure. Lets a
+#: force-rotate treat an already-compliant camera as "already on target" instead
+#: of counting it as an error.
+IPC_PASSWORD_ALREADY_SET = "536870962"
+
 
 class NvrClient:
     """Client for TVT NVR web CGI API (NVMS-9000).
@@ -724,6 +730,38 @@ class NvrClient:
         if failures:
             raise NvrApiError(f"Failed to change IPC password for {len(failures)} channel(s): {', '.join(failures)}")
         return updated
+
+    def edit_ipc_password_status(self, channel_id: str, *, new_password: str) -> str:
+        """Change one channel's IPC password and report whether it changed.
+
+        Returns ``"changed"`` when the camera password was updated, or
+        ``"already-set"`` when the NVR reports the new password already equals the
+        camera's current one (errorCode :data:`IPC_PASSWORD_ALREADY_SET`) — an
+        idempotent no-op. Any other non-success response raises
+        :class:`NvrApiError` carrying the errorCode.
+
+        Unlike :meth:`edit_nvr_ipc_passwords` (which treats every non-success as a
+        failure), distinguishing "already on target" lets a caller force-rotate a
+        whole site — including channels the NVR currently shows online — without
+        knowing the old password and without a benign no-op reading as an error.
+        """
+        self._require_login()
+        if not self._session_key:
+            raise NvrApiError("Missing NVR session key; call login() first.")
+
+        encrypted_password = self._encrypt_for_session(new_password, self._session_key)
+        attrs = f' securityVer="{self._security_ver}"' if self._security_ver else ""
+        body = self._build_request_with_content(
+            f"<content><chl id='{channel_id}'><password{attrs}><![CDATA[{encrypted_password}]]>"
+            f"</password></chl></content>"
+        )
+        data = self._post("editIPChlPassword", body)
+        if "<status>success</status>" in data:
+            return "changed"
+        code = self._parse_xml_field(data, "errorCode")
+        if code == IPC_PASSWORD_ALREADY_SET:
+            return "already-set"
+        raise NvrApiError(f"editIPChlPassword failed for {channel_id}", code)
 
     def get_rtsp_url(self, channel: int, stream_type: str = "main") -> str:
         """Build RTSP URL for an NVR channel (1-indexed).
