@@ -126,6 +126,7 @@ from .models import (
     Channel,
     FaceDbGroup,
     FaceEvent,
+    FacePerson,
     NvrApiError,
     NvrApiResponseShapeError,
     NvrFaceDetectionConfig,
@@ -1449,6 +1450,84 @@ class NvrClient:
                     )
                 )
         return groups
+
+    def query_face_persons(self, group_id: str, *, page: int = 1, page_size: int = 100) -> list[FacePerson]:
+        """List people enrolled in a face-database group.
+
+        CGI endpoint: ``queryFacePersonnalInfoList``. Item fields vary by
+        firmware; ``person_id``/``name`` are extracted and the full item block is
+        kept in ``FacePerson.extra``.
+        """
+        self._require_login()
+        content = (
+            f"<pageIndex>{int(page)}</pageIndex><pageSize>{int(page_size)}</pageSize>"
+            '<condition><faceFeatureGroups type="list">'
+            f'<item id="{group_id}"></item>'
+            "</faceFeatureGroups></condition>"
+        )
+        data = self._post("queryFacePersonnalInfoList", self._build_request_with_content(content))
+        # The web client treats errorCode 536870942/536870947 as "0 people"
+        # (an empty group), not a failure.
+        err = re.search(r"<errorCode>(.*?)</errorCode>", data)
+        if err and err.group(1) in ("536870942", "536870947"):
+            return []
+        self._check_response(data, "queryFacePersonnalInfoList")
+        persons: list[FacePerson] = []
+        content_m = re.search(r"<content\b[^>]*>(.*?)</content>", data, re.DOTALL)
+        if content_m:
+            for m in re.finditer(r'<item\s+id="([^"]+)"[^>]*>(.*?)</item>', content_m.group(1), re.DOTALL):
+                pid, block = m.group(1), m.group(2)
+                persons.append(
+                    FacePerson(
+                        person_id=pid,
+                        name=self._parse_xml_field(block, "name") or "",
+                        group_id=group_id,
+                        extra={
+                            tag: val
+                            for tag, val in re.findall(r"<([a-zA-Z]+)>(.*?)</\1>", block)
+                            if tag not in ("name",)
+                        },
+                    )
+                )
+        return persons
+
+    def create_face_group(self, name: str, *, group_type: str = "limited") -> None:
+        """Create a face-database group (``allow`` / ``reject`` / ``limited``).
+
+        CGI endpoint: ``createFacePersonnalInfoGroup``.
+        """
+        self._require_login()
+        content = (
+            "<types><property><enum>allow</enum><enum>reject</enum><enum>limited</enum></property></types>"
+            f"<content><name><![CDATA[{name}]]></name>"
+            f'<property type="property">{escape(group_type)}</property></content>'
+        )
+        data = self._post("createFacePersonnalInfoGroup", self._build_request_with_content(content))
+        self._check_response(data, "createFacePersonnalInfoGroup")
+
+    def delete_face_groups(self, group_ids: list[str]) -> None:
+        """Delete face-database groups by id.
+
+        CGI endpoint: ``delFacePersonnalInfoGroups``.
+        """
+        self._require_login()
+        items = "".join(f'<item id="{gid}"></item>' for gid in group_ids)
+        content = f'<condition><ids type="list">{items}</ids></condition>'
+        data = self._post("delFacePersonnalInfoGroups", self._build_request_with_content(content))
+        self._check_response(data, "delFacePersonnalInfoGroups")
+
+    def get_face_person_image(self, person_id: str, index: int = 0) -> bytes:
+        """Fetch an enrolled person's face image (JPEG bytes).
+
+        CGI endpoint: ``requestFacePersonnalInfoImage``. ``index`` selects which
+        of the person's enrolled faces. Returns ``b""`` if unavailable.
+        """
+        self._require_login()
+        content = f"<condition><id>{person_id}</id><index>{int(index)}</index></condition>"
+        data = self._post("requestFacePersonnalInfoImage", self._build_request_with_content(content))
+        self._check_response(data, "requestFacePersonnalInfoImage")
+        cdata = re.search(r"<content>\s*<!\[CDATA\[(.*?)\]\]>\s*</content>", data, re.DOTALL)
+        return _maybe_b64(cdata.group(1).strip()) if cdata else b""
 
     def search_face_events(
         self,

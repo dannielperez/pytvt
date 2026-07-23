@@ -404,6 +404,20 @@ class FaceDbGroup:
 
 
 @dataclass
+class FacePerson:
+    """A person enrolled in a face-database group (``queryFacePersonnalInfoList``).
+
+    Item fields vary by firmware; ``person_id``/``name`` are the stable ones and
+    the rest of the record is kept in ``extra`` for callers that need it.
+    """
+
+    person_id: str
+    name: str = ""
+    group_id: str = ""
+    extra: dict = field(default_factory=dict)
+
+
+@dataclass
 class AlarmServerConfig:
     """NVR "Alarm Server" push configuration (``queryAlarmServerParam``).
 

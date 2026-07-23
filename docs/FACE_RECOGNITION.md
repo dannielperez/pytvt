@@ -16,6 +16,9 @@ detection enabled on a standard camera).
 | `NvrClient.query_nvr_face_detection(ch)` | `queryBackFaceMatch` | "Enable Detection by NVR" switch + schedule. Response omits `<status>` on success. |
 | `NvrClient.set_nvr_face_detection(ch, on)` | **`editRealFaceMatch`** | Write paired with the `queryBackFaceMatch` read (note the asymmetric name). Validated via an idempotent write-back (no state change). |
 | `NvrClient.query_face_db_groups()` | `queryFacePersonnalInfoGroupList` | allow / reject / limited groups. |
+| `NvrClient.query_face_persons(group)` | `queryFacePersonnalInfoList` | People in a group. errorCode `536870942`/`536870947` mean "0 people" (not a failure). |
+| `NvrClient.create_face_group(name)` / `delete_face_groups(ids)` | `createFacePersonnalInfoGroup` / `delFacePersonnalInfoGroups` | Validated via a self-cleaning create→delete round-trip. |
+| `NvrClient.get_face_person_image(id)` | `requestFacePersonnalInfoImage` | Enrolled person's face JPEG (base64 CDATA). Implemented; not exercised (no enrolled people on the test NVR). |
 | `NvrClient.query_face_match_config(ch)` | `queryFaceMatchConfig` | Returns raw `<content>` (firmware-variable shape). |
 | `NvrClient.search_face_events(ch, start, end)` | `searchImageByImageV2` | "By Event" face-event index; compact `<i>` records decoded to `FaceEvent` (channel, `img_id`, `frame_time`). Count matched the web client live. |
 | `NvrClient.get_face_snapshot(ch, img_id, frame_time)` | `requestChSnapFaceImage` | Cropped-face JPEG (base64 CDATA). Returned a valid 464×464 JPEG live. |
@@ -42,11 +45,13 @@ detection enabled on a standard camera).
    (`parse_*_face_payload`), which **requires a captured live face callback
    payload** to reverse/validate. Deferred rather than shipped drop-silently.
 
-3. **Face database person enrollment — NOT implemented.** Adding/removing people
-   and face images lives in the web client's `facePersonnalInfoMgr` module, which
-   was not retrievable statically. Read-side group listing
-   (`query_face_db_groups`) is done; person-level writes await that module's
-   command capture.
+3. **Face database person *enrollment* — NOT implemented.** Group management
+   (`create_face_group`/`delete_face_groups`), person listing
+   (`query_face_persons`) and person-image fetch (`get_face_person_image`) are
+   done. *Enrolling* a person (`createFacePersonnalInfo`) additionally requires
+   the face image + extracted feature payload, and the bulk import/export path
+   (`websocket.facelib`, `/device/facelib/export/*`) is a **WebSocket** protocol,
+   not HTTP CGI — both are larger follow-ups.
 
 ## How commands were discovered (reproducible)
 
@@ -56,3 +61,10 @@ Commands/payloads were extracted from the device's own JS
 `url:"<cmd>"` and read the adjacent `GetRequestHeader(...)+"<condition>…"` payload
 builder — then confirmed live via `NvrClient._post`. Use Python substring search,
 not regex with large quantifiers, on the minified JS (catastrophic backtracking).
+
+**Commands are device/firmware-specific.** The same UI concept can map to a
+different command on an NVR vs. a camera, or across firmware — e.g. this NVR's
+"By Event" face search is `searchImageByImageV2`, while `searchSmartTarget`
+(the "smart alarm search") is a real command on other paths/devices. Treat the
+command names here as validated for `NVMS-9000`, and re-capture when targeting a
+different device class.
