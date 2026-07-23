@@ -17,6 +17,8 @@ detection enabled on a standard camera).
 | `NvrClient.set_nvr_face_detection(ch, on)` | **`editRealFaceMatch`** | Write paired with the `queryBackFaceMatch` read (note the asymmetric name). Validated via an idempotent write-back (no state change). |
 | `NvrClient.query_face_db_groups()` | `queryFacePersonnalInfoGroupList` | allow / reject / limited groups. |
 | `NvrClient.query_face_match_config(ch)` | `queryFaceMatchConfig` | Returns raw `<content>` (firmware-variable shape). |
+| `NvrClient.search_face_events(ch, start, end)` | `searchImageByImageV2` | "By Event" face-event index; compact `<i>` records decoded to `FaceEvent` (channel, `img_id`, `frame_time`). Count matched the web client live. |
+| `NvrClient.get_face_snapshot(ch, img_id, frame_time)` | `requestChSnapFaceImage` | Cropped-face JPEG (base64 CDATA). Returned a valid 464×464 JPEG live. |
 | `NvrClient.query_alarm_server()` | `queryAlarmServerParam` | Push target: address/url/port/format + `alarm_types` (decimal codes; `16` = face match) + heartbeat. |
 | `NvrClient.set_alarm_server(cfg)` | `editAlarmServerParam` | Validated via idempotent write-back (config unchanged, push stayed disabled). |
 | `channel_guid(n)` / `Channel.guid` | — | `{0000000N-…}` GUID for per-channel AI commands. |
@@ -26,28 +28,21 @@ detection enabled on a standard camera).
 
 ## Pending / NOT yet validated — do not rely on without testing
 
-1. **`search_face_events()` — PROVISIONAL.** `searchSmartTarget` is confirmed
-   present, but its condition schema is firmware-specific and not yet captured;
-   current firmware rejects the sent form with `errorCode=536870942`. The
-   response parsing is defensive and should work once the real request body is
-   captured from the web client's Intelligent-Analysis face search. **Needs a
-   live web-client network capture.**
-
-2. **`set_alarm_server()` enabling a real push target — write path validated,
+1. **`set_alarm_server()` enabling a real push target — write path validated,
    real redirect NOT tested.** The command is accepted and the idempotent
    write-back is clean, but pointing the NVR at a live listener and confirming a
    face event actually arrives has not been exercised end-to-end (would change a
    production NVR's push config). **Test on a lab/again-revert NVR before relying
    on it.**
 
-3. **Real-time NetSDK face subscription — NOT implemented.** `device_sdk`'s
+2. **Real-time NetSDK face subscription — NOT implemented.** `device_sdk`'s
    `PlateEventStream.ingest` silently drops any command that isn't
    `VEHICLE`/`NVR_VEHICLE`, so wiring `FACE_MATCH` into it would drop every face
    event. A correct version needs its own face-payload binary decoder
    (`parse_*_face_payload`), which **requires a captured live face callback
    payload** to reverse/validate. Deferred rather than shipped drop-silently.
 
-4. **Face database person enrollment — NOT implemented.** Adding/removing people
+3. **Face database person enrollment — NOT implemented.** Adding/removing people
    and face images lives in the web client's `facePersonnalInfoMgr` module, which
    was not retrievable statically. Read-side group listing
    (`query_face_db_groups`) is done; person-level writes await that module's

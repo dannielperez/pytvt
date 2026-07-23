@@ -430,19 +430,23 @@ class AlarmServerConfig:
 
 @dataclass
 class FaceEvent:
-    """A detected/recognized face, from a search or the real-time stream.
+    """A detected/recognized face from a search.
 
-    ``snapshot`` is the cropped face JPEG and ``background`` the wide/panorama
-    frame — both returned inline as bytes (decoded from the device's base64).
-    ``matched`` is True when the face hit a database group.
+    ``search_face_events`` returns the event *index* (channel, ``img_id``,
+    ``frame_time``); the cropped-face JPEG is then fetched on demand with
+    :meth:`~pytvt.xml_api.NvrClient.get_face_snapshot` (they are stored
+    separately on the recorder, not inline). ``matched`` is True when the face
+    hit a database group.
     """
 
     chl_id: str
     channel: int = 0
-    timestamp: str = ""  # device-local time string
+    timestamp: str = ""  # frame time, "YYYY-MM-DD HH:MM:SS:NNNNNNN" (UTC)
+    img_id: int = 0  # snapshot id, used with get_face_snapshot()
+    frame_time: str = ""  # exact frameTime string to pass to get_face_snapshot()
     matched: bool = False
     group_name: str = ""
     person_name: str = ""
     similarity: float = 0.0
-    snapshot: bytes = b""
+    snapshot: bytes = b""  # populated only if the search fetched images
     background: bytes = b""

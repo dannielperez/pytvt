@@ -35,6 +35,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stays transport-agnostic in `alarm_protocol`).
 - **CLI face/AI subcommands** (`xml_api.py`): `ai-resource`, `face-detection <ch>`,
   `face-db`, and `alarm-server`.
+- **Face-event search + snapshot retrieval** (`xml_api.py`, `models.py`).
+  `search_face_events()` (now `searchImageByImageV2`, replacing the earlier
+  provisional `searchSmartTarget` guess) returns the "By Event" face-event index —
+  each `FaceEvent` carries `channel`, `img_id` and `frame_time` (the compact `<i>`
+  records are decoded per the web client). `get_face_snapshot(ch, img_id, frame_time)`
+  (`requestChSnapFaceImage`) fetches the cropped-face JPEG. Both **validated live**:
+  the search count matched the web client and a fetch returned a real 464×464 JPEG.
+  `FaceEvent` gains `img_id`/`frame_time`; `fetch_snapshots=True` eagerly populates
+  `FaceEvent.snapshot`.
 
 - **Typed, bounded license-plate smart-event ingestion**
   (`device_sdk/plate_events.py`, `DeviceSession.subscribe_plate_events`). Parses both
