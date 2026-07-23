@@ -121,6 +121,75 @@ def test_session_logout_closes_plate_subscription_before_logout(native_lib, nati
     native_lib.NET_SDK_Logout.assert_called_once_with(11)
 
 
+def test_session_logout_preserves_handle_when_unsubscribe_needs_retry(native_lib, native_session):
+    native_lib.NET_SDK_SmartSubscrib.side_effect = lambda uid, command, channel, reply: (
+        _fill_reply(reply, b"token") or True
+    )
+    stream = native_session.subscribe_plate_events(
+        [0],
+        commands=[SmartEventType.VEHICLE],
+        experimental=True,
+    )
+    native_lib.NET_SDK_UnSmartSubscrib.return_value = False
+
+    with pytest.raises(NetSdkError, match="UnSmartSubscrib"):
+        native_session.logout()
+
+    handle_after_failure = native_session.handle
+    logout_calls_after_failure = native_lib.NET_SDK_Logout.call_count
+    stream_closed_after_failure = stream.closed
+
+    native_lib.NET_SDK_UnSmartSubscrib.return_value = True
+    native_session.logout()
+
+    assert handle_after_failure == 11
+    assert logout_calls_after_failure == 0
+    assert stream_closed_after_failure is False
+    assert stream.closed is True
+    native_lib.NET_SDK_Logout.assert_called_once_with(11)
+
+
+def test_plate_subscription_setup_has_an_aggregate_deadline(native_lib, native_session, monkeypatch):
+    class Clock:
+        now = 100.0
+
+        def monotonic(self):
+            return self.now
+
+    clock = Clock()
+
+    def delayed_subscribe(user_id, command, channel_id, reply_pointer):
+        clock.now += 1.0
+        _fill_reply(reply_pointer, f"token-{channel_id}".encode())
+        return True
+
+    native_lib.NET_SDK_SmartSubscrib.side_effect = delayed_subscribe
+    monkeypatch.setattr("pytvt.device_sdk.client.time", clock)
+
+    with pytest.raises(NetSdkError, match="setup deadline"):
+        native_session.subscribe_plate_events(
+            [0, 1, 2],
+            commands=[SmartEventType.VEHICLE],
+            setup_timeout=1.5,
+            experimental=True,
+        )
+
+    assert native_lib.NET_SDK_SmartSubscrib.call_count == 2
+    assert native_lib.NET_SDK_UnSmartSubscrib.call_count == 2
+    assert native_session._plate_stream is None
+
+
+@pytest.mark.parametrize("setup_timeout", [0, -1, float("nan"), float("inf"), 301])
+def test_plate_subscription_rejects_unbounded_setup_timeout(native_session, setup_timeout):
+    with pytest.raises(ValueError, match="setup_timeout"):
+        native_session.subscribe_plate_events(
+            [0],
+            commands=[SmartEventType.VEHICLE],
+            setup_timeout=setup_timeout,
+            experimental=True,
+        )
+
+
 def test_subscribe_v2_rejects_oversized_payload_before_copy(native_lib, native_client):
     callback = None
 

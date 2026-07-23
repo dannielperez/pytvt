@@ -339,6 +339,8 @@ def _optional_picture(
     size = int(info.iPicSize)  # type: ignore[attr-defined]
     if size < 0:
         raise PlatePayloadError(f"negative picture size {size}")
+    if size == 0:
+        return None, int(info.iPicFormat), data_offset, "picture_data_missing"  # type: ignore[attr-defined]
     image, end = _take_image(
         payload,
         data_offset,
@@ -430,7 +432,7 @@ class PlateEventStream:
         self._max_image_bytes = max_image_bytes
         self._max_buffer_bytes = max_buffer_bytes
         self._drop_policy = drop_policy
-        self._queue: queue.Queue[PlateEvent] = queue.Queue(maxsize=max_events)
+        self._queue: queue.Queue[PlateEvent | None] = queue.Queue(maxsize=max_events)
         self._lock = threading.Lock()
         self._callbacks_received = 0
         self._events_parsed = 0
@@ -442,6 +444,7 @@ class PlateEventStream:
         self._buffered_image_bytes = 0
         self._closed = False
         self._closing = False
+        self._close_signal_queued = False
         self._closer: Callable[[], None] | None = None
         self._subscriptions: tuple[_SmartSubscriptionToken, ...] = ()
 
@@ -531,6 +534,10 @@ class PlateEventStream:
                     oldest = self._queue.get_nowait()
                 except queue.Empty:
                     break
+                if oldest is None:
+                    self._queue.put_nowait(None)
+                    self._close_signal_queued = True
+                    return
                 self._buffered_image_bytes -= len(oldest.full_image or b"") + len(oldest.plate_image or b"")
                 self._events_dropped += 1
             try:
@@ -544,17 +551,42 @@ class PlateEventStream:
         event_bytes = len(event.full_image or b"") + len(event.plate_image or b"")
         with self._lock:
             self._buffered_image_bytes = max(0, self._buffered_image_bytes - event_bytes)
+            if self._closed and not self._close_signal_queued and self._queue.empty():
+                self._queue.put_nowait(None)
+                self._close_signal_queued = True
 
     def get(self, timeout: float | None = None) -> PlateEvent:
-        """Return the next event, raising ``queue.Empty`` on timeout."""
+        """Return the next event.
+
+        Raises ``queue.Empty`` on timeout and ``RuntimeError`` when a close
+        wakes a blocked reader.
+        """
+        with self._lock:
+            if self._closed and self._queue.empty():
+                raise RuntimeError("plate-event stream is closed")
         event = self._queue.get(timeout=timeout)
+        if event is None:
+            self._requeue_close_signal()
+            raise RuntimeError("plate-event stream is closed")
         self._record_dequeue(event)
         return event
 
     def get_nowait(self) -> PlateEvent:
         event = self._queue.get_nowait()
+        if event is None:
+            self._requeue_close_signal()
+            raise queue.Empty
         self._record_dequeue(event)
         return event
+
+    def _requeue_close_signal(self) -> None:
+        with self._lock:
+            try:
+                self._queue.put_nowait(None)
+            except queue.Full:
+                self._close_signal_queued = False
+            else:
+                self._close_signal_queued = True
 
     def drain(self, *, limit: int = 100) -> list[PlateEvent]:
         if limit < 1:
@@ -569,6 +601,7 @@ class PlateEventStream:
 
     def stats(self) -> PlateStreamStats:
         with self._lock:
+            buffered_events = self._queue.qsize() - int(self._close_signal_queued)
             return PlateStreamStats(
                 callbacks_received=self._callbacks_received,
                 events_parsed=self._events_parsed,
@@ -576,7 +609,7 @@ class PlateEventStream:
                 malformed_payloads=self._malformed_payloads,
                 rejected_callbacks=self._rejected_callbacks,
                 ignored_commands=self._ignored_commands,
-                buffered_events=self._queue.qsize(),
+                buffered_events=max(0, buffered_events),
                 buffered_image_bytes=self._buffered_image_bytes,
                 last_error=self._last_error,
             )
@@ -599,6 +632,11 @@ class PlateEventStream:
         with self._lock:
             self._closing = False
             self._closed = True
+            try:
+                self._queue.put_nowait(None)
+            except queue.Full:
+                return
+            self._close_signal_queued = True
 
     def __enter__(self) -> PlateEventStream:
         return self

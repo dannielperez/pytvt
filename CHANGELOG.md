@@ -111,6 +111,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Plate-event lifecycle hardening** (`device_sdk/client.py`,
+  `device_sdk/plate_events.py`). Failed unsubscribe now preserves the live session
+  handle for retry; multi-target registration has a finite aggregate setup deadline;
+  successful close wakes blocked readers; and zero-byte image descriptors are exposed
+  as explicit partial evidence.
 - **Status Log parser tolerates a leading UTF-8 BOM** (`status_log.py`).
   A BOM-prefixed export (NVMS or Windows tooling that re-saved the TSV) made
   the header cell read `U+FEFF` + `No.`, dodging the header check and surfacing the

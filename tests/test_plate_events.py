@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import contextlib
 import ctypes as ct
 import queue
+import threading
 from datetime import datetime, timezone
 
 import pytest
@@ -203,6 +205,25 @@ def test_parse_nvr_payload_without_images_is_explicitly_partial():
 
 
 @pytest.mark.parametrize(
+    ("full_image", "plate_image", "missing_field"),
+    [
+        (b"", b"crop", "full_image"),
+        (b"full", b"", "plate_image"),
+    ],
+)
+def test_parse_nvr_zero_byte_picture_descriptor_is_partial(full_image, plate_image, missing_field):
+    event = parse_nvr_plate_payload(
+        _nvr_payload(full_image=full_image, plate_image=plate_image),
+        user_id=1,
+        channel_id=0,
+    )
+
+    assert getattr(event, missing_field) is None
+    assert event.is_partial is True
+    assert event.warnings == ("picture_data_missing",)
+
+
+@pytest.mark.parametrize(
     "payload,error",
     [
         (b"short", "truncated"),
@@ -264,3 +285,92 @@ def test_stream_records_malformed_and_ignored_callbacks_without_raising():
     assert stats.ignored_commands == 1
     assert stats.rejected_callbacks == 1
     assert stats.last_error == "native payload too large"
+
+
+def test_blocked_reader_exits_when_stream_closes():
+    stream = PlateEventStream()
+    started = threading.Event()
+    finished = threading.Event()
+    errors = []
+
+    def read_event():
+        started.set()
+        try:
+            stream.get()
+        except RuntimeError as exc:
+            errors.append(str(exc))
+        finally:
+            finished.set()
+
+    reader = threading.Thread(target=read_event, daemon=True)
+    reader.start()
+    assert started.wait(timeout=1.0)
+
+    stream.close()
+    exited_after_close = finished.wait(timeout=0.2)
+    if not exited_after_close:
+        stream._queue.put_nowait(
+            parse_nvr_plate_payload(
+                _nvr_payload(),
+                user_id=1,
+                channel_id=0,
+            )
+        )
+        assert finished.wait(timeout=1.0)
+    reader.join(timeout=1.0)
+
+    assert exited_after_close is True
+    assert errors == ["plate-event stream is closed"]
+
+
+def test_closed_stream_preserves_buffered_events_without_counting_wake_signal():
+    stream = PlateEventStream()
+    stream.ingest(1, 2, int(SmartEventType.NVR_VEHICLE), _nvr_payload())
+
+    stream.close()
+
+    assert stream.stats().buffered_events == 1
+    assert stream.get_nowait().plate == "XYZ789"
+    assert stream.stats().buffered_events == 0
+    with pytest.raises(queue.Empty):
+        stream.get_nowait()
+
+
+def test_close_wakes_all_readers_when_queue_was_full(monkeypatch):
+    stream = PlateEventStream(max_events=1)
+    stream.ingest(1, 2, int(SmartEventType.NVR_VEHICLE), _nvr_payload())
+    stream.close()
+    dequeue_barrier = threading.Barrier(2)
+    original_get = stream._queue.get
+
+    def synchronized_get(*args, **kwargs):
+        dequeue_barrier.wait(timeout=1.0)
+        return original_get(*args, **kwargs)
+
+    monkeypatch.setattr(stream._queue, "get", synchronized_get)
+    finished = [threading.Event(), threading.Event()]
+    events = []
+    errors = []
+
+    def read_event(reader_index):
+        try:
+            events.append(stream.get())
+        except RuntimeError as exc:
+            errors.append(str(exc))
+        finally:
+            finished[reader_index].set()
+
+    readers = [threading.Thread(target=read_event, args=(index,), daemon=True) for index in range(2)]
+    for reader in readers:
+        reader.start()
+
+    exited_after_close = [done.wait(timeout=0.5) for done in finished]
+    if not all(exited_after_close):
+        with contextlib.suppress(queue.Full):
+            stream._queue.put_nowait(None)
+    for reader in readers:
+        reader.join(timeout=1.0)
+
+    assert exited_after_close == [True, True]
+    assert [event.plate for event in events] == ["XYZ789"]
+    assert errors == ["plate-event stream is closed"]

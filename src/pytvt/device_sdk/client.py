@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import ctypes as ct
 import logging
+import math
 import re
 import threading
 import time
@@ -98,6 +99,8 @@ _PROCESS_SDK_LOCK = threading.RLock()
 _PROCESS_SUBSCRIBE_OWNER: NetSdkClient | None = None
 _LIVE_CLIENTS: weakref.WeakSet[NetSdkClient] = weakref.WeakSet()
 _CALLBACK_DRAIN_TIMEOUT_SECONDS = 5.0
+_DEFAULT_SUBSCRIPTION_SETUP_TIMEOUT_SECONDS = 30.0
+_MAX_SUBSCRIPTION_SETUP_TIMEOUT_SECONDS = 300.0
 
 
 # ── Result dataclasses ──────────────────────────────────────────────
@@ -597,20 +600,17 @@ class DeviceSession:
     def logout(self) -> None:
         if self._handle < 0:
             return
-        close_error: Exception | None = None
-        try:
-            if self._plate_stream is not None and not self._plate_stream.closed:
-                self._plate_stream.close()
-        except Exception as exc:
-            close_error = exc
+        if self._plate_stream is not None and not self._plate_stream.closed:
+            # A failed native unsubscribe leaves retry tokens attached to this
+            # live session. Preserve the handle and skip logout so close() can
+            # be retried with the same native session.
+            self._plate_stream.close()
         handle = self._handle
         try:
             sdk._lib.NET_SDK_Logout(handle)  # type: ignore[union-attr]
             logger.debug("Logged out handle=%d", handle)
         finally:
             self._handle = -1
-        if close_error is not None:
-            raise close_error
 
     # ── Device information ──────────────────────────────────────
 
@@ -912,6 +912,7 @@ class DeviceSession:
         max_image_bytes: int = DEFAULT_MAX_IMAGE_BYTES,
         max_buffer_bytes: int = DEFAULT_MAX_BUFFER_BYTES,
         drop_policy: DropPolicy = DropPolicy.DROP_OLDEST,
+        setup_timeout: float = _DEFAULT_SUBSCRIPTION_SETUP_TIMEOUT_SECONDS,
         experimental: bool = False,
     ) -> PlateEventStream:
         """Subscribe to typed IPC/NVR plate events for selected channels.
@@ -920,11 +921,22 @@ class DeviceSession:
         successful registrations are compensated and the global callback is
         cleared. The returned stream is bounded and must be closed (or used as
         a context manager) before another process-global callback is installed.
+        ``setup_timeout`` bounds the registration sequence between native calls;
+        it cannot interrupt a single native call that never returns.
         """
         if not experimental:
             raise NetSdkCapabilityError(
                 "Live plate subscriptions are provisional because vendor renewal timing is unvalidated; "
                 "pass experimental=True only for an approved read-only conformance pilot."
+            )
+        if (
+            not math.isfinite(setup_timeout)
+            or setup_timeout <= 0
+            or setup_timeout > _MAX_SUBSCRIPTION_SETUP_TIMEOUT_SECONDS
+        ):
+            raise ValueError(
+                "setup_timeout must be finite, positive, and no greater than "
+                f"{_MAX_SUBSCRIPTION_SETUP_TIMEOUT_SECONDS:g} seconds"
             )
         if self._handle < 0:
             raise NetSdkError("subscribe_plate_events requires an active device session")
@@ -944,6 +956,12 @@ class DeviceSession:
         allowed = {SmartEventType.VEHICLE, SmartEventType.NVR_VEHICLE}
         if not command_values or any(command not in allowed for command in command_values):
             raise ValueError("commands must contain VEHICLE and/or NVR_VEHICLE")
+
+        setup_deadline = time.monotonic() + setup_timeout
+
+        def _check_setup_deadline() -> None:
+            if time.monotonic() >= setup_deadline:
+                raise NetSdkError("Plate-event subscription setup deadline exceeded")
 
         subscribe = self._require("NET_SDK_SmartSubscrib")
         unsubscribe = self._require("NET_SDK_UnSmartSubscrib")
@@ -1007,8 +1025,10 @@ class DeviceSession:
         self._client._active_plate_stream = stream
         self._plate_stream = stream
         try:
+            _check_setup_deadline()
             for command in command_values:
                 for channel_id in channel_ids:
+                    _check_setup_deadline()
                     reply = NET_DVR_SUBSCRIBE_REPLY()
                     if not subscribe(self._handle, int(command), channel_id, ct.byref(reply)):
                         raise NetSdkError(
@@ -1030,6 +1050,7 @@ class DeviceSession:
                     )
                     if not server_address:
                         raise NetSdkError("SmartSubscrib returned an empty unsubscribe token")
+                    _check_setup_deadline()
         except Exception as setup_error:
             try:
                 stream.close()
