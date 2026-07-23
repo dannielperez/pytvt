@@ -120,6 +120,7 @@ from ._crypto import aes_ecb_zeropad
 from .models import (
     AiResource,
     AiResourceChannel,
+    AlarmServerConfig,
     ApiServerConfig,
     Channel,
     FaceDbGroup,
@@ -1383,11 +1384,12 @@ class NvrClient:
     ) -> None:
         """Enable/disable NVR-side face detection on a channel.
 
-        Writes back the same structure :meth:`query_nvr_face_detection` reads.
-        When ``schedule_id`` is omitted the channel's current arming schedule is
+        Writes the switch read by :meth:`query_nvr_face_detection`. When
+        ``schedule_id`` is omitted the channel's current arming schedule is
         preserved.
 
-        CGI endpoint: ``editBackFaceMatch``
+        CGI endpoint: ``editRealFaceMatch`` (the write paired with the
+        ``queryBackFaceMatch`` read).
         """
         self._require_login()
         chl_id = self.channel_guid(channel)
@@ -1400,8 +1402,8 @@ class NvrClient:
             f"<switch>{'true' if enabled else 'false'}</switch>"
             "</item></chls></param></content>"
         )
-        data = self._post("editBackFaceMatch", self._build_request_with_content(content))
-        self._check_response(data, "editBackFaceMatch")
+        data = self._post("editRealFaceMatch", self._build_request_with_content(content))
+        self._check_response(data, "editRealFaceMatch")
 
     def query_face_match_config(self, channel: int) -> str:
         """Query the face *recognition* (match) config for a channel.
@@ -1495,9 +1497,7 @@ class NvrClient:
                 FaceEvent(
                     chl_id=chl_id,
                     channel=channel,
-                    timestamp=self._parse_xml_field(block, "time")
-                    or self._parse_xml_field(block, "startTime")
-                    or "",
+                    timestamp=self._parse_xml_field(block, "time") or self._parse_xml_field(block, "startTime") or "",
                     matched=bool(group),
                     group_name=group,
                     person_name=self._parse_xml_field(block, "name") or "",
@@ -1507,6 +1507,77 @@ class NvrClient:
                 )
             )
         return events
+
+    # ── Alarm Server (event push target) ─────────────────────────────
+
+    def query_alarm_server(self) -> AlarmServerConfig:
+        """Query the NVR's Alarm Server push configuration.
+
+        The Alarm Server action pushes alarm frames (incl. AI/face events, when
+        their type code is in ``alarm_types``) to an external listener. Pair the
+        returned target with :class:`~pytvt.alarm_server.AlarmServer` to receive
+        them.
+
+        CGI endpoint: ``queryAlarmServerParam``
+        """
+        self._require_login()
+        data = self._post("queryAlarmServerParam", self._build_request())
+        self._check_response(data, "queryAlarmServerParam")
+        content = re.search(r"<content\b[^>]*>(.*?)</content>", data, re.DOTALL)
+        block = content.group(1) if content else data
+        types_raw = self._parse_xml_field(block, "alarmServerAlarmTypes") or ""
+        alarm_types = [int(t) for t in types_raw.split(",") if t.strip().isdigit()]
+        heartbeat = re.search(r"<heartbeat>(.*?)</heartbeat>", block, re.DOTALL)
+        hb = heartbeat.group(1) if heartbeat else ""
+        return AlarmServerConfig(
+            enabled=self._parse_xml_field(block, "switch") == "true",
+            address=self._parse_xml_field(block, "address") or "",
+            url=self._parse_xml_field(block, "url") or "",
+            port=int(self._parse_xml_field(block, "port") or 80),
+            data_format=self._parse_xml_field(block, "dataFormat") or "XML",
+            schedule_id=self._parse_xml_field(block, "alarmServerSchedule") or "",
+            alarm_types=alarm_types,
+            device_id=self._parse_xml_field(block, "deviceId") or "",
+            token=self._parse_xml_field(block, "token") or "",
+            heartbeat_enabled=(self._parse_xml_field(hb, "switch") == "true") if hb else False,
+            heartbeat_interval=int(self._parse_xml_field(hb, "interval") or 10) if hb else 10,
+        )
+
+    def set_alarm_server(self, config: AlarmServerConfig) -> None:
+        """Write the NVR's Alarm Server push configuration.
+
+        Read-modify-write: fetch with :meth:`query_alarm_server`, adjust the
+        target/enable/alarm_types, and pass the config here. To point the NVR at
+        a receiver: set ``address``/``port`` (and ``url`` if used), ``enabled=True``,
+        and ensure the desired event codes are in ``alarm_types`` (e.g. ``16`` for
+        face match).
+
+        ``alarm_types`` is only sent when ``data_format == "XML"`` (matches the
+        web client). CGI endpoint: ``editAlarmServerParam``.
+        """
+        self._require_login()
+        parts = [
+            "<content>",
+            f"<address>{escape(config.address)}</address>",
+            f"<url>{escape(config.url)}</url>",
+            f"<switch>{'true' if config.enabled else 'false'}</switch>",
+            f"<dataFormat>{escape(config.data_format)}</dataFormat>",
+            f"<port>{int(config.port)}</port>",
+            f"<alarmServerSchedule>{escape(config.schedule_id)}</alarmServerSchedule>",
+        ]
+        if config.data_format == "XML":
+            parts.append(
+                f"<alarmServerAlarmTypes>{','.join(str(t) for t in config.alarm_types)}</alarmServerAlarmTypes>"
+            )
+        parts.append(
+            "<heartbeat>"
+            f"<switch>{'true' if config.heartbeat_enabled else 'false'}</switch>"
+            f"<interval>{int(config.heartbeat_interval)}</interval>"
+            "</heartbeat>"
+        )
+        parts.append("</content>")
+        data = self._post("editAlarmServerParam", self._build_request_with_content("".join(parts)))
+        self._check_response(data, "editAlarmServerParam")
 
 
 def _maybe_b64(value: str) -> bytes:
@@ -1636,6 +1707,12 @@ def main():
     )
     chall_parser.add_argument("new_password", help="New password")
 
+    sub.add_parser("ai-resource", help="Show NVR AI-compute pool and per-channel allocation")
+    fd_parser = sub.add_parser("face-detection", help="Show NVR-side face detection state for a channel")
+    fd_parser.add_argument("channel", type=int, help="Channel number (1-indexed)")
+    sub.add_parser("face-db", help="List face-database groups")
+    sub.add_parser("alarm-server", help="Show Alarm Server push configuration")
+
     args = parser.parse_args()
 
     with NvrClient(args.host, args.username, args.password, port=args.port, timeout=args.timeout) as nvr:
@@ -1760,6 +1837,34 @@ def main():
             result = nvr.change_admin_password_and_sync(args.password, args.new_password)
             print(f"Password changed. Updated {result['devices_updated']} device credentials.")
             print("Re-login OK. New password is active.")
+
+        elif args.command == "ai-resource":
+            res = nvr.query_ai_resource()
+            print(f"AI event types: {', '.join(res.supported_event_types) or '(none)'}")
+            print(f"Pool occupancy: {res.total_occupancy:.0f}%")
+            for chl in res.channels:
+                types = ", ".join(chl.event_types) or "-"
+                print(f"  {chl.chl_id}  {chl.name:<24} state={chl.connect_state:<6} events={types}")
+
+        elif args.command == "face-detection":
+            cfg = nvr.query_nvr_face_detection(args.channel)
+            print(f"Channel {args.channel} ({cfg.chl_id})")
+            print(f"  NVR-side face detection: {'ENABLED' if cfg.enabled else 'DISABLED'}")
+            print(f"  Schedule: {cfg.schedule_id or '(none)'}")
+
+        elif args.command == "face-db":
+            groups = nvr.query_face_db_groups()
+            if not groups:
+                print("No face-database groups.")
+            for g in groups:
+                print(f"  {g.group_id}  {g.name:<24} type={g.group_type:<8} faces={g.face_count}")
+
+        elif args.command == "alarm-server":
+            cfg = nvr.query_alarm_server()
+            print(f"Alarm Server: {'ENABLED' if cfg.enabled else 'DISABLED'}")
+            print(f"  Target: {cfg.address or '(unset)'}:{cfg.port}{cfg.url}  format={cfg.data_format}")
+            print(f"  Pushed alarm types: {','.join(str(t) for t in cfg.alarm_types) or '(none)'}")
+            print(f"  Heartbeat: {'on' if cfg.heartbeat_enabled else 'off'} ({cfg.heartbeat_interval}s)")
 
 
 if __name__ == "__main__":

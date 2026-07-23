@@ -13,19 +13,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`xml_api.py`, `models.py`). `NvrClient` gains `query_ai_resource()` (the recorder's
   AI-compute pool + per-channel allocation — how a standard camera is turned into a
   face/AI channel), `query_nvr_face_detection()` / `set_nvr_face_detection()` (the
-  "Enable Detection by NVR" switch + schedule via `queryBackFaceMatch`/`editBackFaceMatch`),
-  `query_face_match_config()`, `query_face_db_groups()` (allow/reject/limited groups), and
-  a `channel_guid()` helper (now also populated on `Channel.guid`). New typed models:
-  `AiResource`, `AiResourceChannel`, `NvrFaceDetectionConfig`, `FaceDbGroup`, `FaceEvent`.
-  Live-validated against firmware `NVMS-9000`. `search_face_events()` is included but
+  "Enable Detection by NVR" switch + schedule; `queryBackFaceMatch` read paired with the
+  `editRealFaceMatch` write), `query_face_match_config()`, `query_face_db_groups()`
+  (allow/reject/limited groups), and a `channel_guid()` helper (now also populated on
+  `Channel.guid`). New typed models: `AiResource`, `AiResourceChannel`,
+  `NvrFaceDetectionConfig`, `FaceDbGroup`, `FaceEvent`. Live-validated against firmware
+  `NVMS-9000` (reads + idempotent write-back). `search_face_events()` is included but
   **provisional** — the `searchSmartTarget` condition schema is firmware-specific and not
-  yet captured.
+  yet captured. See `docs/FACE_RECOGNITION.md` for the full surface and validation status.
+- **Alarm Server push configuration** (`xml_api.py`, `models.py`). `query_alarm_server()` /
+  `set_alarm_server()` read and write the NVR's Alarm Server target (address/url/port/format,
+  the decimal `alarm_types` pushed — `16` = face match — and heartbeat) via
+  `queryAlarmServerParam`/`editAlarmServerParam`. New `AlarmServerConfig` model. Read and
+  idempotent write-back validated live; enabling a real push target is not yet end-to-end
+  tested (see docs).
 - **AI/face alarm-server codes + a listener** (`alarm_protocol.py`, `alarm_server.py`).
   `TVT_ALARM_CODES` now maps the intelligent-analytics codes (face detect `0x0C`, face
   match `0x10`/`0x11`, tripwire, perimeter, vehicle/plate, …) so pushed AI events can be
   classified. New `AlarmServer` — a bounded threaded TCP receiver that binds the NVR's
   Alarm Server push port and delivers parsed `ParsedAlarmFrame`s to a callback (parsing
   stays transport-agnostic in `alarm_protocol`).
+- **CLI face/AI subcommands** (`xml_api.py`): `ai-resource`, `face-detection <ch>`,
+  `face-db`, and `alarm-server`.
 
 - **Typed, bounded license-plate smart-event ingestion**
   (`device_sdk/plate_events.py`, `DeviceSession.subscribe_plate_events`). Parses both
