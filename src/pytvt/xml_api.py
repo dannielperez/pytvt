@@ -1620,10 +1620,15 @@ class NvrClient:
                 datetime.fromtimestamp(cal_time_s, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
                 + f":{cal_time_ns:07d}"
             )
+            occurred_at = datetime.fromtimestamp(cal_time_s, tz=timezone.utc)
+            if 0 <= cal_time_ns < 10_000_000:
+                # TVT's seven-digit suffix is expressed in 100 ns ticks.
+                occurred_at = occurred_at.replace(microsecond=cal_time_ns // 10)
             ev = FaceEvent(
                 chl_id=chl_id,
                 channel=ch,
                 timestamp=frame_time,
+                occurred_at=occurred_at,
                 img_id=img_id,
                 frame_time=frame_time,
             )

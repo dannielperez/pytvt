@@ -12,6 +12,7 @@ import json
 import re
 import socket
 import threading
+from datetime import datetime, timezone
 
 import pytest
 
@@ -191,6 +192,11 @@ class TestSearchFaceEvents:
         # frame time = "YYYY-MM-DD HH:MM:SS:NNNNNNN" (7-digit sub-second from calTimeNS)
         assert evs[0].frame_time.endswith(":3365630")  # 0x335afe
         assert re.match(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}:\d{7}", evs[0].frame_time)
+        assert evs[0].occurred_at == datetime.fromtimestamp(
+            0x6A619CB3,
+            tz=timezone.utc,
+        ).replace(microsecond=336563)
+        assert evs[0].occurred_at.tzinfo is timezone.utc
         assert evs[1].frame_time.endswith(":0000001")
 
     def test_sends_searchimagebyimagev2_payload(self):

@@ -11,6 +11,7 @@ Two model groups live here:
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+from datetime import datetime
 
 # ── Exceptions ───────────────────────────────────────────────────────
 
@@ -456,6 +457,7 @@ class FaceEvent:
     chl_id: str
     channel: int = 0
     timestamp: str = ""  # frame time, "YYYY-MM-DD HH:MM:SS:NNNNNNN" (UTC)
+    occurred_at: datetime | None = None  # parsed UTC event time
     img_id: int = 0  # snapshot id, used with get_face_snapshot()
     frame_time: str = ""  # exact frameTime string to pass to get_face_snapshot()
     matched: bool = False
