@@ -27,9 +27,7 @@ def test_changed_on_success():
 
 
 def test_already_set_on_idempotent_code():
-    client = _client(
-        f"<response><status>failed</status><errorCode>{IPC_PASSWORD_ALREADY_SET}</errorCode></response>"
-    )
+    client = _client(f"<response><status>failed</status><errorCode>{IPC_PASSWORD_ALREADY_SET}</errorCode></response>")
     assert client.edit_ipc_password_status("dev-1", new_password="New@2026") == "already-set"
 
 

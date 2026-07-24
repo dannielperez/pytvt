@@ -99,6 +99,4 @@ def test_dry_run_makes_no_changes():
 def test_precheck_still_rejects_noop_password():
     client = FakeClient([_chan(1)])
     with pytest.raises(WorkflowPrecheckError):
-        rotate_nvr_channel_passwords(
-            client, apply=True, include_online=True, old_password="same", new_password="same"
-        )
+        rotate_nvr_channel_passwords(client, apply=True, include_online=True, old_password="same", new_password="same")

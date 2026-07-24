@@ -14,8 +14,11 @@
 ## Validation
 
 - `uv run pytest -q tests/test_face_api.py` — 26 passed.
+- Face-event plus inherited password-rotation regression files — 36 passed.
 - `uv run ruff check ...` — passed.
-- `uv run ruff format --check ...` — passed.
+- Full `src/` + `tests/` Ruff check and format — passed. This branch also
+  formats three files inherited from pytvt PR #39 that otherwise made every
+  Python CI matrix job fail before tests.
 - Full SDK suite — 1,094 passed; two packaging guardrail tests could not install
   `hatchling` in their isolated build environment because external package
   resolution was unavailable.

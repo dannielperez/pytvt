@@ -164,40 +164,47 @@ def _force_rotate_online(
             status = client.edit_ipc_password_status(ch.dev_id, new_password=new_password)
         except Exception as exc:
             out.append(
-                ChannelRotationResult(ch.chl_num, ch.dev_id, ch.ip, "failed",
-                                      f"editIPChlPassword (force) failed: {exc}")
+                ChannelRotationResult(
+                    ch.chl_num, ch.dev_id, ch.ip, "failed", f"editIPChlPassword (force) failed: {exc}"
+                )
             )
             sink.emit(ProgressEvent("error", "force.editIPChlPassword_failed", f"{label}: {exc}"))
             continue
         try:
-            client.update_device_credentials(
-                dev_ids=[ch.dev_id], username=username, password=new_password
-            )
+            client.update_device_credentials(dev_ids=[ch.dev_id], username=username, password=new_password)
         except Exception as exc:
             out.append(
-                ChannelRotationResult(ch.chl_num, ch.dev_id, ch.ip, "failed",
-                                      f"editDevList(new) after force rotate failed: {exc}")
+                ChannelRotationResult(
+                    ch.chl_num, ch.dev_id, ch.ip, "failed", f"editDevList(new) after force rotate failed: {exc}"
+                )
             )
             sink.emit(
-                ProgressEvent("warning", "force.editDevList_failed",
-                              f"{label}: camera changed but NVR cred NOT updated — {exc}")
+                ProgressEvent(
+                    "warning", "force.editDevList_failed", f"{label}: camera changed but NVR cred NOT updated — {exc}"
+                )
             )
             continue
         if status == "changed":
             rotated += 1
             out.append(ChannelRotationResult(ch.chl_num, ch.dev_id, ch.ip, "rotated-via-force"))
             sink.emit(
-                ProgressEvent("success", "channel.rotated",
-                              f"{label}: force-rotated and NVR cred synced",
-                              context={"chl_num": ch.chl_num, "ip": ch.ip})
+                ProgressEvent(
+                    "success",
+                    "channel.rotated",
+                    f"{label}: force-rotated and NVR cred synced",
+                    context={"chl_num": ch.chl_num, "ip": ch.ip},
+                )
             )
         else:  # already-set
             already += 1
             out.append(ChannelRotationResult(ch.chl_num, ch.dev_id, ch.ip, "already-ours"))
             sink.emit(
-                ProgressEvent("info", "channel.already_ours",
-                              f"{label}: already on target password (NVR cred re-synced)",
-                              context={"chl_num": ch.chl_num, "ip": ch.ip})
+                ProgressEvent(
+                    "info",
+                    "channel.already_ours",
+                    f"{label}: already on target password (NVR cred re-synced)",
+                    context={"chl_num": ch.chl_num, "ip": ch.ip},
+                )
             )
     return rotated, already, out
 
