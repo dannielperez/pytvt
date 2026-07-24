@@ -4,6 +4,8 @@
 
 - `FaceEvent` now exposes a timezone-aware `occurred_at` value parsed at the
   pytvt boundary.
+- `parse_face_event_timestamp()` is the single safe raw-string fallback for
+  compatibility consumers; invalid values return `None`.
 - `NvrClient.search_face_events()` converts the recorder's epoch seconds and
   seven-digit 100 ns suffix into a UTC `datetime`.
 - The original `timestamp` and `frame_time` strings remain unchanged for
@@ -11,7 +13,7 @@
 
 ## Validation
 
-- `uv run pytest -q tests/test_face_api.py` — 20 passed.
+- `uv run pytest -q tests/test_face_api.py` — 26 passed.
 - `uv run ruff check ...` — passed.
 - `uv run ruff format --check ...` — passed.
 - Full SDK suite — 1,094 passed; two packaging guardrail tests could not install

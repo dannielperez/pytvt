@@ -18,7 +18,7 @@ import pytest
 
 from pytvt import AlarmServer
 from pytvt.alarm_protocol import TVT_ALARM_CODES
-from pytvt.models import FaceEvent
+from pytvt.models import FaceEvent, parse_face_event_timestamp
 from pytvt.xml_api import NvrClient
 
 
@@ -176,6 +176,24 @@ class TestFaceDatabase:
 
 
 class TestSearchFaceEvents:
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            "",
+            "garbage",
+            "2026-07-23 04:46:43",
+            "2026-07-23 04:46:43:123",
+            "2026-07-23 04:46:43:10000000",
+        ],
+    )
+    def test_face_event_timestamp_parser_rejects_unrecognized_values(self, raw):
+        assert parse_face_event_timestamp(raw) is None
+
+    def test_face_event_timestamp_parser_returns_aware_utc_time(self):
+        assert parse_face_event_timestamp(
+            "2026-07-23 04:46:43:3365630",
+        ) == datetime(2026, 7, 23, 4, 46, 43, 336563, tzinfo=timezone.utc)
+
     def test_face_event_preserves_existing_positional_constructor(self):
         event = FaceEvent(
             "{CHANNEL}",

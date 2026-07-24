@@ -70,6 +70,7 @@ from .models import (
     RtspServerConfig,
     ScannerConfig,
     ScanResult,
+    parse_face_event_timestamp,
 )
 from .output import save_csv, save_failed_devices, save_json, save_xlsx_per_site
 from .platform_sdk import ManagementClient, ManagementError
@@ -124,6 +125,7 @@ __all__ = [
     "DeviceEntry",
     "FaceDbGroup",
     "FaceEvent",
+    "parse_face_event_timestamp",
     "FacePerson",
     "NvrFaceDetectionConfig",
     "NvrLanFreeDevice",

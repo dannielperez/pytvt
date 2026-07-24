@@ -11,7 +11,7 @@ Two model groups live here:
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 
 # ── Exceptions ───────────────────────────────────────────────────────
 
@@ -441,6 +441,19 @@ class AlarmServerConfig:
     token: str = ""
     heartbeat_enabled: bool = False
     heartbeat_interval: int = 10
+
+
+def parse_face_event_timestamp(raw: str) -> datetime | None:
+    """Parse TVT's UTC ``YYYY-MM-DD HH:MM:SS:NNNNNNN`` face-event time."""
+    value = raw.strip()
+    timestamp, separator, ticks = value.rpartition(":")
+    if not separator or len(ticks) != 7 or not ticks.isdecimal() or int(ticks) >= 10_000_000:
+        return None
+    try:
+        parsed = datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return None
+    return parsed.replace(tzinfo=timezone.utc, microsecond=int(ticks) // 10)
 
 
 @dataclass
