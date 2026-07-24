@@ -18,6 +18,7 @@ import pytest
 
 from pytvt import AlarmServer
 from pytvt.alarm_protocol import TVT_ALARM_CODES
+from pytvt.models import FaceEvent
 from pytvt.xml_api import NvrClient
 
 
@@ -175,6 +176,26 @@ class TestFaceDatabase:
 
 
 class TestSearchFaceEvents:
+    def test_face_event_preserves_existing_positional_constructor(self):
+        event = FaceEvent(
+            "{CHANNEL}",
+            9,
+            "2026-07-23 04:46:43:3365630",
+            9425,
+            "2026-07-23 04:46:43:3365630",
+            True,
+            "allow",
+            "Ada",
+            0.95,
+            b"face",
+            b"background",
+        )
+
+        assert event.img_id == 9425
+        assert event.frame_time == "2026-07-23 04:46:43:3365630"
+        assert event.background == b"background"
+        assert event.occurred_at is None
+
     def test_decodes_records(self):
         client = _client()
         # searchImageByImageV2 compact <i> records: _,calTimeS,calTimeNS,imgId,channel,... (hex)

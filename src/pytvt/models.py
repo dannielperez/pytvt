@@ -457,7 +457,6 @@ class FaceEvent:
     chl_id: str
     channel: int = 0
     timestamp: str = ""  # frame time, "YYYY-MM-DD HH:MM:SS:NNNNNNN" (UTC)
-    occurred_at: datetime | None = None  # parsed UTC event time
     img_id: int = 0  # snapshot id, used with get_face_snapshot()
     frame_time: str = ""  # exact frameTime string to pass to get_face_snapshot()
     matched: bool = False
@@ -466,3 +465,4 @@ class FaceEvent:
     similarity: float = 0.0
     snapshot: bytes = b""  # populated only if the search fetched images
     background: bytes = b""
+    occurred_at: datetime | None = None  # parsed UTC event time

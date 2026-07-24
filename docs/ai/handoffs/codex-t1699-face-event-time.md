@@ -11,12 +11,15 @@
 
 ## Validation
 
-- `uv run pytest -q tests/test_face_api.py` — 19 passed.
+- `uv run pytest -q tests/test_face_api.py` — 20 passed.
 - `uv run ruff check ...` — passed.
 - `uv run ruff format --check ...` — passed.
 - Full SDK suite — 1,094 passed; two packaging guardrail tests could not install
   `hatchling` in their isolated build environment because external package
   resolution was unavailable.
+- SDK-boundary review — WARNING resolved by appending the new dataclass field
+  after every existing field and adding a positional-constructor compatibility
+  regression; targeted suite now 20 passed.
 
 ## Consumer follow-up
 
