@@ -137,6 +137,7 @@ from .models import (
     PortConfig,
     RtspServerConfig,
     User,
+    parse_face_event_timestamp,
 )
 
 XML_HEADER = '<?xml version="1.0" encoding="utf-8" ?>'
@@ -1624,6 +1625,7 @@ class NvrClient:
                 chl_id=chl_id,
                 channel=ch,
                 timestamp=frame_time,
+                occurred_at=parse_face_event_timestamp(frame_time),
                 img_id=img_id,
                 frame_time=frame_time,
             )

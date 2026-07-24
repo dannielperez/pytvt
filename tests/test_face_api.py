@@ -12,11 +12,13 @@ import json
 import re
 import socket
 import threading
+from datetime import datetime, timezone
 
 import pytest
 
 from pytvt import AlarmServer
 from pytvt.alarm_protocol import TVT_ALARM_CODES
+from pytvt.models import FaceEvent, parse_face_event_timestamp
 from pytvt.xml_api import NvrClient
 
 
@@ -174,6 +176,44 @@ class TestFaceDatabase:
 
 
 class TestSearchFaceEvents:
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            "",
+            "garbage",
+            "2026-07-23 04:46:43",
+            "2026-07-23 04:46:43:123",
+            "2026-07-23 04:46:43:10000000",
+        ],
+    )
+    def test_face_event_timestamp_parser_rejects_unrecognized_values(self, raw):
+        assert parse_face_event_timestamp(raw) is None
+
+    def test_face_event_timestamp_parser_returns_aware_utc_time(self):
+        assert parse_face_event_timestamp(
+            "2026-07-23 04:46:43:3365630",
+        ) == datetime(2026, 7, 23, 4, 46, 43, 336563, tzinfo=timezone.utc)
+
+    def test_face_event_preserves_existing_positional_constructor(self):
+        event = FaceEvent(
+            "{CHANNEL}",
+            9,
+            "2026-07-23 04:46:43:3365630",
+            9425,
+            "2026-07-23 04:46:43:3365630",
+            True,
+            "allow",
+            "Ada",
+            0.95,
+            b"face",
+            b"background",
+        )
+
+        assert event.img_id == 9425
+        assert event.frame_time == "2026-07-23 04:46:43:3365630"
+        assert event.background == b"background"
+        assert event.occurred_at is None
+
     def test_decodes_records(self):
         client = _client()
         # searchImageByImageV2 compact <i> records: _,calTimeS,calTimeNS,imgId,channel,... (hex)
@@ -191,6 +231,11 @@ class TestSearchFaceEvents:
         # frame time = "YYYY-MM-DD HH:MM:SS:NNNNNNN" (7-digit sub-second from calTimeNS)
         assert evs[0].frame_time.endswith(":3365630")  # 0x335afe
         assert re.match(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}:\d{7}", evs[0].frame_time)
+        assert evs[0].occurred_at == datetime.fromtimestamp(
+            0x6A619CB3,
+            tz=timezone.utc,
+        ).replace(microsecond=336563)
+        assert evs[0].occurred_at.tzinfo is timezone.utc
         assert evs[1].frame_time.endswith(":0000001")
 
     def test_sends_searchimagebyimagev2_payload(self):
