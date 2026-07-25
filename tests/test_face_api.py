@@ -12,12 +12,14 @@ import json
 import re
 import socket
 import threading
+import time
 from datetime import datetime, timezone
 
 import pytest
 
 from pytvt import AlarmServer
 from pytvt.alarm_protocol import TVT_ALARM_CODES
+from pytvt.alarm_server import AlarmServerCapacityError
 from pytvt.models import FaceEvent, parse_face_event_timestamp
 from pytvt.xml_api import NvrClient
 
@@ -364,6 +366,16 @@ class TestAlarmCodes:
 
 
 class TestAlarmServer:
+    @pytest.mark.parametrize("value", [0, -1, True, 1.5, "2"])
+    def test_rejects_invalid_connection_cap(self, value):
+        with pytest.raises(ValueError, match="max_connections"):
+            AlarmServer(
+                "127.0.0.1",
+                0,
+                lambda _event, _addr: None,
+                max_connections=value,
+            )
+
     def test_receives_and_parses_face_push(self):
         received: list = []
         done = threading.Event()
@@ -386,3 +398,36 @@ class TestAlarmServer:
         assert event.event_code == "face_match"
         assert event.event_type == "face"
         assert event.channel == 9
+
+    def test_rejects_connections_above_hard_concurrency_cap(self):
+        rejected = threading.Event()
+        errors: list[BaseException] = []
+
+        def on_error(exc, _addr):
+            errors.append(exc)
+            rejected.set()
+
+        with AlarmServer(
+            "127.0.0.1",
+            0,
+            lambda _event, _addr: None,
+            max_connections=1,
+            recv_timeout=5,
+            on_error=on_error,
+        ) as srv:
+            port = srv._sock.getsockname()[1]
+            thread = threading.Thread(target=srv.serve_forever, daemon=True)
+            thread.start()
+            first = socket.create_connection(("127.0.0.1", port), timeout=5)
+            try:
+                deadline = time.monotonic() + 2
+                while not srv._threads and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                assert srv._threads
+                with socket.create_connection(("127.0.0.1", port), timeout=5):
+                    assert rejected.wait(timeout=2)
+            finally:
+                first.close()
+
+        assert len(errors) == 1
+        assert isinstance(errors[0], AlarmServerCapacityError)

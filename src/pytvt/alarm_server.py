@@ -28,11 +28,17 @@ from __future__ import annotations
 import contextlib
 import socket
 import threading
+import time
 from collections.abc import Callable
 
 from .alarm_protocol import MAX_FRAME_SIZE, ParsedAlarmFrame, parse_alarm_frame
 
-__all__ = ["AlarmServer", "AlarmCallback"]
+__all__ = [
+    "DEFAULT_MAX_CONNECTIONS",
+    "AlarmServer",
+    "AlarmServerCapacityError",
+    "AlarmCallback",
+]
 
 # (parsed frame, source (host, port)) -> None
 AlarmCallback = Callable[[ParsedAlarmFrame, tuple[str, int]], None]
@@ -40,6 +46,11 @@ AlarmCallback = Callable[[ParsedAlarmFrame, tuple[str, int]], None]
 # One NVR push is a single frame; cap the per-connection read so a wedged or
 # hostile peer can't stream unbounded bytes into memory.
 _MAX_CONN_BYTES = MAX_FRAME_SIZE * 4
+DEFAULT_MAX_CONNECTIONS = 32
+
+
+class AlarmServerCapacityError(RuntimeError):
+    """Raised through ``on_error`` when the listener is at its connection cap."""
 
 
 class AlarmServer:
@@ -59,8 +70,11 @@ class AlarmServer:
         *,
         backlog: int = 32,
         recv_timeout: float = 10.0,
+        max_connections: int = DEFAULT_MAX_CONNECTIONS,
         on_error: Callable[[BaseException, tuple[str, int] | None], None] | None = None,
     ) -> None:
+        if isinstance(max_connections, bool) or not isinstance(max_connections, int) or max_connections <= 0:
+            raise ValueError("max_connections must be a positive integer")
         self.host = host
         self.port = port
         self._callback = callback
@@ -69,7 +83,10 @@ class AlarmServer:
         self._on_error = on_error
         self._sock: socket.socket | None = None
         self._stop = threading.Event()
+        self._connection_slots = threading.BoundedSemaphore(max_connections)
+        self._max_connections = max_connections
         self._threads: set[threading.Thread] = set()
+        self._threads_lock = threading.Lock()
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -103,9 +120,32 @@ class AlarmServer:
                 continue
             except OSError:
                 break
+            if not self._connection_slots.acquire(blocking=False):
+                with contextlib.suppress(OSError):
+                    conn.close()
+                self._report_error(
+                    AlarmServerCapacityError(
+                        f"AlarmServer connection limit reached ({self._max_connections})",
+                    ),
+                    addr,
+                )
+                continue
             t = threading.Thread(target=self._handle, args=(conn, addr), daemon=True)
-            self._threads.add(t)
-            t.start()
+            try:
+                # Publish and start atomically with respect to close(): joining a
+                # registered-but-not-yet-started Thread raises RuntimeError.
+                with self._threads_lock:
+                    self._threads.add(t)
+                    try:
+                        t.start()
+                    except BaseException:
+                        self._threads.discard(t)
+                        raise
+            except BaseException as exc:
+                self._connection_slots.release()
+                with contextlib.suppress(OSError):
+                    conn.close()
+                self._report_error(exc, addr)
 
     def close(self) -> None:
         """Stop accepting and release the socket."""
@@ -115,9 +155,14 @@ class AlarmServer:
                 self._sock.close()
             finally:
                 self._sock = None
-        for t in list(self._threads):
-            t.join(timeout=1.0)
-        self._threads.clear()
+        with self._threads_lock:
+            threads = tuple(self._threads)
+        deadline = time.monotonic() + 1.0
+        for thread in threads:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            thread.join(timeout=remaining)
 
     # -- per-connection ----------------------------------------------------
 
@@ -142,12 +187,22 @@ class AlarmServer:
             try:
                 self._callback(event, addr)
             except BaseException as exc:
-                if self._on_error is not None:
-                    self._on_error(exc, addr)
+                self._report_error(exc, addr)
         except BaseException as exc:
-            if self._on_error is not None:
-                self._on_error(exc, addr)
+            self._report_error(exc, addr)
         finally:
             with contextlib.suppress(OSError):
                 conn.close()
-            self._threads.discard(threading.current_thread())
+            with self._threads_lock:
+                self._threads.discard(threading.current_thread())
+            self._connection_slots.release()
+
+    def _report_error(
+        self,
+        exc: BaseException,
+        addr: tuple[str, int] | None,
+    ) -> None:
+        if self._on_error is None:
+            return
+        with contextlib.suppress(BaseException):
+            self._on_error(exc, addr)

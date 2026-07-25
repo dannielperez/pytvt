@@ -40,7 +40,7 @@ __version__ = "1.2.0"
 
 from . import workflows  # Provisional — technician-facing workflow orchestrations.
 from .alarm_protocol import ParsedAlarmFrame, parse_alarm_frame
-from .alarm_server import AlarmServer
+from .alarm_server import AlarmServer, AlarmServerCapacityError
 from .config import load_config
 from .connection_pool import ConnectionPool, PoolStats, SessionMetrics, SessionResult, connect_many
 from .constants import BackendFamily, CompositeStrategy, ExecutionPlan, IntegrationMode, resolve_backend
@@ -104,6 +104,7 @@ __all__ = [
     "ParsedAlarmFrame",
     "parse_alarm_frame",
     "AlarmServer",
+    "AlarmServerCapacityError",
     # Constants / enums
     "BackendFamily",
     "CompositeStrategy",
