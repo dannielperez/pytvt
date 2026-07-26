@@ -101,6 +101,8 @@ _LOGIN_TIMEOUT = 15.0
 
 # ---------------------------------------------------------------------------
 # ctypes struct definitions (from SDKDefs.h)
+# Packed definitions explicitly select the MSVC layout that ctypes historically
+# inferred from _pack_. Python 3.14 deprecated that implicit selection.
 # ---------------------------------------------------------------------------
 
 
@@ -175,6 +177,7 @@ class _Plat_ResListMsg(ct.Structure):
 
 # --- AI (Intelligent Analysis) server list message -------------------------
 class _Plat_AnsiServerInfo(ct.Structure):
+    _layout_ = "ms"
     _pack_ = 4
     _fields_ = [
         ("ulNodeID", ct.c_uint),
@@ -186,6 +189,7 @@ class _Plat_AnsiServerInfo(ct.Structure):
 class _Plat_AnsiServerListMsg(ct.Structure):
     """stPlat_AnsiServerListMsg from SDKDefs.h."""
 
+    _layout_ = "ms"
     _pack_ = 4
     _fields_ = [
         ("nStructSize", ct.c_int),
@@ -202,6 +206,7 @@ class _Plat_AnsiServerListMsg(ct.Structure):
 
 # --- Storage server list message ------------------------------------------
 class _Plat_StorageServerInfo(ct.Structure):
+    _layout_ = "ms"
     _pack_ = 4
     _fields_ = [
         ("szName", ct.c_char * 256),
@@ -212,6 +217,7 @@ class _Plat_StorageServerInfo(ct.Structure):
 class _Plat_StorageServerListMsg(ct.Structure):
     """stPlat_StorageServerListMsg from SDKDefs.h."""
 
+    _layout_ = "ms"
     _pack_ = 4
     _fields_ = [
         ("nStructSize", ct.c_int),
@@ -227,6 +233,7 @@ class _Plat_StorageServerListMsg(ct.Structure):
 
 # --- Alarm host list message ----------------------------------------------
 class _Plat_AlarmHostInfo(ct.Structure):
+    _layout_ = "ms"
     _pack_ = 4
     _fields_ = [
         ("szName", ct.c_char * 256),
@@ -244,6 +251,7 @@ class _Plat_AlarmHostInfo(ct.Structure):
 class _Plat_AlarmHostListMsg(ct.Structure):
     """stPlat_AlarmHostListMsg from SDKDefs.h."""
 
+    _layout_ = "ms"
     _pack_ = 4
     _fields_ = [
         ("nStructSize", ct.c_int),
@@ -259,6 +267,7 @@ class _Plat_AlarmHostListMsg(ct.Structure):
 
 # --- Alarm zone list message ----------------------------------------------
 class _Plat_AlarmZoneInfo(ct.Structure):
+    _layout_ = "ms"
     _pack_ = 4
     _fields_ = [
         ("szName", ct.c_char * 256),
@@ -271,6 +280,7 @@ class _Plat_AlarmZoneInfo(ct.Structure):
 class _Plat_AlarmZoneListMsg(ct.Structure):
     """stPlat_AlarmZoneListMsg from SDKDefs.h."""
 
+    _layout_ = "ms"
     _pack_ = 4
     _fields_ = [
         ("nStructSize", ct.c_int),
