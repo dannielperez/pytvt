@@ -1,6 +1,8 @@
 """ctypes structure definitions matching DVR_NET_SDK.h / dvrdvsdefine.h.
 
 Every struct uses ``_pack_ = 4`` matching the SDK's ``#pragma pack(4)``.
+``_layout_ = "ms"`` makes the historical ctypes layout explicit so Python
+3.14+ does not warn and Python 3.19+ does not reject the packed definitions.
 Field names mirror the C originals for traceability.
 """
 
@@ -15,6 +17,7 @@ from datetime import datetime
 class DD_TIME(ct.Structure):
     """Recording time (month 0-11, year = actual - 1900)."""
 
+    _layout_ = "ms"
     _pack_ = 4
     _fields_ = [
         ("second", ct.c_ubyte),
@@ -54,6 +57,7 @@ class DD_TIME(ct.Structure):
 class DD_TIME_EX(ct.Structure):
     """Recording time extended (month 1-12, year = actual)."""
 
+    _layout_ = "ms"
     _pack_ = 4
     _fields_ = [
         ("second", ct.c_ubyte),
@@ -84,6 +88,7 @@ class DD_TIME_EX(ct.Structure):
 class NET_SDK_DEVICE_FUNC_IPC(ct.Structure):
     """IPC AI capability bitfield (32-bit flags + 7x32 reserved)."""
 
+    _layout_ = "ms"
     _pack_ = 4
     _fields_ = [
         ("flags", ct.c_uint),
@@ -162,6 +167,7 @@ class NET_SDK_DEVICE_FUNC_IPC(ct.Structure):
 class NET_SDK_DEVICEINFO(ct.Structure):
     """Full device information returned by NET_SDK_Login / NET_SDK_GetDeviceInfo."""
 
+    _layout_ = "ms"
     _pack_ = 4
     _fields_ = [
         ("localVideoInputNum", ct.c_ubyte),
@@ -231,6 +237,7 @@ class NET_SDK_DEVICEINFO(ct.Structure):
 class NET_SDK_DEVICE_DISCOVERY_INFO(ct.Structure):
     """Device found via NET_SDK_DiscoverDevice."""
 
+    _layout_ = "ms"
     _pack_ = 4
     _fields_ = [
         ("deviceType", ct.c_uint),
@@ -264,6 +271,7 @@ class NET_SDK_DEVICE_DISCOVERY_INFO(ct.Structure):
 class NET_SDK_DEVICE_IP_INFO(ct.Structure):
     """MAC-addressed network provisioning payload for LAN readdressing."""
 
+    _layout_ = "ms"
     _pack_ = 4
     _fields_ = [
         ("szMac", ct.c_char * 36),
@@ -283,6 +291,7 @@ class NET_SDK_DEVICE_IP_INFO(ct.Structure):
 class NET_SDK_IPC_DEVICE_INFO(ct.Structure):
     """IPC channel info from NVR via NET_SDK_GetDeviceIPCInfo."""
 
+    _layout_ = "ms"
     _pack_ = 4
     _fields_ = [
         ("deviceID", ct.c_uint),
@@ -318,6 +327,7 @@ DD_MAX_CAMERA_NAME_BUF_LEN = 64
 class NET_SDK_CH_DEVICE_STATUS(ct.Structure):
     """Channel device status from NET_SDK_GetDeviceCHStatus."""
 
+    _layout_ = "ms"
     _pack_ = 4
     _fields_ = [
         ("channel", ct.c_ushort),
@@ -338,6 +348,7 @@ class NET_SDK_CH_DEVICE_STATUS(ct.Structure):
 class NET_SDK_DEV_SUPPORT(ct.Structure):
     """Device capability flags from NET_SDK_GetDeviceSupportFunction."""
 
+    _layout_ = "ms"
     _pack_ = 4
     _fields_ = [
         ("flags", ct.c_uint),
@@ -371,6 +382,7 @@ class NET_SDK_DEV_SUPPORT(ct.Structure):
 class NET_SDK_SMART_SUPPORT(ct.Structure):
     """Smart event capability flags from NET_SDK_GetSmarEventSupport."""
 
+    _layout_ = "ms"
     _pack_ = 4
     _fields_ = [
         ("supportAOIEntry", ct.c_int),
@@ -407,6 +419,7 @@ class NET_SDK_SMART_SUPPORT(ct.Structure):
 class NET_SDK_DISK_INFO(ct.Structure):
     """Disk information from NET_SDK_GetNextDiskInfo."""
 
+    _layout_ = "ms"
     _pack_ = 4
     _fields_ = [
         ("diskIndex", ct.c_long),
@@ -423,6 +436,7 @@ class NET_SDK_DISK_INFO(ct.Structure):
 class NET_SDK_ALARMINFO(ct.Structure):
     """Alarm event from device message callback."""
 
+    _layout_ = "ms"
     _pack_ = 4
     _fields_ = [
         ("dwAlarmType", ct.c_uint),
@@ -435,6 +449,7 @@ class NET_SDK_ALARMINFO(ct.Structure):
 class NET_SDK_ALARMINFO_EX(ct.Structure):
     """Extended alarm event with sensor name and timestamp."""
 
+    _layout_ = "ms"
     _pack_ = 4
     _fields_ = [
         ("dwAlarmType", ct.c_uint),
@@ -453,6 +468,7 @@ class NET_SDK_ALARMINFO_EX(ct.Structure):
 class NET_SDK_REC_FILE(ct.Structure):
     """Recording file information from NET_SDK_FindNextFile."""
 
+    _layout_ = "ms"
     _pack_ = 4
     _fields_ = [
         ("dwChannel", ct.c_uint),
@@ -468,6 +484,7 @@ class NET_SDK_REC_FILE(ct.Structure):
 class NET_SDK_REC_TIME(ct.Structure):
     """Recording time range from NET_SDK_FindNextFile (time mode)."""
 
+    _layout_ = "ms"
     _pack_ = 4
     _fields_ = [
         ("dwChannel", ct.c_uint),
@@ -482,6 +499,7 @@ class NET_SDK_REC_TIME(ct.Structure):
 class NET_SDK_JPEGPARA(ct.Structure):
     """JPEG capture parameters."""
 
+    _layout_ = "ms"
     _pack_ = 4
     _fields_ = [
         ("wPicSize", ct.c_ushort),
@@ -498,6 +516,7 @@ MAX_CONTENTLEN = 512
 class NET_SDK_LOG(ct.Structure):
     """Device log entry from NET_SDK_FindNextLog."""
 
+    _layout_ = "ms"
     _pack_ = 4
     _fields_ = [
         ("strLogTime", DD_TIME),
@@ -515,6 +534,7 @@ class NET_SDK_LOG(ct.Structure):
 class NET_SDK_NVR_DISKREC_DATE_ITEM(ct.Structure):
     """NVR disk recording date range."""
 
+    _layout_ = "ms"
     _pack_ = 4
     _fields_ = [
         ("diskCount", ct.c_uint),
@@ -531,6 +551,7 @@ class NET_SDK_NVR_DISKREC_DATE_ITEM(ct.Structure):
 class NET_SDK_ALRAM_OUT_STATUS(ct.Structure):
     """Alarm relay output status."""
 
+    _layout_ = "ms"
     _pack_ = 4
     _fields_ = [
         ("szName", ct.c_char * 64),
@@ -545,6 +566,7 @@ class NET_SDK_ALRAM_OUT_STATUS(ct.Structure):
 class NET_SDK_IVE_RECT_T(ct.Structure):
     """Unsigned smart-event rectangle used by IPC analytics payloads."""
 
+    _layout_ = "ms"
     _pack_ = 4
     _fields_ = [
         ("X1", ct.c_uint),
@@ -557,6 +579,7 @@ class NET_SDK_IVE_RECT_T(ct.Structure):
 class NET_SDK_IVE_POINT_T(ct.Structure):
     """Signed smart-event point used by IPC analytics payloads."""
 
+    _layout_ = "ms"
     _pack_ = 4
     _fields_ = [
         ("X", ct.c_int),
@@ -571,6 +594,7 @@ class NET_SDK_IVE_VEHICE_HEAD_INFO(ct.Structure):
     source/header traceability.
     """
 
+    _layout_ = "ms"
     _pack_ = 4
     _fields_ = [
         ("begin_flag", ct.c_uint),
@@ -591,6 +615,7 @@ class NET_SDK_IVE_VEHICE_HEAD_INFO(ct.Structure):
 class NET_SDK_IVE_VEHICE_ITEM_INFO(ct.Structure):
     """One image/plate item in an IPC vehicle-recognition callback."""
 
+    _layout_ = "ms"
     _pack_ = 4
     _fields_ = [
         ("begin_flag", ct.c_uint),
@@ -634,6 +659,7 @@ class NET_SDK_IVE_VEHICE_ITEM_INFO(ct.Structure):
 class RECT_16(ct.Structure):
     """Signed 16-bit rectangle used by NVR plate callbacks."""
 
+    _layout_ = "ms"
     _pack_ = 4
     _fields_ = [
         ("left", ct.c_short),
@@ -646,6 +672,7 @@ class RECT_16(ct.Structure):
 class NET_SDK_IVE_PICTURE_INFO(ct.Structure):
     """Descriptor immediately preceding a smart-event image buffer."""
 
+    _layout_ = "ms"
     _pack_ = 4
     _fields_ = [
         ("iWidth", ct.c_int),
@@ -664,6 +691,7 @@ class NET_SDK_IVE_PICTURE_INFO(ct.Structure):
 class GUID(ct.Structure):
     """Windows-style GUID used for NVR channel node ids (``guid.h``)."""
 
+    _layout_ = "ms"
     _pack_ = 4
     _fields_ = [
         ("Data1", ct.c_uint),
@@ -689,6 +717,7 @@ class GUID(ct.Structure):
 class VEHICE_PLATE_INFO(ct.Structure):
     """NVR plate metadata for ``NET_SDK_SMART_EVENT_TYPE_NVR_VEHICLE``."""
 
+    _layout_ = "ms"
     _pack_ = 4
     _fields_ = [
         ("dwPlateID", ct.c_uint),
@@ -717,6 +746,7 @@ class VEHICE_PLATE_INFO(ct.Structure):
 class NET_SDK_USER_GROUP(ct.Structure):
     """User group (``NET_SDK_USER_GROUP``)."""
 
+    _layout_ = "ms"
     _pack_ = 4
     _fields_ = [
         ("szGroupGuid", ct.c_char * 48),
@@ -727,6 +757,7 @@ class NET_SDK_USER_GROUP(ct.Structure):
 class NET_SDK_USER_INFO(ct.Structure):
     """Device user account from NET_SDK_GetDeviceUsers."""
 
+    _layout_ = "ms"
     _pack_ = 4
     _fields_ = [
         ("m_szUserName", ct.c_char * 36),
@@ -744,6 +775,7 @@ class NET_SDK_USER_INFO(ct.Structure):
 class NVRChlInfoStruct(ct.Structure):
     """IPC info for one NVR channel from NET_SDK_GetNvrChlInfo."""
 
+    _layout_ = "ms"
     _pack_ = 4
     _fields_ = [
         ("softwareVersion", ct.c_int),
@@ -758,6 +790,7 @@ class NVRChlInfoStruct(ct.Structure):
 class NVRChlListStruct(ct.Structure):
     """Online channel GUID list from NET_SDK_QueryOnlineChlList."""
 
+    _layout_ = "ms"
     _pack_ = 4
     _fields_ = [
         ("chlList", (ct.c_char * 64) * 256),
@@ -770,6 +803,7 @@ class NVRChlListStruct(ct.Structure):
 class NET_SDK_RECORD_STATUS(ct.Structure):
     """Per-channel recording status from NET_SDK_GetRecordStatus."""
 
+    _layout_ = "ms"
     _pack_ = 4
     _fields_ = [
         ("dwRecordType", ct.c_uint),  # DD_RECORD_TYPE
@@ -780,6 +814,7 @@ class NET_SDK_RECORD_STATUS(ct.Structure):
 class NET_SDK_RECORD_STATUS_EX(ct.Structure):
     """Extended recording status from NET_SDK_GetRecordStatusEx."""
 
+    _layout_ = "ms"
     _pack_ = 4
     _fields_ = [
         ("deviceName", ct.c_char * 128),
@@ -802,6 +837,7 @@ class NET_SDK_RECORD_STATUS_EX(ct.Structure):
 class NET_SDK_RECORD_DEVICE(ct.Structure):
     """Recording device (channel node) from NET_SDK_GetRecordDevice."""
 
+    _layout_ = "ms"
     _pack_ = 4
     _fields_ = [
         ("nodeChlID", GUID),
@@ -815,6 +851,7 @@ class NET_SDK_RECORD_DEVICE(ct.Structure):
 class UNLOCK_PARAM(ct.Structure):
     """Door-unlock parameters for NET_SDK_UnlockAccessControlEx (by value)."""
 
+    _layout_ = "ms"
     _pack_ = 4
     _fields_ = [
         ("lockID", ct.c_int),  # 1-based; 0/absent unlocks all locks
@@ -825,6 +862,7 @@ class UNLOCK_PARAM(ct.Structure):
 class CALL_RECORD(ct.Structure):
     """Intercom call-log entry from NET_SDK_GetCallLog."""
 
+    _layout_ = "ms"
     _pack_ = 4
     _fields_ = [
         ("missedCall", ct.c_bool),
@@ -848,6 +886,7 @@ class CALL_RECORD(ct.Structure):
 class CALL_RECORD_QUERY_PARAM(ct.Structure):
     """Query window for NET_SDK_GetCallLog (passed by const ref)."""
 
+    _layout_ = "ms"
     _pack_ = 4
     _fields_ = [
         ("startTime", DD_TIME),
@@ -864,6 +903,7 @@ class CALL_RECORD_QUERY_PARAM(ct.Structure):
 class CLOUD_UPGRADE_INFO(ct.Structure):
     """Cloud-upgrade state from NET_SDK_GetCloudUpgradeInfo."""
 
+    _layout_ = "ms"
     _pack_ = 4
     _fields_ = [
         ("chlid", ct.c_int),  # -1 = NVR itself, else channel
@@ -880,6 +920,7 @@ class CLOUD_UPGRADE_INFO(ct.Structure):
 class NET_DVR_IVE_POINT_T(ct.Structure):
     """A single rule/tripwire point (NET_DVR_IVE_POINT_T)."""
 
+    _layout_ = "ms"
     _pack_ = 4
     _fields_ = [
         ("X", ct.c_int),
@@ -893,6 +934,7 @@ MAX_RULE_NUMBER = 4
 class RULE_POINT(ct.Structure):
     """Up to six on-screen rule-box corners (``_rule_point``)."""
 
+    _layout_ = "ms"
     _pack_ = 4
     _fields_ = [(f"m_RulePoint_{axis}{i}", ct.c_int) for i in range(1, 7) for axis in ("x", "y")]
 
@@ -900,6 +942,7 @@ class RULE_POINT(ct.Structure):
 class RULE_POINT_LIST(ct.Structure):
     """Rule-box overlay list for NET_SDK_ShowRuleBoxList (by value)."""
 
+    _layout_ = "ms"
     _pack_ = 4
     _fields_ = [
         ("rule_point", RULE_POINT * MAX_RULE_NUMBER),
@@ -923,6 +966,7 @@ SUBSCRIBE_CALLBACK_V2 = ct.CFUNCTYPE(None, ct.c_long, ct.c_long, ct.c_uint, ct.c
 class NET_DVR_SUBSCRIBE_REPLY(ct.Structure):
     """Opaque renewal/unsubscribe token returned by ``NET_SDK_SmartSubscrib``."""
 
+    _layout_ = "ms"
     _pack_ = 4
     _fields_ = [
         ("serverAddress", ct.c_char * 256),
