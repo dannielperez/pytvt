@@ -8,6 +8,7 @@ from pytvt.models import (
     CameraInfo,
     DeviceEntry,
     NvrApiError,
+    PlatformAccessDisabledError,
     ScannerConfig,
     ScanResult,
 )
@@ -183,3 +184,20 @@ class TestNvrApiError:
     def test_no_code(self):
         e = NvrApiError("oops")
         assert e.error_code is None
+
+    def test_without_error_code_is_not_retryable(self):
+        assert NvrApiError("boom").retryable is False
+
+    def test_with_error_code_is_not_retryable(self):
+        assert NvrApiError("boom", "536870962").retryable is False
+
+    def test_subclass_inherits_not_retryable(self):
+        assert PlatformAccessDisabledError("disabled").retryable is False
+
+    def test_subclass_can_override_retryable(self):
+        class TransientNvrApiError(NvrApiError):
+            @property
+            def retryable(self) -> bool:
+                return True
+
+        assert TransientNvrApiError("try again").retryable is True
