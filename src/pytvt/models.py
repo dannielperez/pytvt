@@ -23,6 +23,21 @@ class NvrApiError(Exception):
         super().__init__(message)
         self.error_code = error_code
 
+    @property
+    def retryable(self) -> bool:
+        """Whether retrying the same request could succeed without other changes.
+
+        ``NvrApiError`` represents a deterministic API, validation, or crypto
+        failure. In the response path, ``_check_response`` raises it only after
+        parsing a non-success status from a real NVR response, while ``_post``
+        lets transport ``OSError`` and ``TimeoutError`` exceptions propagate
+        unchanged. Retrying identical inputs therefore repeats the rejection.
+
+        This is a property so subclasses can override the classification if a
+        specific vendor failure is later proven transient in the field.
+        """
+        return False
+
 
 class PlatformAccessDisabledError(NvrApiError):
     """Raised when editing Platform Access config while the feature is disabled.
