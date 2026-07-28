@@ -127,6 +127,8 @@ from .models import (
     FaceDbGroup,
     FaceEvent,
     FacePerson,
+    FaceSearchApiStatus,
+    FaceSearchProbeResult,
     NvrApiError,
     NvrApiResponseShapeError,
     NvrFaceDetectionConfig,
@@ -148,6 +150,11 @@ SYSTEM_TYPE = "NVMS-9000"
 #: force-rotate treat an already-compliant camera as "already on target" instead
 #: of counting it as an error.
 IPC_PASSWORD_ALREADY_SET = "536870962"
+
+# Legacy firmware observed in the field returns this deterministic rejection
+# for ``searchImageByImageV2`` after a successful login. Do not broaden this
+# set without response evidence from another firmware family.
+FACE_SEARCH_API_UNSUPPORTED_CODES = frozenset({"536870934"})
 
 
 class NvrClient:
@@ -1633,6 +1640,48 @@ class NvrClient:
                 ev.snapshot = self.get_face_snapshot(ch, img_id, frame_time)
             events.append(ev)
         return events
+
+    def probe_face_search(
+        self,
+        channel: int,
+        start: str,
+        end: str,
+    ) -> FaceSearchProbeResult:
+        """Read port/API state and probe the exact face-event search command.
+
+        ``searchImageByImageV2`` is invoked with a one-result bound and never
+        fetches image bytes. Only the field-proven unsupported response is
+        normalized; authentication, transport, response-shape, and unknown
+        vendor errors still raise so callers cannot persist a false
+        ``unsupported`` result.
+        """
+        port_config = self.query_port_config()
+        rtsp_server = self.query_rtsp_server()
+        api_server = self.query_api_server()
+        error_code: str | None
+        try:
+            self.search_face_events(
+                channel,
+                start,
+                end,
+                result_limit=1,
+                fetch_snapshots=False,
+            )
+        except NvrApiError as exc:
+            if exc.error_code not in FACE_SEARCH_API_UNSUPPORTED_CODES:
+                raise
+            status = FaceSearchApiStatus.UNSUPPORTED
+            error_code = exc.error_code
+        else:
+            status = FaceSearchApiStatus.SUPPORTED
+            error_code = None
+        return FaceSearchProbeResult(
+            status=status,
+            port_config=port_config,
+            rtsp_server=rtsp_server,
+            api_server=api_server,
+            error_code=error_code,
+        )
 
     def get_face_snapshot(self, channel: int, img_id: int, frame_time: str) -> bytes:
         """Fetch one face snapshot JPEG by ``img_id`` + ``frame_time``.

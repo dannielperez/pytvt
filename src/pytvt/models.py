@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
+from enum import Enum
 
 # ── Exceptions ───────────────────────────────────────────────────────
 
@@ -256,6 +257,24 @@ class ApiServerConfig:
 
     enabled: bool
     auth_type: str  # 'Digest' or 'Basic'
+
+
+class FaceSearchApiStatus(str, Enum):
+    """Support state for the exact recorder face-event search command."""
+
+    SUPPORTED = "supported"
+    UNSUPPORTED = "unsupported"
+
+
+@dataclass(frozen=True)
+class FaceSearchProbeResult:
+    """Typed, read-only evidence collected while probing face-event search."""
+
+    status: FaceSearchApiStatus
+    port_config: PortConfig
+    rtsp_server: RtspServerConfig
+    api_server: ApiServerConfig
+    error_code: str | None = None
 
 
 @dataclass
