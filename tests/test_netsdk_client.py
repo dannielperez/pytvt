@@ -423,6 +423,35 @@ class TestSessionCapture:
         assert session.capture_jpeg(channel=7) == jpeg_data
         mock_lib.NET_SDK_CaptureJPEGFile_V2.assert_called_once()
 
+    def test_capture_jpeg_can_prefer_file_api(self, session, mock_lib):
+        jpeg_data = b"\xff\xd8file-first\xff\xd9"
+
+        def write_jpeg(handle, channel, path):
+            assert handle == 1
+            assert channel == 7
+            Path(path.decode()).write_bytes(jpeg_data)
+            return True
+
+        mock_lib.NET_SDK_CaptureJPEGFile_V2.side_effect = write_jpeg
+
+        assert session.capture_jpeg(channel=7, prefer_file=True) == jpeg_data
+        mock_lib.NET_SDK_CaptureJPEGData_V2.assert_not_called()
+
+    def test_capture_jpeg_file_preference_falls_back_to_data_api(self, session, mock_lib):
+        jpeg_data = b"\xff\xd8data-fallback\xff\xd9"
+        mock_lib.NET_SDK_CaptureJPEGFile_V2.return_value = False
+        mock_lib.NET_SDK_GetLastError.return_value = 26
+
+        def fill_jpeg(_handle, _channel, _para_ptr, buf, _buf_size, returned_ptr):
+            ct.memmove(buf, jpeg_data, len(jpeg_data))
+            returned_ptr._obj.value = len(jpeg_data)
+            return True
+
+        mock_lib.NET_SDK_CaptureJPEGData_V2.side_effect = fill_jpeg
+
+        assert session.capture_jpeg(channel=1, prefer_file=True) == jpeg_data
+        mock_lib.NET_SDK_CaptureJPEGData_V2.assert_called_once()
+
     def test_capture_jpeg_file_fallback_keeps_size_bound(self, session, mock_lib):
         mock_lib.NET_SDK_CaptureJPEGData_V2.return_value = False
         mock_lib.NET_SDK_GetLastError.return_value = 26
