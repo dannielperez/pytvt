@@ -43,9 +43,25 @@ from .http_client import (
     DeviceTimeResult,
     RtspUrlResult,
     SdkHttpClient,
+    SnapshotAttempt,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _first_failure(attempts: list[SnapshotAttempt]) -> SnapshotAttempt:
+    """Report the most specific failure across the transport legs tried.
+
+    A leg that never had a stream URL says less than one whose capture call
+    actually failed, so the latter is preferred; the first attempt is the
+    fallback so a reason is always returned.
+    """
+    for attempt in attempts:
+        if attempt.error_kind not in ("", "no_stream_url"):
+            return attempt
+    return attempts[0] if attempts else SnapshotAttempt(
+        error="No snapshot transport was attempted.", error_kind="not_attempted"
+    )
 
 
 # ── Backend enum ─────────────────────────────────────────────────────
@@ -343,29 +359,131 @@ class DeviceManager:
         falls back to the SDK/NAT (NETSDK) or HTTP snapshot. Pass
         ``prefer_rtsp=False`` to force the legacy SDK/HTTP path.
         """
-        if prefer_rtsp:
-            data = self._rtsp_snapshot(channel=channel, stream_type=stream_type, timeout=timeout)
-            if data:
-                return data
-        if self._backend == Backend.NETSDK:
-            return self._netsdk_snapshot(channel=channel)
-        return self._get_http().snapshot(
-            self._ip,
-            self._username,
-            self._password,
-            port=self._port,
+        return self.snapshot_attempt(
             channel=channel,
-        )
+            prefer_rtsp=prefer_rtsp,
+            stream_type=stream_type,
+            timeout=timeout,
+        ).image
+
+    def snapshot_attempt(
+        self,
+        *,
+        channel: int = 0,
+        prefer_rtsp: bool = True,
+        stream_type: int = 0,
+        timeout: int = 10,
+    ) -> SnapshotAttempt:
+        """Capture a JPEG snapshot, reporting WHY when it produces no image.
+
+        Same transport preference as :meth:`snapshot` — RTSP first, then the
+        SDK or HTTP path — but the reason each leg produced nothing survives
+        into the result instead of collapsing to ``None``. A caller showing an
+        operator "capture failed" can say what actually failed.
+        """
+        attempts: list[SnapshotAttempt] = []
+        if prefer_rtsp:
+            rtsp = self._rtsp_snapshot_attempt(
+                channel=channel,
+                stream_type=stream_type,
+                timeout=timeout,
+            )
+            if rtsp.image:
+                return rtsp
+            attempts.append(rtsp)
+
+        if self._backend == Backend.NETSDK:
+            netsdk = self._netsdk_snapshot_attempt(channel=channel)
+            if netsdk.image:
+                return netsdk
+            attempts.append(netsdk)
+            return _first_failure(attempts)
+
+        http = self._http_snapshot_attempt(channel=channel)
+        if http.image:
+            return http
+        attempts.append(http)
+        return _first_failure(attempts)
+
+    def _http_snapshot_attempt(self, *, channel: int = 0) -> SnapshotAttempt:
+        try:
+            data = self._get_http().snapshot(
+                self._ip,
+                self._username,
+                self._password,
+                port=self._port,
+                channel=channel,
+            )
+        except Exception as exc:
+            logger.warning(
+                "HTTP snapshot failed ip=%s channel=%s: %s: %s",
+                self._ip, channel, type(exc).__name__, exc,
+            )
+            return SnapshotAttempt(
+                method="http",
+                error=f"{type(exc).__name__}: {exc}",
+                error_kind="http_error",
+            )
+        if not data:
+            logger.warning(
+                "HTTP snapshot returned no data ip=%s channel=%s", self._ip, channel
+            )
+            return SnapshotAttempt(
+                method="http",
+                error="Device returned an empty HTTP snapshot.",
+                error_kind="empty_frame",
+            )
+        return SnapshotAttempt(image=data, method="http")
 
     def _rtsp_snapshot(self, *, channel: int = 0, stream_type: int = 0, timeout: int = 10) -> bytes | None:
         """Direct-RTSP JPEG grab via the resolved RTSP URL; ``None`` on any failure."""
+        return self._rtsp_snapshot_attempt(
+            channel=channel, stream_type=stream_type, timeout=timeout
+        ).image
+
+    def _rtsp_snapshot_attempt(
+        self, *, channel: int = 0, stream_type: int = 0, timeout: int = 10
+    ) -> SnapshotAttempt:
+        """RTSP leg, reporting which step produced no frame.
+
+        Two distinct failures used to look identical: the recorder never gave
+        us a stream URL, and it gave us one that yielded no frame. They point
+        at different problems, so they are reported apart.
+        """
         result = self.rtsp_url(channel=channel, stream_type=stream_type)
         if not result.success or not isinstance(result.rtsp_url, str) or not result.rtsp_url:
-            return None
+            detail = result.error or "Device did not return an RTSP URL."
+            logger.info(
+                "RTSP url unavailable ip=%s channel=%s: %s", self._ip, channel, detail
+            )
+            return SnapshotAttempt(
+                method="rtsp", error=str(detail), error_kind="no_stream_url"
+            )
         # Lazy import avoids pulling the NVR XML/HTTP module at device_sdk load.
         from ..xml_api import rtsp_snapshot_bytes
 
-        return rtsp_snapshot_bytes(result.rtsp_url, timeout=timeout)
+        try:
+            data = rtsp_snapshot_bytes(result.rtsp_url, timeout=timeout)
+        except Exception as exc:
+            logger.warning(
+                "RTSP frame grab failed ip=%s channel=%s: %s: %s",
+                self._ip, channel, type(exc).__name__, exc,
+            )
+            return SnapshotAttempt(
+                method="rtsp",
+                error=f"{type(exc).__name__}: {exc}",
+                error_kind="rtsp_error",
+            )
+        if not data:
+            logger.info(
+                "RTSP stream yielded no frame ip=%s channel=%s", self._ip, channel
+            )
+            return SnapshotAttempt(
+                method="rtsp",
+                error="RTSP stream yielded no frame.",
+                error_kind="empty_frame",
+            )
+        return SnapshotAttempt(image=data, method="rtsp")
 
     def rtsp_url(self, *, channel: int = 0, stream_type: int = 0) -> RtspUrlResult:
         """Get RTSP stream URL for a channel."""
@@ -472,11 +590,50 @@ class DeviceManager:
             return DeviceTimeResult(success=False, error=str(e))
 
     def _netsdk_snapshot(self, *, channel: int = 0) -> bytes | None:
+        return self._netsdk_snapshot_attempt(channel=channel).image
+
+    def _netsdk_snapshot_attempt(self, *, channel: int = 0) -> SnapshotAttempt:
+        """NETSDK leg, preserving the vendor error instead of discarding it.
+
+        This bare ``except`` used to return ``None``, so a failed login, an
+        unsupported capability and a socket timeout all reached the caller as
+        "no image" — indistinguishable from a recorder with nothing to send,
+        and invisible to anything but a stack trace nobody logged.
+        """
         try:
             session = self._get_netsdk_session()
-            return session.capture_jpeg(channel)
-        except Exception:
-            return None
+        except Exception as exc:
+            logger.warning(
+                "NETSDK session unavailable ip=%s channel=%s: %s: %s",
+                self._ip, channel, type(exc).__name__, exc,
+            )
+            return SnapshotAttempt(
+                method="netsdk",
+                error=f"{type(exc).__name__}: {exc}",
+                error_kind="session_error",
+            )
+        try:
+            data = session.capture_jpeg(channel)
+        except Exception as exc:
+            logger.warning(
+                "NETSDK capture failed ip=%s channel=%s: %s: %s",
+                self._ip, channel, type(exc).__name__, exc,
+            )
+            return SnapshotAttempt(
+                method="netsdk",
+                error=f"{type(exc).__name__}: {exc}",
+                error_kind="sdk_error",
+            )
+        if not data:
+            logger.info(
+                "NETSDK capture returned no data ip=%s channel=%s", self._ip, channel
+            )
+            return SnapshotAttempt(
+                method="netsdk",
+                error="Recorder returned an empty JPEG buffer.",
+                error_kind="empty_frame",
+            )
+        return SnapshotAttempt(image=data, method="netsdk")
 
     def _netsdk_rtsp_url(self, *, channel: int = 0, stream_type: int = 0) -> RtspUrlResult:
         try:

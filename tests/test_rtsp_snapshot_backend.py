@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from pytvt import xml_api
-from pytvt.device_sdk.http_client import RtspUrlResult
+from pytvt.device_sdk.http_client import RtspUrlResult, SnapshotAttempt
 from pytvt.device_sdk.manager import Backend, DeviceManager
 
 CREDS = dict(ip="10.0.0.1", username="admin", password="pass123")
@@ -115,7 +115,14 @@ class TestManagerSnapshotPrefersRtsp:
         with (
             patch.object(mgr, "rtsp_url", return_value=ok_url),
             patch.object(xml_api, "rtsp_snapshot_bytes", return_value=None),
-            patch.object(mgr, "_netsdk_snapshot", return_value=JPEG) as netsdk,
+            # The NETSDK leg now reports WHY it produced no image, so the seam
+            # snapshot() reaches is the attempt-returning helper. _netsdk_snapshot
+            # remains as the bytes|None form for direct callers.
+            patch.object(
+                mgr,
+                "_netsdk_snapshot_attempt",
+                return_value=SnapshotAttempt(image=JPEG, method="netsdk"),
+            ) as netsdk,
         ):
             out = mgr.snapshot(channel=1)
         assert out == JPEG
