@@ -188,6 +188,12 @@ def bind(lib: ct.CDLL) -> None:
         ct.c_uint,  # dwPicSize (buf len)
         ct.POINTER(ct.c_uint),  # lpSizeReturned
     ]
+    lib.NET_SDK_CaptureJPEGFile_V2.restype = ct.c_bool
+    lib.NET_SDK_CaptureJPEGFile_V2.argtypes = [
+        ct.c_long,  # lUserID
+        ct.c_long,  # lChannel
+        ct.c_char_p,  # sPicFileName
+    ]
 
     # ── PTZ ─────────────────────────────────────────────────────
     lib.NET_SDK_PTZControl_Other.restype = ct.c_bool

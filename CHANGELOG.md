@@ -111,6 +111,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Recorder-compatible JPEG capture fallback** (`device_sdk/{bindings,client}.py`).
+  `DeviceSession.capture_jpeg()` now falls back from the in-memory
+  `NET_SDK_CaptureJPEGData_V2` call to the SDK's bounded, temporary-file
+  `NET_SDK_CaptureJPEGFile_V2` path. Some TVT recorder/firmware combinations
+  reject the memory API while supporting the file API; callers keep the same
+  bytes-returning interface and configured maximum-size bound.
 - **Plate-event lifecycle hardening** (`device_sdk/client.py`,
   `device_sdk/plate_events.py`). Failed unsubscribe now preserves the live session
   handle for retry; multi-target registration has a finite aggregate setup deadline;
