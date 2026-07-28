@@ -20,7 +20,7 @@ import pytest
 from pytvt import AlarmServer
 from pytvt.alarm_protocol import TVT_ALARM_CODES
 from pytvt.alarm_server import AlarmServerCapacityError
-from pytvt.models import FaceEvent, parse_face_event_timestamp
+from pytvt.models import FaceEvent, FaceSearchApiStatus, NvrApiError, parse_face_event_timestamp
 from pytvt.xml_api import NvrClient
 
 
@@ -256,6 +256,104 @@ class TestSearchFaceEvents:
         assert '<item id="{00000009-0000-0000-0000-000000000000}">' in sent["body"]
         assert "<eventType>byAll</eventType>" in sent["body"]
         assert "<similarity>80</similarity>" in sent["body"]
+
+
+class TestProbeFaceSearch:
+    @staticmethod
+    def _response(path):
+        responses = {
+            "queryNetPortCfg": (
+                "<response><status>success</status><content>"
+                "<httpPort>80</httpPort><httpsPort>443</httpsPort>"
+                "<netPort>6036</netPort><rtspPort>8554</rtspPort>"
+                "<posPort>9036</posPort><autoReportPort>2009</autoReportPort>"
+                "</content></response>"
+            ),
+            "queryRTSPServer": (
+                "<response><status>success</status><content>"
+                "<rtspServerSwitch>true</rtspServerSwitch><rtspPort>8554</rtspPort>"
+                "<rtspAuthType>Digest</rtspAuthType><anonymousAccess>false</anonymousAccess>"
+                "</content></response>"
+            ),
+            "queryApiServer": (
+                "<response><status>success</status><content>"
+                "<apiserverSwitch>true</apiserverSwitch>"
+                "<authenticationType>Digest</authenticationType>"
+                "</content></response>"
+            ),
+        }
+        return responses[path]
+
+    def test_supported_result_includes_port_rtsp_and_api_state(self):
+        client = _client()
+        paths = []
+
+        def fake_post(path, body):
+            paths.append(path)
+            if path == "searchImageByImageV2":
+                assert "<resultLimit>1</resultLimit>" in body
+                return '<response><status>success</status><content type="list" total="0"/></response>'
+            return self._response(path)
+
+        client._post = fake_post
+
+        result = client.probe_face_search(
+            9,
+            "2026-07-28 09:00:00",
+            "2026-07-28 09:00:01",
+        )
+
+        assert result.status is FaceSearchApiStatus.SUPPORTED
+        assert result.error_code is None
+        assert result.port_config.server_port == 6036
+        assert result.port_config.rtsp_port == 8554
+        assert result.rtsp_server.enabled is True
+        assert result.rtsp_server.port == 8554
+        assert result.api_server.enabled is True
+        assert paths == [
+            "queryNetPortCfg",
+            "queryRTSPServer",
+            "queryApiServer",
+            "searchImageByImageV2",
+        ]
+
+    def test_field_proven_rejection_is_typed_unsupported(self):
+        client = _client()
+
+        def fake_post(path, body):
+            if path == "searchImageByImageV2":
+                return "<response><status>fail</status><errorCode>536870934</errorCode></response>"
+            return self._response(path)
+
+        client._post = fake_post
+
+        result = client.probe_face_search(
+            9,
+            "2026-07-28 09:00:00",
+            "2026-07-28 09:00:01",
+        )
+
+        assert result.status is FaceSearchApiStatus.UNSUPPORTED
+        assert result.error_code == "536870934"
+
+    def test_unknown_rejection_is_not_misclassified(self):
+        client = _client()
+
+        def fake_post(path, body):
+            if path == "searchImageByImageV2":
+                return "<response><status>fail</status><errorCode>536870999</errorCode></response>"
+            return self._response(path)
+
+        client._post = fake_post
+
+        with pytest.raises(NvrApiError) as exc_info:
+            client.probe_face_search(
+                9,
+                "2026-07-28 09:00:00",
+                "2026-07-28 09:00:01",
+            )
+
+        assert exc_info.value.error_code == "536870999"
 
 
 class TestGetFaceSnapshot:
