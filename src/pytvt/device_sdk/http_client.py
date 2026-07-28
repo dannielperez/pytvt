@@ -64,6 +64,29 @@ class RtspUrlResult:
 
 
 @dataclass(frozen=True)
+class SnapshotAttempt:
+    """One snapshot attempt, including WHY it produced no image.
+
+    ``Manager.snapshot`` returns ``bytes | None`` and cannot distinguish a
+    recorder that genuinely has no frame from a failed login, an unsupported
+    capability, or a transport timeout — every one of them arrives as ``None``.
+    Callers that surface a reason to an operator need this instead.
+
+    ``error_kind`` is a stable, machine-comparable token; ``error`` is the
+    human-readable detail and may contain vendor text.
+    """
+
+    image: bytes | None = None
+    method: str = ""
+    error: str = ""
+    error_kind: str = ""
+
+    @property
+    def success(self) -> bool:
+        return bool(self.image)
+
+
+@dataclass(frozen=True)
 class CommandResult:
     """Generic success/error for simple commands (reboot, ptz, etc.)."""
 
