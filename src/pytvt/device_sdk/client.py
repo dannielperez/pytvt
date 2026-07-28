@@ -29,6 +29,8 @@ from collections.abc import Callable, Iterable
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Literal
 
 from . import bindings as sdk
@@ -813,18 +815,49 @@ class DeviceSession:
         para = NET_SDK_JPEGPARA(wPicSize=pic_size, wPicQuality=pic_quality)
         buf = ct.create_string_buffer(buf_size)
         returned = ct.c_uint(0)
-        self._check(
-            sdk._lib.NET_SDK_CaptureJPEGData_V2(  # type: ignore[union-attr]
-                self._handle,
-                channel,
-                ct.byref(para),
-                buf,
-                buf_size,
-                ct.byref(returned),
-            ),
-            "CaptureJPEGData_V2",
-        )
-        return buf.raw[: returned.value]
+        try:
+            self._check(
+                sdk._lib.NET_SDK_CaptureJPEGData_V2(  # type: ignore[union-attr]
+                    self._handle,
+                    channel,
+                    ct.byref(para),
+                    buf,
+                    buf_size,
+                    ct.byref(returned),
+                ),
+                "CaptureJPEGData_V2",
+            )
+            return buf.raw[: returned.value]
+        except NetSdkError as data_error:
+            # Some TVT recorder/firmware combinations reject the in-memory
+            # capture function while supporting the SDK's file-based variant.
+            # Keep this compatibility fallback inside pytvt so every caller
+            # gets the same vendor behavior and HTTP bridges stay transport-only.
+            capture_file = self._require("NET_SDK_CaptureJPEGFile_V2")
+            try:
+                with TemporaryDirectory(prefix="pytvt-snapshot-") as directory:
+                    snapshot_path = Path(directory) / f"channel-{channel}.jpg"
+                    self._check(
+                        capture_file(
+                            self._handle,
+                            channel,
+                            str(snapshot_path).encode("utf-8"),
+                        ),
+                        "CaptureJPEGFile_V2",
+                    )
+                    size = snapshot_path.stat().st_size
+                    if size > buf_size:
+                        raise NetSdkError(
+                            "CaptureJPEGFile_V2 snapshot exceeds configured byte limit",
+                        )
+                    return snapshot_path.read_bytes()
+            except (NetSdkCapabilityError, NetSdkError):
+                raise
+            except OSError as file_error:
+                raise NetSdkError(
+                    "CaptureJPEGFile_V2 did not produce a readable snapshot "
+                    f"after CaptureJPEGData_V2 failed: {data_error}",
+                ) from file_error
 
     # ── PTZ control ─────────────────────────────────────────────
 

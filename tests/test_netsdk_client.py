@@ -5,6 +5,7 @@ from __future__ import annotations
 import ctypes as ct
 import re
 from datetime import datetime
+from pathlib import Path
 from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
@@ -404,6 +405,36 @@ class TestSessionCapture:
         result = session.capture_jpeg(channel=0)
         assert result[:4] == b"\xff\xd8\xff\xe0"
         assert len(result) == len(jpeg_data)
+        mock_lib.NET_SDK_CaptureJPEGFile_V2.assert_not_called()
+
+    def test_capture_jpeg_falls_back_to_file_api(self, session, mock_lib):
+        jpeg_data = b"\xff\xd8file-fallback\xff\xd9"
+        mock_lib.NET_SDK_CaptureJPEGData_V2.return_value = False
+        mock_lib.NET_SDK_GetLastError.return_value = 26
+
+        def write_jpeg(handle, channel, path):
+            assert handle == 1
+            assert channel == 7
+            Path(path.decode()).write_bytes(jpeg_data)
+            return True
+
+        mock_lib.NET_SDK_CaptureJPEGFile_V2.side_effect = write_jpeg
+
+        assert session.capture_jpeg(channel=7) == jpeg_data
+        mock_lib.NET_SDK_CaptureJPEGFile_V2.assert_called_once()
+
+    def test_capture_jpeg_file_fallback_keeps_size_bound(self, session, mock_lib):
+        mock_lib.NET_SDK_CaptureJPEGData_V2.return_value = False
+        mock_lib.NET_SDK_GetLastError.return_value = 26
+
+        def write_oversized_jpeg(_handle, _channel, path):
+            Path(path.decode()).write_bytes(b"x" * 17)
+            return True
+
+        mock_lib.NET_SDK_CaptureJPEGFile_V2.side_effect = write_oversized_jpeg
+
+        with pytest.raises(NetSdkError, match="exceeds configured byte limit"):
+            session.capture_jpeg(channel=1, buf_size=16)
 
 
 # ── DeviceSession.ptz ──────────────────────────────────────────────
