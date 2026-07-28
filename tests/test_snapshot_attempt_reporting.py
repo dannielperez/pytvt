@@ -65,9 +65,7 @@ class TestNetsdkLegReportsTheVendorError:
         # call that ran and failed, so the kinds differ.
         mgr = _manager()
 
-        with patch.object(
-            mgr, "_get_netsdk_session", side_effect=OSError("connection refused")
-        ):
+        with patch.object(mgr, "_get_netsdk_session", side_effect=OSError("connection refused")):
             attempt = mgr._netsdk_snapshot_attempt(channel=3)
 
         assert attempt.error_kind == "session_error"
@@ -113,7 +111,10 @@ class TestRtspLegSeparatesItsTwoFailures:
         mgr = _manager()
         result = RtspUrlResult(success=True, rtsp_url=RTSP)
 
-        with patch.object(mgr, "rtsp_url", return_value=result), patch.object(xml_api, "rtsp_snapshot_bytes", return_value=b""):
+        with (
+            patch.object(mgr, "rtsp_url", return_value=result),
+            patch.object(xml_api, "rtsp_snapshot_bytes", return_value=b""),
+        ):
             attempt = mgr._rtsp_snapshot_attempt(channel=1)
 
         assert attempt.error_kind == "empty_frame"
@@ -122,8 +123,9 @@ class TestRtspLegSeparatesItsTwoFailures:
         mgr = _manager()
         result = RtspUrlResult(success=True, rtsp_url=RTSP)
 
-        with patch.object(mgr, "rtsp_url", return_value=result), patch.object(
-            xml_api, "rtsp_snapshot_bytes", side_effect=TimeoutError("ffmpeg timed out")
+        with (
+            patch.object(mgr, "rtsp_url", return_value=result),
+            patch.object(xml_api, "rtsp_snapshot_bytes", side_effect=TimeoutError("ffmpeg timed out")),
         ):
             attempt = mgr._rtsp_snapshot_attempt(channel=1)
 
@@ -142,9 +144,10 @@ class TestFallbackReportsTheMostSpecificReason:
         session = MagicMock()
         session.capture_jpeg.side_effect = RuntimeError("capability not supported")
 
-        with patch.object(
-            mgr, "rtsp_url", return_value=RtspUrlResult(success=False, error="no url")
-        ), patch.object(mgr, "_get_netsdk_session", return_value=session):
+        with (
+            patch.object(mgr, "rtsp_url", return_value=RtspUrlResult(success=False, error="no url")),
+            patch.object(mgr, "_get_netsdk_session", return_value=session),
+        ):
             attempt = mgr.snapshot_attempt(channel=2)
 
         assert attempt.error_kind == "sdk_error"
@@ -153,9 +156,10 @@ class TestFallbackReportsTheMostSpecificReason:
     def test_a_working_rtsp_leg_short_circuits(self):
         mgr = _manager()
 
-        with patch.object(
-            mgr, "rtsp_url", return_value=RtspUrlResult(success=True, rtsp_url=RTSP)
-        ), patch.object(xml_api, "rtsp_snapshot_bytes", return_value=JPEG):
+        with (
+            patch.object(mgr, "rtsp_url", return_value=RtspUrlResult(success=True, rtsp_url=RTSP)),
+            patch.object(xml_api, "rtsp_snapshot_bytes", return_value=JPEG),
+        ):
             attempt = mgr.snapshot_attempt(channel=1)
 
         assert attempt.image == JPEG
@@ -170,9 +174,10 @@ class TestBackwardCompatibility:
         session = MagicMock()
         session.capture_jpeg.return_value = JPEG
 
-        with patch.object(
-            mgr, "rtsp_url", return_value=RtspUrlResult(success=False)
-        ), patch.object(mgr, "_get_netsdk_session", return_value=session):
+        with (
+            patch.object(mgr, "rtsp_url", return_value=RtspUrlResult(success=False)),
+            patch.object(mgr, "_get_netsdk_session", return_value=session),
+        ):
             assert mgr.snapshot(channel=0) == JPEG
 
     def test_snapshot_still_returns_none_on_failure(self):
@@ -180,9 +185,10 @@ class TestBackwardCompatibility:
         session = MagicMock()
         session.capture_jpeg.side_effect = RuntimeError("boom")
 
-        with patch.object(
-            mgr, "rtsp_url", return_value=RtspUrlResult(success=False)
-        ), patch.object(mgr, "_get_netsdk_session", return_value=session):
+        with (
+            patch.object(mgr, "rtsp_url", return_value=RtspUrlResult(success=False)),
+            patch.object(mgr, "_get_netsdk_session", return_value=session),
+        ):
             assert mgr.snapshot(channel=0) is None
 
     def test_legacy_private_helpers_still_return_bytes_or_none(self):
