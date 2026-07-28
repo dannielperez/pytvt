@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Add an opt-in file-first NetSDK JPEG path for legacy recorder firmware where
+  `NET_SDK_CaptureJPEGData_V2` can block instead of returning an error. Process-isolated
+  callers can now prefer `NET_SDK_CaptureJPEGFile_V2` while existing callers retain the
+  in-memory-first default.
+
 ### Added
 
 - **NVR-side face detection / recognition over the web CGI API**
