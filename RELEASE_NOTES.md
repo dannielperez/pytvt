@@ -9,7 +9,8 @@ Correct NetSDK connection retry semantics and faster still-frame capture.
   controlled a receive timeout and is retained temporarily as a deprecated,
   ignored compatibility argument.
 - `connect_retry_count` defaults to the vendor-documented value of three and is
-  bounded to 1–10.
+  bounded to 1–10. Connection waits of 300 ms or less are rejected instead of
+  being forwarded as unsupported vendor configuration.
 - Camera-direct RTSP resolution can use the HTTP/XML client before native
   login, and the one-frame ffmpeg path avoids unnecessary stream probing.
 
