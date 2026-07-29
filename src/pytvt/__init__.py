@@ -36,7 +36,7 @@ native SDK bindings. It still requires a local vendor SDK installation, but it
 no longer depends on Node.js or any bridge scripts.
 """
 
-__version__ = "1.2.1"
+__version__ = "1.3.0"
 
 from . import workflows  # Provisional — technician-facing workflow orchestrations.
 from .alarm_protocol import ParsedAlarmFrame, parse_alarm_frame
@@ -44,7 +44,15 @@ from .alarm_server import AlarmServer, AlarmServerCapacityError
 from .config import load_config
 from .connection_pool import ConnectionPool, PoolStats, SessionMetrics, SessionResult, connect_many
 from .constants import BackendFamily, CompositeStrategy, ExecutionPlan, IntegrationMode, resolve_backend
-from .device_sdk.http_client import CommandResult, DeviceInfoResult, DeviceTimeResult, RtspUrlResult, SdkHttpClient
+from .device_sdk.http_client import (
+    CommandResult,
+    DeviceInfoResult,
+    DeviceTimeResult,
+    FaceCaptureImageResult,
+    FaceCaptureSearchResult,
+    RtspUrlResult,
+    SdkHttpClient,
+)
 from .device_sdk.manager import Backend, DeviceManager, NoBackendAvailable, available_backends
 from .diff import DeviceDiff, ScanDiff, diff_scans, load_scan_file
 from .exceptions import BackendError, PytvtError, RegistryError
@@ -157,6 +165,8 @@ __all__ = [
     "CommandResult",
     "DeviceInfoResult",
     "DeviceTimeResult",
+    "FaceCaptureImageResult",
+    "FaceCaptureSearchResult",
     "RtspUrlResult",
     # Unified device manager (auto backend selection)
     "DeviceManager",

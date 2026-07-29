@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import ctypes as ct
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, PropertyMock, patch
 
@@ -26,6 +26,8 @@ from pytvt.device_sdk.client import (
     IpcInfo,
     LogEntry,
     MotionConfig,
+    NativeFaceCapture,
+    NativeFaceCapturePage,
     NatLoginFailed,
     NatTimeoutError,
     NatUnavailableError,
@@ -58,12 +60,16 @@ from pytvt.device_sdk.constants import (
 from pytvt.device_sdk.loader import NetSdkUnavailable
 from pytvt.device_sdk.types import (
     DD_TIME,
+    DD_TIME_EX,
     NET_SDK_ALRAM_OUT_STATUS,
     NET_SDK_CH_DEVICE_STATUS,
+    NET_SDK_CH_SNAP_FACE_IMG_LIST,
     NET_SDK_DEV_SUPPORT,
     NET_SDK_DEVICE_DISCOVERY_INFO,
     NET_SDK_DEVICEINFO,
     NET_SDK_DISK_INFO,
+    NET_SDK_FACE_IMG_INFO_CH,
+    NET_SDK_FACE_INFO_IMG_DATA,
     NET_SDK_IPC_DEVICE_INFO,
     NET_SDK_JPEGPARA,
     NET_SDK_LOG,
@@ -1010,9 +1016,231 @@ class TestPackageExports:
         import pytvt.device_sdk as pkg
         from pytvt.device_sdk import client as client_mod
 
-        for name in ("EncodeStream", "MotionConfig", "NodeEncodeInfo", "RecordSchedule", "NetSdkError"):
+        for name in (
+            "EncodeStream",
+            "MotionConfig",
+            "NativeFaceCapture",
+            "NativeFaceCapturePage",
+            "NodeEncodeInfo",
+            "RecordSchedule",
+            "NetSdkError",
+        ):
             assert name in pkg.__all__
             assert getattr(pkg, name) is getattr(client_mod, name)
+
+
+class TestNativeFaceCaptureSearch:
+    def test_capture_model_rejects_ambiguous_or_wrapping_values(self):
+        with pytest.raises(ValueError, match="recorder-local"):
+            NativeFaceCapture(0, datetime(2026, 7, 28, tzinfo=timezone.utc), 0, 1, 0, False)
+        with pytest.raises(ValueError, match="device_time_ticks"):
+            NativeFaceCapture(0, datetime(2026, 7, 28), 10_000_000, 1, 0, False)
+        with pytest.raises(ValueError, match="snapshot_image_id"):
+            NativeFaceCapture(0, datetime(2026, 7, 28), 0, -1, 0, False)
+
+    def test_search_copies_vendor_owned_results(self, session, mock_lib):
+        native_items = (NET_SDK_FACE_IMG_INFO_CH * 2)()
+        native_items[0].frameTime = DD_TIME_EX.from_datetime(datetime(2026, 7, 28, 13, 4, 5, 123456))
+        native_items[0].snapImgId = 41
+        native_items[0].targetImgId = 7
+        native_items[0].chl = 6
+        native_items[1].frameTime = DD_TIME_EX.from_datetime(datetime(2026, 7, 28, 13, 5, 6))
+        native_items[1].snapImgId = 42
+        native_items[1].chl = 6
+        native_items[1].isPanorama = 1
+        mock_lib._face_items = native_items
+
+        def fill(handle, command, query_ptr, query_size, output, output_size, returned_ptr):
+            assert handle == 1
+            assert command == 0x0E
+            query = query_ptr._obj
+            assert query.dwChannel == 6
+            assert query.startTime.to_datetime() == datetime(2026, 7, 28, 12)
+            assert query.endTime.to_datetime() == datetime(2026, 7, 28, 14)
+            assert query.pageIndex == 2
+            assert query.pageSize == 10
+            result = ct.cast(output, ct.POINTER(NET_SDK_CH_SNAP_FACE_IMG_LIST)).contents
+            result.bEnd = 1
+            result.listNum = 2
+            result.pCHFaceImgItem = ct.cast(native_items, ct.POINTER(NET_SDK_FACE_IMG_INFO_CH))
+            returned_ptr._obj.value = ct.sizeof(NET_SDK_CH_SNAP_FACE_IMG_LIST)
+            return True
+
+        mock_lib.NET_SDK_FaceMatchOperate.side_effect = fill
+        result = session.search_face_captures(
+            6,
+            datetime(2026, 7, 28, 12),
+            datetime(2026, 7, 28, 14),
+            page=2,
+            page_size=10,
+        )
+
+        assert result == NativeFaceCapturePage(
+            captures=(
+                NativeFaceCapture(
+                    _native_channel=6,
+                    captured_at_device=datetime(2026, 7, 28, 13, 4, 5, 123456),
+                    device_time_ticks=1_234_560,
+                    snapshot_image_id=41,
+                    target_image_id=7,
+                    panorama=False,
+                ),
+                NativeFaceCapture(
+                    _native_channel=6,
+                    captured_at_device=datetime(2026, 7, 28, 13, 5, 6),
+                    device_time_ticks=0,
+                    snapshot_image_id=42,
+                    target_image_id=0,
+                    panorama=True,
+                ),
+            ),
+            complete=True,
+            page=2,
+        )
+
+        # The result is Python-owned; later mutation of the native array cannot
+        # change an already-returned capture.
+        native_items[0].snapImgId = 999
+        assert result.captures[0].snapshot_image_id == 41
+
+    def test_deleted_channel_sentinel_is_not_exposed_as_a_route(self, session, mock_lib):
+        native_items = (NET_SDK_FACE_IMG_INFO_CH * 1)()
+        native_items[0].frameTime = DD_TIME_EX.from_datetime(datetime(2026, 7, 28, 13))
+        native_items[0].snapImgId = 41
+        native_items[0].chl = 255
+        mock_lib._face_items = native_items
+
+        def fill(handle, command, query_ptr, query_size, output, output_size, returned_ptr):
+            result = ct.cast(output, ct.POINTER(NET_SDK_CH_SNAP_FACE_IMG_LIST)).contents
+            result.listNum = 1
+            result.pCHFaceImgItem = ct.cast(native_items, ct.POINTER(NET_SDK_FACE_IMG_INFO_CH))
+            returned_ptr._obj.value = ct.sizeof(NET_SDK_CH_SNAP_FACE_IMG_LIST)
+            return True
+
+        mock_lib.NET_SDK_FaceMatchOperate.side_effect = fill
+        capture = session.search_face_captures(
+            6,
+            datetime(2026, 7, 28, 12),
+            datetime(2026, 7, 28, 14),
+        ).captures[0]
+
+        assert capture.channel_index is None
+        assert capture.channel_deleted is True
+        assert "255" not in repr(capture)
+
+    @pytest.mark.parametrize(
+        ("channel", "start", "end", "page", "page_size", "message"),
+        [
+            (-1, datetime(2026, 7, 28), datetime(2026, 7, 28), 1, 10, "channel"),
+            (True, datetime(2026, 7, 28), datetime(2026, 7, 28), 1, 10, "channel"),
+            (255, datetime(2026, 7, 28), datetime(2026, 7, 28), 1, 10, "channel"),
+            (0, datetime(2026, 7, 29), datetime(2026, 7, 28), 1, 10, "start"),
+            (0, datetime(2026, 7, 28), datetime(2026, 7, 28), 0, 10, "page"),
+            (0, datetime(2026, 7, 28), datetime(2026, 7, 28), 1, 101, "page_size"),
+        ],
+    )
+    def test_search_rejects_unsafe_input(self, session, channel, start, end, page, page_size, message):
+        with pytest.raises(ValueError, match=message):
+            session.search_face_captures(channel, start, end, page=page, page_size=page_size)
+
+    def test_search_rejects_timezone_aware_window(self, session):
+        with pytest.raises(ValueError, match="recorder-local"):
+            session.search_face_captures(
+                0,
+                datetime(2026, 7, 28, tzinfo=timezone.utc),
+                datetime(2026, 7, 29, tzinfo=timezone.utc),
+            )
+
+    def test_search_rejects_oversized_vendor_count(self, session, mock_lib):
+        def fill(handle, command, query_ptr, query_size, output, output_size, returned_ptr):
+            result = ct.cast(output, ct.POINTER(NET_SDK_CH_SNAP_FACE_IMG_LIST)).contents
+            result.listNum = 11
+            returned_ptr._obj.value = ct.sizeof(NET_SDK_CH_SNAP_FACE_IMG_LIST)
+            return True
+
+        mock_lib.NET_SDK_FaceMatchOperate.side_effect = fill
+        with pytest.raises(NetSdkError, match="more entries"):
+            session.search_face_captures(
+                0,
+                datetime(2026, 7, 28),
+                datetime(2026, 7, 29),
+                page_size=10,
+            )
+
+    def test_search_rejects_truncated_success_header(self, session, mock_lib):
+        def fill(handle, command, query_ptr, query_size, output, output_size, returned_ptr):
+            returned_ptr._obj.value = ct.sizeof(NET_SDK_CH_SNAP_FACE_IMG_LIST) - 1
+            return True
+
+        mock_lib.NET_SDK_FaceMatchOperate.side_effect = fill
+        with pytest.raises(NetSdkError, match="truncated result header"):
+            session.search_face_captures(
+                0,
+                datetime(2026, 7, 28),
+                datetime(2026, 7, 29),
+            )
+
+    def test_get_image_copies_bytes_and_preserves_native_identity(self, session, mock_lib):
+        capture = NativeFaceCapture(
+            _native_channel=6,
+            captured_at_device=datetime(2026, 7, 28, 13, 4, 5, 123456),
+            device_time_ticks=1_234_567,
+            snapshot_image_id=41,
+            target_image_id=7,
+            panorama=False,
+        )
+        image = ct.create_string_buffer(b"\xff\xd8face-jpeg\xff\xd9")
+        mock_lib._face_image = image
+
+        def fill(handle, command, input_ptr, input_size, output, output_size, returned_ptr):
+            assert command == 0x0F
+            native = input_ptr._obj
+            assert native.chl == 6
+            assert native.snapImgId == 41
+            assert native.targetImgId == 7
+            assert native.frameTime.nMicrosecond == 1_234_567
+            result = ct.cast(output, ct.POINTER(NET_SDK_FACE_INFO_IMG_DATA)).contents
+            result.imgLen = len(image.raw) - 1
+            result.grade = 97
+            result.imgData = ct.cast(image, ct.POINTER(ct.c_ubyte))
+            returned_ptr._obj.value = ct.sizeof(NET_SDK_FACE_INFO_IMG_DATA)
+            return True
+
+        mock_lib.NET_SDK_FaceMatchOperate.side_effect = fill
+        copied = session.get_face_capture_image(capture)
+
+        assert copied == b"\xff\xd8face-jpeg\xff\xd9"
+        image[2] = b"X"
+        assert copied == b"\xff\xd8face-jpeg\xff\xd9"
+
+    def test_get_image_rejects_oversized_vendor_payload(self, session, mock_lib):
+        capture = NativeFaceCapture(0, datetime(2026, 7, 28), 0, 1, 0, False)
+
+        def fill(handle, command, input_ptr, input_size, output, output_size, returned_ptr):
+            result = ct.cast(output, ct.POINTER(NET_SDK_FACE_INFO_IMG_DATA)).contents
+            result.imgLen = 11
+            returned_ptr._obj.value = ct.sizeof(NET_SDK_FACE_INFO_IMG_DATA)
+            return True
+
+        mock_lib.NET_SDK_FaceMatchOperate.side_effect = fill
+        with pytest.raises(NetSdkError, match="exceeds configured"):
+            session.get_face_capture_image(capture, max_image_bytes=10)
+
+    def test_get_image_rejects_truncated_success_header(self, session, mock_lib):
+        capture = NativeFaceCapture(0, datetime(2026, 7, 28), 0, 1, 0, False)
+
+        def fill(handle, command, input_ptr, input_size, output, output_size, returned_ptr):
+            returned_ptr._obj.value = ct.sizeof(NET_SDK_FACE_INFO_IMG_DATA) - 1
+            return True
+
+        mock_lib.NET_SDK_FaceMatchOperate.side_effect = fill
+        with pytest.raises(NetSdkError, match="truncated result header"):
+            session.get_face_capture_image(capture)
+
+    def test_missing_face_symbol_is_a_capability_error(self, session, mock_lib):
+        mock_lib.NET_SDK_FaceMatchOperate = None
+        with pytest.raises(NetSdkCapabilityError, match="FaceMatchOperate"):
+            session.search_face_captures(0, datetime(2026, 7, 28), datetime(2026, 7, 29))
 
 
 # ══════════════════════════════════════════════════════════════════

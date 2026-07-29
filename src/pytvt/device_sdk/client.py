@@ -27,7 +27,7 @@ import time
 import weakref
 from collections.abc import Callable, Iterable
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -38,6 +38,7 @@ from .constants import (
     ConnectType,
     DiskProperty,
     DiskStatus,
+    FaceMatchCommand,
     PtzCommand,
     PtzSpeed,
     RecordType,
@@ -64,15 +65,20 @@ from .types import (
     CALL_RECORD_QUERY_PARAM,
     CLOUD_UPGRADE_INFO,
     DD_TIME,
+    DD_TIME_EX,
     NET_DVR_IVE_POINT_T,
     NET_DVR_SUBSCRIBE_REPLY,
     NET_SDK_ALRAM_OUT_STATUS,
     NET_SDK_CH_DEVICE_STATUS,
+    NET_SDK_CH_SNAP_FACE_IMG_LIST,
+    NET_SDK_CH_SNAP_FACE_IMG_LIST_SEARCH,
     NET_SDK_DEV_SUPPORT,
     NET_SDK_DEVICE_DISCOVERY_INFO,
     NET_SDK_DEVICE_IP_INFO,
     NET_SDK_DEVICEINFO,
     NET_SDK_DISK_INFO,
+    NET_SDK_FACE_IMG_INFO_CH,
+    NET_SDK_FACE_INFO_IMG_DATA,
     NET_SDK_IPC_DEVICE_INFO,
     NET_SDK_JPEGPARA,
     NET_SDK_LOG,
@@ -166,6 +172,86 @@ class IpcInfo:
     name: str
     online: bool
     poe: bool
+
+
+@dataclass(frozen=True, slots=True)
+class NativeFaceCapture:
+    """Typed index entry for a face image stored by a legacy NVR.
+
+    ``captured_at_device`` is deliberately naive: the NetSDK result contains
+    the recorder wall clock but no UTC offset. Consumers must attach the
+    device/site timezone or use their own receipt time; pytvt will not silently
+    reinterpret it in the bridge/container timezone.
+    """
+
+    _native_channel: int = field(repr=False)
+    channel_index: int | None = field(init=False)
+    channel_deleted: bool = field(init=False)
+    captured_at_device: datetime
+    device_time_ticks: int
+    snapshot_image_id: int
+    target_image_id: int
+    panorama: bool
+
+    def __post_init__(self) -> None:
+        if (
+            isinstance(self._native_channel, bool)
+            or not isinstance(self._native_channel, int)
+            or not 0 <= self._native_channel <= 255
+        ):
+            raise ValueError("_native_channel must be a NetSDK identity between 0 and 255")
+        deleted = self._native_channel == 255
+        object.__setattr__(self, "channel_deleted", deleted)
+        object.__setattr__(self, "channel_index", None if deleted else self._native_channel)
+        if not isinstance(self.captured_at_device, datetime):
+            raise TypeError("captured_at_device must be a datetime")
+        if self.captured_at_device.utcoffset() is not None:
+            raise ValueError("captured_at_device must be a naive recorder-local datetime")
+        if (
+            isinstance(self.device_time_ticks, bool)
+            or not isinstance(self.device_time_ticks, int)
+            or not 0 <= self.device_time_ticks < 10_000_000
+        ):
+            raise ValueError("device_time_ticks must be between 0 and 9999999")
+        for name, value in (
+            ("snapshot_image_id", self.snapshot_image_id),
+            ("target_image_id", self.target_image_id),
+        ):
+            if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 0xFFFFFFFF:
+                raise ValueError(f"{name} must be an unsigned 32-bit integer")
+        if not isinstance(self.panorama, bool):
+            raise TypeError("panorama must be a bool")
+
+
+@dataclass(frozen=True, slots=True)
+class NativeFaceCapturePage:
+    """One bounded page of native face capture index entries."""
+
+    captures: tuple[NativeFaceCapture, ...]
+    complete: bool
+    page: int
+
+
+def _validate_face_search_input(
+    channel: int,
+    start: datetime,
+    end: datetime,
+    page: int,
+    page_size: int,
+) -> None:
+    """Keep local and HTTP face search backends on one input contract."""
+    if isinstance(channel, bool) or not isinstance(channel, int) or not 0 <= channel < 255:
+        raise ValueError("channel must be a routeable NetSDK index between 0 and 254")
+    if not isinstance(start, datetime) or not isinstance(end, datetime):
+        raise TypeError("start and end must be datetimes")
+    if start.utcoffset() is not None or end.utcoffset() is not None:
+        raise ValueError("start and end must be naive recorder-local datetimes")
+    if start > end:
+        raise ValueError("start must be before or equal to end")
+    if isinstance(page, bool) or not isinstance(page, int) or not 1 <= page <= 0xFFFFFFFF:
+        raise ValueError("page must be an unsigned 32-bit positive integer")
+    if isinstance(page_size, bool) or not isinstance(page_size, int) or not 1 <= page_size <= 100:
+        raise ValueError("page_size must be between 1 and 100")
 
 
 @dataclass(frozen=True, slots=True)
@@ -892,6 +978,130 @@ class DeviceSession:
             raise NetSdkError(
                 "CaptureJPEGFile_V2 did not produce a readable snapshot",
             ) from file_error
+
+    # ── Native face capture search ─────────────────────────────
+
+    def search_face_captures(
+        self,
+        channel: int,
+        start: datetime,
+        end: datetime,
+        *,
+        page: int = 1,
+        page_size: int = 100,
+    ) -> NativeFaceCapturePage:
+        """Search the legacy NVR's stored face captures without fetching images.
+
+        Channel numbers are NetSDK indices (0-based). ``start`` and ``end`` are
+        naive recorder-local wall-clock values because the native structure
+        carries no timezone. Results copy out every vendor-owned structure
+        before this method returns.
+        """
+        _validate_face_search_input(channel, start, end, page, page_size)
+
+        operate = self._require("NET_SDK_FaceMatchOperate")
+        query = NET_SDK_CH_SNAP_FACE_IMG_LIST_SEARCH(
+            dwChannel=channel,
+            startTime=DD_TIME_EX.from_datetime(start),
+            endTime=DD_TIME_EX.from_datetime(end),
+            pageIndex=page,
+            pageSize=page_size,
+        )
+        output_size = 100 * 1024
+        output = ct.create_string_buffer(output_size)
+        returned = ct.c_uint(0)
+        self._check(
+            operate(
+                self._handle,
+                FaceMatchCommand.SEARCH_CHANNEL_CAPTURE_LIST,
+                ct.byref(query),
+                ct.sizeof(query),
+                output,
+                output_size,
+                ct.byref(returned),
+            ),
+            "FaceMatchOperate(SEARCH_CHANNEL_CAPTURE_LIST)",
+        )
+        if returned.value > output_size:
+            raise NetSdkError("Face capture search returned an invalid byte count")
+        if returned.value < ct.sizeof(NET_SDK_CH_SNAP_FACE_IMG_LIST):
+            raise NetSdkError("Face capture search returned a truncated result header")
+
+        result = ct.cast(output, ct.POINTER(NET_SDK_CH_SNAP_FACE_IMG_LIST)).contents
+        if result.listNum > page_size:
+            raise NetSdkError("Face capture search returned more entries than requested")
+        if result.listNum and not result.pCHFaceImgItem:
+            raise NetSdkError("Face capture search returned a null item pointer")
+
+        captures: list[NativeFaceCapture] = []
+        for index in range(result.listNum):
+            native = result.pCHFaceImgItem[index]
+            captured_at = native.frameTime.to_datetime().replace(
+                microsecond=min(native.frameTime.nMicrosecond // 10, 999_999)
+            )
+            captures.append(
+                NativeFaceCapture(
+                    _native_channel=int(native.chl),
+                    captured_at_device=captured_at,
+                    device_time_ticks=int(native.frameTime.nMicrosecond),
+                    snapshot_image_id=int(native.snapImgId),
+                    target_image_id=int(native.targetImgId),
+                    panorama=bool(native.isPanorama),
+                )
+            )
+        return NativeFaceCapturePage(captures=tuple(captures), complete=bool(result.bEnd), page=page)
+
+    def get_face_capture_image(
+        self,
+        capture: NativeFaceCapture,
+        *,
+        max_image_bytes: int = 8 * 1024 * 1024,
+    ) -> bytes:
+        """Copy one stored legacy-NVR face JPEG into Python-owned bytes."""
+        if not isinstance(capture, NativeFaceCapture):
+            raise TypeError("capture must be a NativeFaceCapture")
+        if (
+            isinstance(max_image_bytes, bool)
+            or not isinstance(max_image_bytes, int)
+            or not 1 <= max_image_bytes <= 32 * 1024 * 1024
+        ):
+            raise ValueError("max_image_bytes must be between 1 and 33554432")
+
+        operate = self._require("NET_SDK_FaceMatchOperate")
+        native = NET_SDK_FACE_IMG_INFO_CH(
+            frameTime=DD_TIME_EX.from_datetime(capture.captured_at_device),
+            snapImgId=capture.snapshot_image_id,
+            targetImgId=capture.target_image_id,
+            chl=capture._native_channel,
+            isPanorama=int(capture.panorama),
+        )
+        native.frameTime.nMicrosecond = capture.device_time_ticks
+        output_size = max_image_bytes + ct.sizeof(NET_SDK_FACE_INFO_IMG_DATA)
+        output = ct.create_string_buffer(output_size)
+        returned = ct.c_uint(0)
+        self._check(
+            operate(
+                self._handle,
+                FaceMatchCommand.SEARCH_CHANNEL_CAPTURE_IMAGE,
+                ct.byref(native),
+                ct.sizeof(native),
+                output,
+                output_size,
+                ct.byref(returned),
+            ),
+            "FaceMatchOperate(SEARCH_CHANNEL_CAPTURE_IMAGE)",
+        )
+        if returned.value > output_size:
+            raise NetSdkError("Face capture image returned an invalid byte count")
+        if returned.value < ct.sizeof(NET_SDK_FACE_INFO_IMG_DATA):
+            raise NetSdkError("Face capture image returned a truncated result header")
+
+        result = ct.cast(output, ct.POINTER(NET_SDK_FACE_INFO_IMG_DATA)).contents
+        if result.imgLen > max_image_bytes:
+            raise NetSdkError("Face capture image exceeds configured byte limit")
+        if result.imgLen and not result.imgData:
+            raise NetSdkError("Face capture image returned a null data pointer")
+        return ct.string_at(result.imgData, result.imgLen) if result.imgLen else b""
 
     # ── PTZ control ─────────────────────────────────────────────
 
