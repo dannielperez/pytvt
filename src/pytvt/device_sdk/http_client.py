@@ -19,6 +19,8 @@ Usage::
 
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import urllib.error
 import urllib.request
@@ -29,6 +31,7 @@ from .client import NativeFaceCapture, _validate_face_search_input
 
 MAX_JSON_RESPONSE_BYTES = 1024 * 1024
 MAX_BINARY_RESPONSE_BYTES = 32 * 1024 * 1024
+MAX_FACE_BATCH_JSON_RESPONSE_BYTES = 40 * 1024 * 1024
 
 # ---------------------------------------------------------------------------
 # Response dataclasses
@@ -123,6 +126,41 @@ class FaceCaptureImageResult:
         return bool(self.image)
 
 
+@dataclass(frozen=True)
+class FaceCaptureBatchItem:
+    """One native face index entry and its copied JPEG, when available."""
+
+    capture: NativeFaceCapture
+    image: bytes | None = None
+    error: str | None = None
+
+    @property
+    def success(self) -> bool:
+        return bool(self.image)
+
+
+@dataclass(frozen=True)
+class FaceCaptureBatchResult:
+    """One bounded native face page copied within a single bridge login."""
+
+    success: bool
+    items: tuple[FaceCaptureBatchItem, ...] = ()
+    complete: bool = False
+    page: int = 1
+    error: str | None = None
+
+
+def _capture_from_payload(item: dict) -> NativeFaceCapture:
+    return NativeFaceCapture(
+        _native_channel=item["native_channel_identity"],
+        captured_at_device=datetime.fromisoformat(item["captured_at_device"]),
+        device_time_ticks=item["device_time_ticks"],
+        snapshot_image_id=item["snapshot_image_id"],
+        target_image_id=item["target_image_id"],
+        panorama=item["panorama"],
+    )
+
+
 # ---------------------------------------------------------------------------
 # Client
 # ---------------------------------------------------------------------------
@@ -175,7 +213,13 @@ class SdkHttpClient:
             raise ValueError("Bridge response exceeds configured byte limit")
         return body
 
-    def _post_json(self, path: str, payload: bytes) -> dict:
+    def _post_json(
+        self,
+        path: str,
+        payload: bytes,
+        *,
+        max_bytes: int = MAX_JSON_RESPONSE_BYTES,
+    ) -> dict:
         req = urllib.request.Request(
             f"{self._base_url}{path}",
             data=payload,
@@ -183,7 +227,7 @@ class SdkHttpClient:
             method="POST",
         )
         with urllib.request.urlopen(req, timeout=self._timeout) as resp:
-            return json.loads(self._read_bounded(resp, MAX_JSON_RESPONSE_BYTES).decode())
+            return json.loads(self._read_bounded(resp, max_bytes).decode())
 
     def _post_raw(
         self,
@@ -400,17 +444,7 @@ class SdkHttpClient:
             raw_captures = data.get("captures", ())
             if not isinstance(raw_captures, list) or len(raw_captures) > page_size:
                 raise ValueError("capture count exceeds the requested page size")
-            captures = tuple(
-                NativeFaceCapture(
-                    _native_channel=item["native_channel_identity"],
-                    captured_at_device=datetime.fromisoformat(item["captured_at_device"]),
-                    device_time_ticks=item["device_time_ticks"],
-                    snapshot_image_id=item["snapshot_image_id"],
-                    target_image_id=item["target_image_id"],
-                    panorama=item["panorama"],
-                )
-                for item in raw_captures
-            )
+            captures = tuple(_capture_from_payload(item) for item in raw_captures)
             return FaceCaptureSearchResult(
                 success=data.get("success", False),
                 captures=captures,
@@ -432,6 +466,87 @@ class SdkHttpClient:
             )
         except TimeoutError:
             return FaceCaptureSearchResult(
+                success=False,
+                page=page,
+                error=f"Timeout after {self._timeout}s",
+            )
+
+    def search_face_capture_images(
+        self,
+        ip: str,
+        username: str,
+        password: str,
+        *,
+        port: int = 6036,
+        channel: int,
+        start: datetime,
+        end: datetime,
+        page: int = 1,
+        page_size: int = 100,
+    ) -> FaceCaptureBatchResult:
+        """Search and copy one bounded page within one disposable SDK login."""
+        _validate_face_search_input(channel, start, end, page, page_size)
+        try:
+            data = self._post_json(
+                "/face/captures/batch",
+                self._connect_payload(
+                    ip,
+                    username,
+                    password,
+                    port,
+                    channel=channel,
+                    start=start.isoformat(timespec="microseconds"),
+                    end=end.isoformat(timespec="microseconds"),
+                    page=page,
+                    page_size=page_size,
+                ),
+                max_bytes=MAX_FACE_BATCH_JSON_RESPONSE_BYTES,
+            )
+            raw_items = data.get("captures", ())
+            if not isinstance(raw_items, list) or len(raw_items) > page_size:
+                raise ValueError("capture count exceeds the requested page size")
+            items = []
+            for raw_item in raw_items:
+                capture = _capture_from_payload(raw_item)
+                encoded_image = raw_item.get("image_base64")
+                image_error = raw_item.get("image_error")
+                image = None
+                if encoded_image is not None:
+                    if not isinstance(encoded_image, str):
+                        raise ValueError("face image must be base64 text")
+                    image = base64.b64decode(encoded_image, validate=True)
+                    if not image.startswith(b"\xff\xd8"):
+                        raise ValueError("face image is not a JPEG")
+                if image_error is not None and not isinstance(image_error, str):
+                    raise ValueError("face image error must be text")
+                items.append(
+                    FaceCaptureBatchItem(
+                        capture=capture,
+                        image=image,
+                        error=image_error,
+                    ),
+                )
+            return FaceCaptureBatchResult(
+                success=data.get("success", False),
+                items=tuple(items),
+                complete=data.get("complete", False),
+                page=data.get("page", page),
+                error=data.get("error"),
+            )
+        except (binascii.Error, KeyError, TypeError, ValueError) as error:
+            return FaceCaptureBatchResult(
+                success=False,
+                page=page,
+                error=f"Invalid bridge response: {error}",
+            )
+        except urllib.error.URLError as error:
+            return FaceCaptureBatchResult(
+                success=False,
+                page=page,
+                error=f"Connection error: {error.reason}",
+            )
+        except TimeoutError:
+            return FaceCaptureBatchResult(
                 success=False,
                 page=page,
                 error=f"Timeout after {self._timeout}s",

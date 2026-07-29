@@ -36,7 +36,7 @@ native SDK bindings. It still requires a local vendor SDK installation, but it
 no longer depends on Node.js or any bridge scripts.
 """
 
-__version__ = "1.3.0"
+__version__ = "1.3.1"
 
 from . import workflows  # Provisional — technician-facing workflow orchestrations.
 from .alarm_protocol import ParsedAlarmFrame, parse_alarm_frame
@@ -48,6 +48,8 @@ from .device_sdk.http_client import (
     CommandResult,
     DeviceInfoResult,
     DeviceTimeResult,
+    FaceCaptureBatchItem,
+    FaceCaptureBatchResult,
     FaceCaptureImageResult,
     FaceCaptureSearchResult,
     RtspUrlResult,
@@ -165,6 +167,8 @@ __all__ = [
     "CommandResult",
     "DeviceInfoResult",
     "DeviceTimeResult",
+    "FaceCaptureBatchItem",
+    "FaceCaptureBatchResult",
     "FaceCaptureImageResult",
     "FaceCaptureSearchResult",
     "RtspUrlResult",
