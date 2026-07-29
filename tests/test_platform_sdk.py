@@ -504,3 +504,102 @@ class TestUnauthenticatedGuards:
             client.list_servers()
         with pytest.raises(SessionExpired):
             client.list_alarm_zones()
+
+
+class _FakeNsLib:
+    """Namespaced-library double whose bound functions return real values.
+
+    A ``MagicMock`` would make ``int(get_last_error())`` raise and silently
+    render every reason "unavailable" — which is the exact bug under test.
+    """
+
+    def __init__(self, *, login_id: int = -1, last_error: int | None = 8) -> None:
+        self._login_id = login_id
+        self._last_error = last_error
+
+    def call_init(self) -> bool:
+        return True
+
+    def call_get_last_error(self) -> int | None:
+        return self._last_error
+
+    def bind_function(self, capability: str, **_kwargs: object):
+        if capability == "login":
+            return lambda *_a: self._login_id
+        if capability == "set_message_callback":
+            return lambda *_a: True
+        return lambda *_a: True
+
+
+class TestPlatErrorCodes:
+    def test_known_codes_get_semantic_names(self) -> None:
+        assert pc.plat_error_name(pc.PLAT_ERROR_USER_LOCKED) == "user_locked"
+        assert pc.plat_error_name(pc.PLAT_ERROR_PASSWORD) == "password_mismatch"
+        assert pc.plat_error_name(pc.PLAT_ERROR_NO_USER) == "no_such_user"
+
+    def test_unknown_code_falls_back_without_raising(self) -> None:
+        assert pc.plat_error_name(4242) == "unknown"
+
+    def test_credential_errors_are_separated_from_transport_errors(self) -> None:
+        assert pc.plat_error_is_credential(pc.PLAT_ERROR_USER_LOCKED)
+        assert pc.plat_error_is_credential(pc.PLAT_ERROR_PASSWORD)
+        assert not pc.plat_error_is_credential(pc.PLAT_ERROR_FAIL_CONNECT)
+        assert not pc.plat_error_is_credential(pc.PLAT_SUCCESS)
+
+
+class TestLoginFailureReporting:
+    """A bare -1 must never be the whole story (PlatErrorDef.h codes)."""
+
+    def _login(self, **kwargs) -> str:
+        client = PlatformSDKClient(ns_lib=_FakeNsLib(**kwargs), host="1.2.3.4", port=6003)
+        with pytest.raises(Exception) as excinfo:
+            client.login("admin", "secret")
+        return str(excinfo.value)
+
+    def test_locked_account_is_named_in_the_error(self) -> None:
+        message = self._login(last_error=pc.PLAT_ERROR_USER_LOCKED)
+        assert "user_locked" in message
+        assert "[8]" in message
+        assert "account-side" in message
+
+    def test_wrong_password_is_distinguishable_from_a_locked_account(self) -> None:
+        message = self._login(last_error=pc.PLAT_ERROR_PASSWORD)
+        assert "password_mismatch" in message
+        assert "user_locked" not in message
+
+    def test_transport_failure_is_not_labelled_account_side(self) -> None:
+        message = self._login(last_error=pc.PLAT_ERROR_FAIL_CONNECT)
+        assert "connect_failed" in message
+        assert "account-side" not in message
+
+    def test_missing_error_symbol_degrades_without_masking_the_failure(self) -> None:
+        message = self._login(last_error=None)
+        assert "reason unavailable" in message
+        # the original diagnostic must survive
+        assert "invalid login ID -1" in message
+        assert "1.2.3.4:6003" in message
+
+
+class TestLastErrorSymbolWiring:
+    """The PLAT namespace must actually resolve Plat_GetLastErrorEx.
+
+    A duplicate ``get_last_error`` key in the symbol dict would be silently
+    overwritten and the reason would degrade to "unavailable" on every real
+    login failure -- invisible to any test that fakes the library.
+    """
+
+    def test_plat_namespace_maps_the_last_error_symbol(self) -> None:
+        from pytvt.platform_sdk.sdk_namespace import (
+            CAPABILITY_SYMBOLS,
+            SdkNamespace,
+            capabilities_for_namespace,
+        )
+
+        assert CAPABILITY_SYMBOLS["get_last_error"][SdkNamespace.PLAT] == "Plat_GetLastErrorEx"
+        # and it survives into the per-namespace view the loader actually uses
+        assert capabilities_for_namespace(SdkNamespace.PLAT)["get_last_error"] == ("Plat_GetLastErrorEx")
+
+    def test_net_sdk_mapping_is_not_clobbered(self) -> None:
+        from pytvt.platform_sdk.sdk_namespace import CAPABILITY_SYMBOLS, SdkNamespace
+
+        assert CAPABILITY_SYMBOLS["get_last_error"][SdkNamespace.NET_SDK] == "NET_SDK_GetLastError"
