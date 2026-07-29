@@ -2337,6 +2337,8 @@ class NetSdkClient:
         reconnect_interval: int = 0,
         recv_timeout: int | None = None,
     ) -> None:
+        if connect_timeout <= 300:
+            raise ValueError("connect_timeout must be greater than 300ms")
         if not 1 <= connect_retry_count <= 10:
             raise ValueError("connect_retry_count must be between 1 and 10")
         if recv_timeout is not None:
@@ -2427,6 +2429,8 @@ class NetSdkClient:
         if timeout_ms is None:
             yield
             return
+        if timeout_ms <= 300:
+            raise ValueError("temporary connect timeout must be greater than 300ms")
 
         self._lib.NET_SDK_SetConnectTime(
             timeout_ms,

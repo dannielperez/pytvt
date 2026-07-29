@@ -167,6 +167,15 @@ class TestNetSdkClientInit:
             NetSdkClient(connect_retry_count=retry_count)
         mock_lib.NET_SDK_Init.assert_not_called()
 
+    @pytest.mark.parametrize("timeout_ms", [0, 300])
+    def test_invalid_connect_timeout_is_rejected(self, mock_lib, timeout_ms):
+        with (
+            patch("pytvt.device_sdk.client.load_sdk", return_value=mock_lib),
+            pytest.raises(ValueError, match="greater than 300ms"),
+        ):
+            NetSdkClient(connect_timeout=timeout_ms)
+        mock_lib.NET_SDK_Init.assert_not_called()
+
 
 class TestNetSdkClientVersion:
     def test_sdk_version(self, client, mock_lib):
@@ -342,6 +351,14 @@ class TestNatLogin:
             call(900, 2),
             call(5000, 2),
         ]
+
+    def test_login_nat_rejects_subminimum_temporary_timeout(self, client, mock_lib):
+        with (
+            patch("pytvt.device_sdk.client.ensure_nat_support"),
+            pytest.raises(ValueError, match="temporary connect timeout"),
+        ):
+            client.login_nat("ABC123456", "admin", "pass", timeout=0.3)
+        mock_lib.NET_SDK_LoginEx.assert_not_called()
 
 
 class TestConnectFacade:
