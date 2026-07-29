@@ -13,12 +13,21 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from pytvt import xml_api
+from pytvt.device_sdk import manager as manager_module
 from pytvt.device_sdk.http_client import RtspUrlResult, SnapshotAttempt
 from pytvt.device_sdk.manager import Backend, DeviceManager
 
 CREDS = dict(ip="10.0.0.1", username="admin", password="pass123")
 JPEG = b"\xff\xd8\xff\xe0" + b"\x00" * 50
 RTSP = "rtsp://10.0.0.1:554/chID=1&streamType=main"
+ORIGINAL_HTTP_RTSP_URL = DeviceManager._http_rtsp_url
+
+
+@pytest.fixture(autouse=True)
+def clear_rtsp_url_cache():
+    manager_module._RTSP_URL_CACHE.clear()
+    yield
+    manager_module._RTSP_URL_CACHE.clear()
 
 
 class TestRtspSnapshotBytes:
@@ -189,6 +198,104 @@ class TestRtspUrlIsResolvedWithoutANativeLogin:
         assert attempt.error_kind == "rtsp_error"
         assert attempt.error_kind != "empty_frame"
         assert "ffmpeg" in attempt.error
+
+
+class TestCameraDirectRtspUrlCache:
+    def test_reuses_a_resolved_url_without_a_second_login(self, monkeypatch):
+        monkeypatch.setattr(
+            DeviceManager,
+            "_http_rtsp_url",
+            ORIGINAL_HTTP_RTSP_URL,
+        )
+        nvr = MagicMock()
+        nvr.__enter__.return_value = nvr
+        nvr.get_rtsp_url.return_value = RTSP
+        mgr = DeviceManager(
+            **CREDS,
+            backend=Backend.SDK_HTTP,
+            rtsp_url_cache_ttl=60,
+        )
+
+        with patch.object(xml_api, "NvrClient", return_value=nvr) as client:
+            first = mgr._http_rtsp_url(channel=1, stream_type=1)
+            second = mgr._http_rtsp_url(channel=1, stream_type=1)
+
+        assert first == second == RTSP
+        client.assert_called_once()
+        nvr.login.assert_called_once()
+        nvr.get_rtsp_url.assert_called_once_with(2, "sub")
+
+    def test_password_is_fingerprinted_and_rotation_misses_the_old_entry(self, monkeypatch):
+        monkeypatch.setattr(
+            DeviceManager,
+            "_http_rtsp_url",
+            ORIGINAL_HTTP_RTSP_URL,
+        )
+        first_nvr = MagicMock()
+        first_nvr.__enter__.return_value = first_nvr
+        first_nvr.get_rtsp_url.return_value = RTSP
+        rotated_nvr = MagicMock()
+        rotated_nvr.__enter__.return_value = rotated_nvr
+        rotated_nvr.get_rtsp_url.return_value = RTSP
+        first = DeviceManager(
+            **CREDS,
+            backend=Backend.SDK_HTTP,
+            rtsp_url_cache_ttl=60,
+        )
+        rotated = DeviceManager(
+            **{**CREDS, "password": "rotated"},
+            backend=Backend.SDK_HTTP,
+            rtsp_url_cache_ttl=60,
+        )
+
+        with patch.object(
+            xml_api,
+            "NvrClient",
+            side_effect=(first_nvr, rotated_nvr),
+        ) as client:
+            assert first._http_rtsp_url(channel=1) == RTSP
+            assert rotated._http_rtsp_url(channel=1) == RTSP
+
+        assert client.call_count == 2
+        key = first._rtsp_url_cache_key(channel=1, stream_type=0)
+        assert CREDS["password"] not in repr(key)
+
+    def test_failed_frame_evicts_the_cached_url(self, monkeypatch):
+        monkeypatch.setattr(
+            DeviceManager,
+            "_http_rtsp_url",
+            ORIGINAL_HTTP_RTSP_URL,
+        )
+        nvr = MagicMock()
+        nvr.__enter__.return_value = nvr
+        nvr.get_rtsp_url.return_value = RTSP
+        mgr = DeviceManager(
+            **CREDS,
+            backend=Backend.SDK_HTTP,
+            rtsp_url_cache_ttl=60,
+        )
+
+        with (
+            patch.object(xml_api, "NvrClient", return_value=nvr),
+            patch.object(xml_api, "rtsp_snapshot_bytes", return_value=None),
+        ):
+            assert mgr._rtsp_snapshot_attempt(channel=1).success is False
+            assert mgr._http_rtsp_url(channel=1) == RTSP
+
+        assert nvr.login.call_count == 2
+
+    def test_ttl_and_lru_bound_are_enforced(self):
+        cache = manager_module._RtspUrlCache(max_entries=2)
+        key1 = ("nvr-1", 80, "admin", b"a", 0, 1)
+        key2 = ("nvr-1", 80, "admin", b"a", 1, 1)
+        key3 = ("nvr-1", 80, "admin", b"a", 2, 1)
+        cache.set(key1, "rtsp://one", expires_at=20)
+        cache.set(key2, "rtsp://two", expires_at=20)
+        cache.set(key3, "rtsp://three", expires_at=20)
+
+        assert cache.get(key1, now=10) is None
+        assert cache.get(key2, now=10) == "rtsp://two"
+        assert cache.get(key3, now=20) is None
 
 
 class TestFfmpegAvailability:

@@ -31,10 +31,15 @@ at construction.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import shutil
 import subprocess
+import time
+from collections import OrderedDict
 from enum import Enum, unique
+from threading import Lock
+from typing import TypeAlias
 
 from ..models import DeviceEntry
 from .http_client import (
@@ -47,6 +52,59 @@ from .http_client import (
 )
 
 logger = logging.getLogger(__name__)
+
+_DEFAULT_RTSP_URL_CACHE_TTL_SECONDS = 300.0
+_MAX_RTSP_URL_CACHE_ENTRIES = 256
+_RtspUrlCacheKey: TypeAlias = tuple[str, int, str, bytes, int, int]
+
+
+class _RtspUrlCache:
+    """Small process-local TTL/LRU cache for credential-bearing RTSP URLs.
+
+    URLs stay in the process that already holds the device credential. They
+    are never written to a shared cache, disk, logs, or API response.
+    """
+
+    def __init__(self, *, max_entries: int) -> None:
+        self._max_entries = max_entries
+        self._entries: OrderedDict[_RtspUrlCacheKey, tuple[float, str]] = OrderedDict()
+        self._lock = Lock()
+
+    def get(self, key: _RtspUrlCacheKey, *, now: float) -> str | None:
+        with self._lock:
+            entry = self._entries.get(key)
+            if entry is None:
+                return None
+            expires_at, url = entry
+            if expires_at <= now:
+                del self._entries[key]
+                return None
+            self._entries.move_to_end(key)
+            return url
+
+    def set(
+        self,
+        key: _RtspUrlCacheKey,
+        url: str,
+        *,
+        expires_at: float,
+    ) -> None:
+        with self._lock:
+            self._entries[key] = (expires_at, url)
+            self._entries.move_to_end(key)
+            while len(self._entries) > self._max_entries:
+                self._entries.popitem(last=False)
+
+    def discard(self, key: _RtspUrlCacheKey) -> None:
+        with self._lock:
+            self._entries.pop(key, None)
+
+    def clear(self) -> None:
+        with self._lock:
+            self._entries.clear()
+
+
+_RTSP_URL_CACHE = _RtspUrlCache(max_entries=_MAX_RTSP_URL_CACHE_ENTRIES)
 
 
 def _first_failure(attempts: list[SnapshotAttempt]) -> SnapshotAttempt:
@@ -170,6 +228,8 @@ class DeviceManager:
         api_url: Base URL for the SDK bridge service (used by sdk_http backend).
         sdk_path: Optional vendor SDK path for the netsdk backend.
         timeout: HTTP/connection timeout in seconds.
+        rtsp_url_cache_ttl: Seconds to reuse a resolved camera-direct URL in
+            this process. Set to zero to disable caching.
 
     Raises:
         NoBackendAvailable: If no backend is usable.
@@ -192,6 +252,7 @@ class DeviceManager:
         api_url: str = "http://localhost:3000",
         sdk_path: str | None = None,
         timeout: int = 30,
+        rtsp_url_cache_ttl: float = _DEFAULT_RTSP_URL_CACHE_TTL_SECONDS,
     ) -> None:
         self._ip = ip or ""
         self._username = username
@@ -206,6 +267,7 @@ class DeviceManager:
         self._api_url = api_url
         self._sdk_path = sdk_path
         self._timeout = timeout
+        self._rtsp_url_cache_ttl = max(0.0, float(rtsp_url_cache_ttl))
 
         # Resolve backend
         if backend is not None:
@@ -456,11 +518,23 @@ class DeviceManager:
         answers the same question over HTTP and points straight at the camera
         rather than the NVR's relay.
 
+        Successful URLs are retained in a small process-local TTL/LRU cache.
+        The value contains credentials, so it deliberately never crosses a
+        persistence, shared-cache, log, or API boundary.
+
         Best-effort by design: any failure returns ``None`` so the caller falls
         back to the native resolver it used before.
         """
         if not self._ip:
             return None
+        cache_key = self._rtsp_url_cache_key(
+            channel=channel,
+            stream_type=stream_type,
+        )
+        if self._rtsp_url_cache_ttl > 0:
+            cached = _RTSP_URL_CACHE.get(cache_key, now=time.monotonic())
+            if cached is not None:
+                return cached
         # Lazy import keeps the NVR XML/HTTP module off the device_sdk load path.
         from ..xml_api import NvrClient
 
@@ -475,7 +549,14 @@ class DeviceManager:
             ) as nvr:
                 nvr.login()
                 # The web CGI numbers channels from 1; device_sdk from 0.
-                return nvr.get_rtsp_url(channel + 1, stream_name) or None
+                url = nvr.get_rtsp_url(channel + 1, stream_name) or None
+                if url is not None and self._rtsp_url_cache_ttl > 0:
+                    _RTSP_URL_CACHE.set(
+                        cache_key,
+                        url,
+                        expires_at=time.monotonic() + self._rtsp_url_cache_ttl,
+                    )
+                return url
         except Exception as exc:
             logger.info(
                 "HTTP RTSP url resolve failed ip=%s channel=%s: %s: %s",
@@ -485,6 +566,35 @@ class DeviceManager:
                 exc,
             )
             return None
+
+    def _rtsp_url_cache_key(
+        self,
+        *,
+        channel: int,
+        stream_type: int,
+    ) -> _RtspUrlCacheKey:
+        credential_fingerprint = hashlib.sha256(self._password.encode("utf-8")).digest()
+        return (
+            self._ip,
+            self._http_port,
+            self._username,
+            credential_fingerprint,
+            channel,
+            stream_type,
+        )
+
+    def _discard_cached_rtsp_url(
+        self,
+        *,
+        channel: int,
+        stream_type: int,
+    ) -> None:
+        _RTSP_URL_CACHE.discard(
+            self._rtsp_url_cache_key(
+                channel=channel,
+                stream_type=stream_type,
+            )
+        )
 
     def _rtsp_snapshot_attempt(self, *, channel: int = 0, stream_type: int = 0, timeout: int = 10) -> SnapshotAttempt:
         """RTSP leg, reporting which step produced no frame.
@@ -507,6 +617,10 @@ class DeviceManager:
         try:
             data = rtsp_snapshot_bytes(rtsp_url, timeout=timeout)
         except Exception as exc:
+            self._discard_cached_rtsp_url(
+                channel=channel,
+                stream_type=stream_type,
+            )
             logger.warning(
                 "RTSP frame grab failed ip=%s channel=%s: %s: %s",
                 self._ip,
@@ -520,6 +634,10 @@ class DeviceManager:
                 error_kind="rtsp_error",
             )
         if not data:
+            self._discard_cached_rtsp_url(
+                channel=channel,
+                stream_type=stream_type,
+            )
             logger.info("RTSP stream yielded no frame ip=%s channel=%s", self._ip, channel)
             return SnapshotAttempt(
                 method="rtsp",
