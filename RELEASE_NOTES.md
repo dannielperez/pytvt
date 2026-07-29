@@ -1,3 +1,27 @@
+# pytvt v1.3.2
+
+Correct NetSDK connection retry semantics and faster still-frame capture.
+
+## Highlights
+
+- `NetSdkClient` now calls `NET_SDK_SetConnectTime(wait_ms, retry_count)`
+  according to the vendor header. The old `recv_timeout` keyword never
+  controlled a receive timeout and is retained temporarily as a deprecated,
+  ignored compatibility argument.
+- `connect_retry_count` defaults to the vendor-documented value of three and is
+  bounded to 1–10.
+- Camera-direct RTSP resolution can use the HTTP/XML client before native
+  login, and the one-frame ffmpeg path avoids unnecessary stream probing.
+
+## Upgrade notes
+
+- Replace `NetSdkClient(recv_timeout=...)` with
+  `NetSdkClient(connect_retry_count=...)`.
+- A deprecation warning is emitted for the old keyword; it is no longer passed
+  to the native library as a retry count.
+
+---
+
 # pytvt v1.2.0
 
 TVT alarm-server frame parsing at the SDK boundary.

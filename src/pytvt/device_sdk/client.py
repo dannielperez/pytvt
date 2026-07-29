@@ -24,6 +24,7 @@ import math
 import re
 import threading
 import time
+import warnings
 import weakref
 from collections.abc import Callable, Iterable
 from contextlib import contextmanager
@@ -2332,9 +2333,20 @@ class NetSdkClient:
         *,
         sdk_path: str | None = None,
         connect_timeout: int = 5000,
-        recv_timeout: int = 5000,
+        connect_retry_count: int = 3,
         reconnect_interval: int = 0,
+        recv_timeout: int | None = None,
     ) -> None:
+        if not 1 <= connect_retry_count <= 10:
+            raise ValueError("connect_retry_count must be between 1 and 10")
+        if recv_timeout is not None:
+            warnings.warn(
+                "recv_timeout never controlled a receive timeout; "
+                "NET_SDK_SetConnectTime's second argument is a retry count. "
+                "Use connect_retry_count instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         with _PROCESS_SDK_LOCK:
             if _PROCESS_SUBSCRIBE_OWNER is not None:
                 raise NetSdkCapabilityError(
@@ -2342,7 +2354,7 @@ class NetSdkClient:
                 )
             self._sdk_path = sdk_path
             self._connect_timeout = connect_timeout
-            self._recv_timeout = recv_timeout
+            self._connect_retry_count = connect_retry_count
             self._reconnect_interval = reconnect_interval
             # Retain the global subscription thunk (see subscribe_v2).
             self._subscribe_callback: tuple[object, object] | None = None
@@ -2354,7 +2366,7 @@ class NetSdkClient:
             sdk.bind(self._lib)
             if not self._lib.NET_SDK_Init():
                 raise NetSdkError("NET_SDK_Init failed")
-            self._lib.NET_SDK_SetConnectTime(connect_timeout, recv_timeout)
+            self._lib.NET_SDK_SetConnectTime(connect_timeout, connect_retry_count)
             if reconnect_interval > 0:
                 self._lib.NET_SDK_SetReconnect(reconnect_interval, True)
             else:
@@ -2416,11 +2428,17 @@ class NetSdkClient:
             yield
             return
 
-        self._lib.NET_SDK_SetConnectTime(timeout_ms, timeout_ms)
+        self._lib.NET_SDK_SetConnectTime(
+            timeout_ms,
+            self._connect_retry_count,
+        )
         try:
             yield
         finally:
-            self._lib.NET_SDK_SetConnectTime(self._connect_timeout, self._recv_timeout)
+            self._lib.NET_SDK_SetConnectTime(
+                self._connect_timeout,
+                self._connect_retry_count,
+            )
 
     # ── Version info ────────────────────────────────────────────
 

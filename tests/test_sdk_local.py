@@ -85,7 +85,7 @@ class TestScanNvrPayload:
             "cameras",
             "error",
         }
-        mock_client.assert_called_once_with(sdk_path="/opt/tvt-sdk", connect_timeout=10_000, recv_timeout=10_000)
+        mock_client.assert_called_once_with(sdk_path="/opt/tvt-sdk", connect_timeout=10_000)
         client.login.assert_called_once_with("10.0.0.1", "admin", "secret", port=6036)
         session.ipc_info.assert_called_once_with(max_channels=32)
 

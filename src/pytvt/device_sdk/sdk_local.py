@@ -43,7 +43,6 @@ def scan_nvr_payload(
             NetSdkClient(
                 sdk_path=sdk_path,
                 connect_timeout=timeout_ms,
-                recv_timeout=timeout_ms,
             ) as client,
             client.login(ip, username, password, port=port) as session,
         ):
