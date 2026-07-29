@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Correct `NetSdkClient`'s `NET_SDK_SetConnectTime` binding contract: the
+  vendor function's second argument is a connection retry count, not a receive
+  timeout in milliseconds. Native callers now send the documented default of
+  three retries instead of 5,000, can set `connect_retry_count` explicitly, and
+  receive a deprecation warning when using the former `recv_timeout` keyword.
 - Add an opt-in file-first NetSDK JPEG path for legacy recorder firmware where
   `NET_SDK_CaptureJPEGData_V2` can block instead of returning an error. Process-isolated
   callers can now prefer `NET_SDK_CaptureJPEGFile_V2` while existing callers retain the

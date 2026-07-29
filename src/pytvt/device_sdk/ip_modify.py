@@ -540,7 +540,8 @@ def modify_device_ip_by_mac(
         function_used = "NET_SDK_SetDeviceIP" if hasattr(lib, "NET_SDK_SetDeviceIP") else "NET_SDK_ModifyDeviceNetInfo"
         try:
             with NetSdkClient(
-                sdk_path=sdk_path, connect_timeout=int(timeout * 1000), recv_timeout=int(timeout * 1000)
+                sdk_path=sdk_path,
+                connect_timeout=int(timeout * 1000),
             ) as sdk:
                 sdk.set_device_ip_by_mac(
                     norm_mac,

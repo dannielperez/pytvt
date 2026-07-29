@@ -6,7 +6,7 @@ import ctypes as ct
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import MagicMock, PropertyMock, patch
+from unittest.mock import MagicMock, PropertyMock, call, patch
 
 import pytest
 
@@ -123,7 +123,7 @@ class TestNetSdkClientInit:
         with patch("pytvt.device_sdk.client.load_sdk", return_value=mock_lib):
             c = NetSdkClient()
             mock_lib.NET_SDK_Init.assert_called_once()
-            mock_lib.NET_SDK_SetConnectTime.assert_called_once_with(5000, 5000)
+            mock_lib.NET_SDK_SetConnectTime.assert_called_once_with(5000, 3)
             mock_lib.NET_SDK_SetReconnect.assert_called_once_with(0, False)
             c.cleanup()
 
@@ -138,12 +138,34 @@ class TestNetSdkClientInit:
                 assert c._lib is not None
             mock_lib.NET_SDK_Cleanup.assert_called()
 
-    def test_custom_timeouts(self, mock_lib):
+    def test_custom_timeout_and_retry_count(self, mock_lib):
         with patch("pytvt.device_sdk.client.load_sdk", return_value=mock_lib):
-            c = NetSdkClient(connect_timeout=10000, recv_timeout=8000, reconnect_interval=5000)
-            mock_lib.NET_SDK_SetConnectTime.assert_called_once_with(10000, 8000)
+            c = NetSdkClient(
+                connect_timeout=10000,
+                connect_retry_count=2,
+                reconnect_interval=5000,
+            )
+            mock_lib.NET_SDK_SetConnectTime.assert_called_once_with(10000, 2)
             mock_lib.NET_SDK_SetReconnect.assert_called_once_with(5000, True)
             c.cleanup()
+
+    def test_deprecated_recv_timeout_is_not_forwarded_as_retry_count(self, mock_lib):
+        with (
+            patch("pytvt.device_sdk.client.load_sdk", return_value=mock_lib),
+            pytest.warns(DeprecationWarning, match="never controlled a receive timeout"),
+        ):
+            c = NetSdkClient(recv_timeout=8000)
+        mock_lib.NET_SDK_SetConnectTime.assert_called_once_with(5000, 3)
+        c.cleanup()
+
+    @pytest.mark.parametrize("retry_count", [0, 11])
+    def test_invalid_connect_retry_count_is_rejected(self, mock_lib, retry_count):
+        with (
+            patch("pytvt.device_sdk.client.load_sdk", return_value=mock_lib),
+            pytest.raises(ValueError, match="connect_retry_count"),
+        ):
+            NetSdkClient(connect_retry_count=retry_count)
+        mock_lib.NET_SDK_Init.assert_not_called()
 
 
 class TestNetSdkClientVersion:
@@ -303,6 +325,23 @@ class TestNatLogin:
         mock_lib.NET_SDK_GetLastError.return_value = SdkError.NETWORK_RECV_TIMEOUT
         with patch("pytvt.device_sdk.client.ensure_nat_support"), pytest.raises(NatTimeoutError, match="NAT login"):
             client.login_nat("ABC123456", "admin", "pass")
+
+    def test_login_nat_timeout_preserves_retry_count(self, mock_lib):
+        with (
+            patch("pytvt.device_sdk.client.load_sdk", return_value=mock_lib),
+            patch("pytvt.device_sdk.client.ensure_nat_support"),
+            NetSdkClient(
+                connect_timeout=5000,
+                connect_retry_count=2,
+            ) as client,
+        ):
+            client.login_nat("ABC123456", "admin", "pass", timeout=0.9)
+
+        assert mock_lib.NET_SDK_SetConnectTime.call_args_list == [
+            call(5000, 2),
+            call(900, 2),
+            call(5000, 2),
+        ]
 
 
 class TestConnectFacade:
