@@ -199,3 +199,22 @@ class TestFfmpegAvailability:
     def test_reports_absent_when_not_on_path(self):
         with patch.object(xml_api.shutil, "which", return_value=None):
             assert xml_api.ffmpeg_available() is False
+
+
+class TestFrameGrabIsTunedForASingleStill:
+    """Measured on a live Palmares channel: probing was ~half the grab time."""
+
+    def test_input_probing_is_disabled_before_the_input(self):
+        argv = xml_api._ffmpeg_rtsp_frame_args(RTSP, 10)
+        i = argv.index("-i")
+        for flag, value in (("-probesize", "32"), ("-analyzeduration", "0")):
+            assert flag in argv[:i], f"{flag} must precede -i to affect input probing"
+            assert argv[argv.index(flag) + 1] == value
+
+    def test_low_latency_input_flags_are_set(self):
+        argv = xml_api._ffmpeg_rtsp_frame_args(RTSP, 10)
+        assert argv[argv.index("-fflags") + 1] == "nobuffer"
+        assert argv[argv.index("-flags") + 1] == "low_delay"
+
+    def test_audio_is_not_decoded_for_a_still(self):
+        assert "-an" in xml_api._ffmpeg_rtsp_frame_args(RTSP, 10)

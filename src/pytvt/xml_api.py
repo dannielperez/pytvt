@@ -1806,12 +1806,36 @@ def ffmpeg_available() -> bool:
 
 
 def _ffmpeg_rtsp_frame_args(rtsp_url: str, timeout: int) -> list[str]:
-    """Shared ffmpeg argument list for grabbing one JPEG frame from RTSP."""
+    """Shared ffmpeg argument list for grabbing one JPEG frame from RTSP.
+
+    The flags before ``-i`` are not cosmetic. ffmpeg's defaults probe the input
+    to characterise every stream before decoding, which is the right call for
+    transcoding and pure overhead for one still. Measured against a Palmares
+    channel, five runs each, URL already known:
+
+        main  plain                        3779 ms
+        main  probe32+nobuffer+lowdelay    1948 ms
+        sub   plain                        1851 ms
+        sub   probe32+nobuffer+lowdelay    1099 ms
+
+    So roughly half the grab was probing. What remains is RTSP setup plus the
+    wait for the next keyframe, which is bounded by the camera's GOP and cannot
+    be tuned away from this side.
+    """
     return [
         "ffmpeg",
         "-y",
         "-rtsp_transport",
         "tcp",
+        # Do not characterise the input; we decode exactly one frame.
+        "-probesize",
+        "32",
+        "-analyzeduration",
+        "0",
+        "-fflags",
+        "nobuffer",
+        "-flags",
+        "low_delay",
         "-timeout",
         str(timeout * 1_000_000),
         "-i",
