@@ -158,6 +158,11 @@ IPC_PASSWORD_ALREADY_SET = "536870962"
 # set without response evidence from another firmware family.
 FACE_SEARCH_API_UNSUPPORTED_CODES = frozenset({"536870934"})
 
+# A successful Palmares face search with stored events proved the command is
+# supported; the same recorder returns this code when the exact time window is
+# empty instead of returning a success envelope with total="0".
+FACE_SEARCH_EMPTY_CODES = frozenset({"536870942"})
+
 
 class NvrClient:
     """Client for TVT NVR web CGI API (NVMS-9000).
@@ -1629,6 +1634,9 @@ class NvrClient:
             "</condition>"
         )
         data = self._post("searchImageByImageV2", self._build_request_with_content(content))
+        error_code = re.search(r"<errorCode>(.*?)</errorCode>", data)
+        if error_code and error_code.group(1) in FACE_SEARCH_EMPTY_CODES:
+            return []
         self._check_response(data, "searchImageByImageV2")
         events: list[FaceEvent] = []
         for rec in re.findall(r"<i>(.*?)</i>", data, re.DOTALL):

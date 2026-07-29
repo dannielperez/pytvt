@@ -257,6 +257,18 @@ class TestSearchFaceEvents:
         assert "<eventType>byAll</eventType>" in sent["body"]
         assert "<similarity>80</similarity>" in sent["body"]
 
+    def test_empty_window_code_returns_no_events(self):
+        client = _client()
+        client._post = lambda path, body: "<response><status>fail</status><errorCode>536870942</errorCode></response>"
+
+        events = client.search_face_events(
+            9,
+            "2026-07-28 09:00:00",
+            "2026-07-28 09:00:01",
+        )
+
+        assert events == []
+
 
 class TestProbeFaceSearch:
     @staticmethod
@@ -335,6 +347,25 @@ class TestProbeFaceSearch:
 
         assert result.status is FaceSearchApiStatus.UNSUPPORTED
         assert result.error_code == "536870934"
+
+    def test_empty_window_is_still_supported(self):
+        client = _client()
+
+        def fake_post(path, body):
+            if path == "searchImageByImageV2":
+                return "<response><status>fail</status><errorCode>536870942</errorCode></response>"
+            return self._response(path)
+
+        client._post = fake_post
+
+        result = client.probe_face_search(
+            9,
+            "2026-07-28 09:00:00",
+            "2026-07-28 09:00:01",
+        )
+
+        assert result.status is FaceSearchApiStatus.SUPPORTED
+        assert result.error_code is None
 
     def test_unknown_rejection_is_not_misclassified(self):
         client = _client()
