@@ -55,6 +55,11 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_RTSP_URL_CACHE_TTL_SECONDS = 300.0
 _MAX_RTSP_URL_CACHE_ENTRIES = 256
+_SNAPSHOT_STREAM_TYPES = {
+    "main": 0,
+    "sub": 1,
+    "third": 2,
+}
 _RtspUrlCacheKey: TypeAlias = tuple[str, int, str, bytes, int, int]
 
 
@@ -122,6 +127,17 @@ def _first_failure(attempts: list[SnapshotAttempt]) -> SnapshotAttempt:
         if attempts
         else SnapshotAttempt(error="No snapshot transport was attempted.", error_kind="not_attempted")
     )
+
+
+def _snapshot_stream_type(*, stream: str | None, stream_type: int) -> int:
+    """Keep the recorder's numeric stream encoding behind the pytvt boundary."""
+    if stream is None:
+        return stream_type
+    try:
+        return _SNAPSHOT_STREAM_TYPES[stream]
+    except KeyError as exc:
+        choices = ", ".join(_SNAPSHOT_STREAM_TYPES)
+        raise ValueError(f"stream must be one of: {choices}") from exc
 
 
 # ── Backend enum ─────────────────────────────────────────────────────
@@ -418,7 +434,10 @@ class DeviceManager:
         channel: int = 0,
         prefer_rtsp: bool = True,
         stream_type: int = 0,
+        stream: str | None = None,
         timeout: int = 10,
+        total_timeout: float | None = None,
+        allow_fallback: bool = True,
     ) -> bytes | None:
         """Capture a JPEG snapshot from a channel.
 
@@ -431,7 +450,10 @@ class DeviceManager:
             channel=channel,
             prefer_rtsp=prefer_rtsp,
             stream_type=stream_type,
+            stream=stream,
             timeout=timeout,
+            total_timeout=total_timeout,
+            allow_fallback=allow_fallback,
         ).image
 
     def snapshot_attempt(
@@ -440,7 +462,10 @@ class DeviceManager:
         channel: int = 0,
         prefer_rtsp: bool = True,
         stream_type: int = 0,
+        stream: str | None = None,
         timeout: int = 10,
+        total_timeout: float | None = None,
+        allow_fallback: bool = True,
     ) -> SnapshotAttempt:
         """Capture a JPEG snapshot, reporting WHY when it produces no image.
 
@@ -449,33 +474,51 @@ class DeviceManager:
         into the result instead of collapsing to ``None``. A caller showing an
         operator "capture failed" can say what actually failed.
         """
+        stream_type = _snapshot_stream_type(
+            stream=stream,
+            stream_type=stream_type,
+        )
+        deadline = None if total_timeout is None else time.monotonic() + max(0.0, total_timeout)
         attempts: list[SnapshotAttempt] = []
         if prefer_rtsp:
             rtsp = self._rtsp_snapshot_attempt(
                 channel=channel,
                 stream_type=stream_type,
                 timeout=timeout,
+                deadline=deadline,
+                allow_resolver_fallback=allow_fallback,
             )
             if rtsp.image:
                 return rtsp
             attempts.append(rtsp)
+        if not allow_fallback or (deadline is not None and deadline <= time.monotonic()):
+            return _first_failure(attempts)
 
         if self._backend == Backend.NETSDK:
+            if deadline is not None:
+                return _first_failure(attempts)
             netsdk = self._netsdk_snapshot_attempt(channel=channel)
             if netsdk.image:
                 return netsdk
             attempts.append(netsdk)
             return _first_failure(attempts)
 
-        http = self._http_snapshot_attempt(channel=channel)
+        remaining = None if deadline is None else max(0.001, deadline - time.monotonic())
+        http = self._http_snapshot_attempt(channel=channel, timeout=remaining)
         if http.image:
             return http
         attempts.append(http)
         return _first_failure(attempts)
 
-    def _http_snapshot_attempt(self, *, channel: int = 0) -> SnapshotAttempt:
+    def _http_snapshot_attempt(
+        self,
+        *,
+        channel: int = 0,
+        timeout: float | None = None,
+    ) -> SnapshotAttempt:
         try:
-            data = self._get_http().snapshot(
+            client = self._get_http() if timeout is None else SdkHttpClient(self._api_url, timeout=timeout)
+            data = client.snapshot(
                 self._ip,
                 self._username,
                 self._password,
@@ -508,7 +551,13 @@ class DeviceManager:
         """Direct-RTSP JPEG grab via the resolved RTSP URL; ``None`` on any failure."""
         return self._rtsp_snapshot_attempt(channel=channel, stream_type=stream_type, timeout=timeout).image
 
-    def _http_rtsp_url(self, *, channel: int = 0, stream_type: int = 0) -> str | None:
+    def _http_rtsp_url(
+        self,
+        *,
+        channel: int = 0,
+        stream_type: int = 0,
+        deadline: float | None = None,
+    ) -> str | None:
         """Resolve the channel's RTSP URL over the NVR web CGI. ``None`` if it can't.
 
         The point of this path is what it *doesn't* do. ``NET_SDK_GetRtspUrl``
@@ -546,6 +595,7 @@ class DeviceManager:
                 self._password,
                 port=self._http_port,
                 timeout=min(self._timeout, 10),
+                deadline=deadline,
             ) as nvr:
                 nvr.login()
                 # The web CGI numbers channels from 1; device_sdk from 0.
@@ -596,15 +646,33 @@ class DeviceManager:
             )
         )
 
-    def _rtsp_snapshot_attempt(self, *, channel: int = 0, stream_type: int = 0, timeout: int = 10) -> SnapshotAttempt:
+    def _rtsp_snapshot_attempt(
+        self,
+        *,
+        channel: int = 0,
+        stream_type: int = 0,
+        timeout: int = 10,
+        deadline: float | None = None,
+        allow_resolver_fallback: bool = True,
+    ) -> SnapshotAttempt:
         """RTSP leg, reporting which step produced no frame.
 
         Two distinct failures used to look identical: the recorder never gave
         us a stream URL, and it gave us one that yielded no frame. They point
         at different problems, so they are reported apart.
         """
-        rtsp_url = self._http_rtsp_url(channel=channel, stream_type=stream_type)
+        rtsp_url = self._http_rtsp_url(
+            channel=channel,
+            stream_type=stream_type,
+            deadline=deadline,
+        )
         if rtsp_url is None:
+            if not allow_resolver_fallback or deadline is not None:
+                return SnapshotAttempt(
+                    method="rtsp",
+                    error="Direct RTSP URL is not cached or could not be resolved.",
+                    error_kind="no_stream_url",
+                )
             result = self.rtsp_url(channel=channel, stream_type=stream_type)
             if not result.success or not isinstance(result.rtsp_url, str) or not result.rtsp_url:
                 detail = result.error or "Device did not return an RTSP URL."
@@ -614,8 +682,23 @@ class DeviceManager:
         # Lazy import avoids pulling the NVR XML/HTTP module at device_sdk load.
         from ..xml_api import rtsp_snapshot_bytes
 
+        remaining = None if deadline is None else deadline - time.monotonic()
+        if remaining is not None and remaining <= 0:
+            return SnapshotAttempt(
+                method="rtsp",
+                error="Snapshot deadline expired before the frame grab.",
+                error_kind="deadline_exceeded",
+            )
         try:
-            data = rtsp_snapshot_bytes(rtsp_url, timeout=timeout)
+            frame_timeout = timeout if remaining is None else max(1, min(timeout, int(remaining)))
+            if remaining is None:
+                data = rtsp_snapshot_bytes(rtsp_url, timeout=frame_timeout)
+            else:
+                data = rtsp_snapshot_bytes(
+                    rtsp_url,
+                    timeout=frame_timeout,
+                    wall_timeout=remaining,
+                )
         except Exception as exc:
             self._discard_cached_rtsp_url(
                 channel=channel,
