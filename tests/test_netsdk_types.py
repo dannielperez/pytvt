@@ -14,11 +14,15 @@ from pytvt.device_sdk.types import (
     NET_SDK_ALARMINFO_EX,
     NET_SDK_ALRAM_OUT_STATUS,
     NET_SDK_CH_DEVICE_STATUS,
+    NET_SDK_CH_SNAP_FACE_IMG_LIST,
+    NET_SDK_CH_SNAP_FACE_IMG_LIST_SEARCH,
     NET_SDK_DEV_SUPPORT,
     NET_SDK_DEVICE_DISCOVERY_INFO,
     NET_SDK_DEVICE_FUNC_IPC,
     NET_SDK_DEVICEINFO,
     NET_SDK_DISK_INFO,
+    NET_SDK_FACE_IMG_INFO_CH,
+    NET_SDK_FACE_INFO_IMG_DATA,
     NET_SDK_IPC_DEVICE_INFO,
     NET_SDK_JPEGPARA,
     NET_SDK_LOG,
@@ -86,6 +90,11 @@ class TestDDTimeEX:
         t.minute = 30
         t.second = 45
         assert t.to_datetime() == datetime(2024, 6, 15, 10, 30, 45)
+
+    def test_from_datetime_preserves_seven_digit_subsecond_ticks(self):
+        t = DD_TIME_EX.from_datetime(datetime(2026, 7, 28, 13, 4, 5, 123456))
+        assert t.to_datetime() == datetime(2026, 7, 28, 13, 4, 5)
+        assert t.nMicrosecond == 1_234_560
 
 
 # ── NET_SDK_DEVICEINFO ──────────────────────────────────────────────
@@ -322,9 +331,13 @@ class TestStructSizes:
             NET_SDK_DEVICE_DISCOVERY_INFO,
             NET_SDK_IPC_DEVICE_INFO,
             NET_SDK_CH_DEVICE_STATUS,
+            NET_SDK_CH_SNAP_FACE_IMG_LIST,
+            NET_SDK_CH_SNAP_FACE_IMG_LIST_SEARCH,
             NET_SDK_DEV_SUPPORT,
             NET_SDK_SMART_SUPPORT,
             NET_SDK_DISK_INFO,
+            NET_SDK_FACE_IMG_INFO_CH,
+            NET_SDK_FACE_INFO_IMG_DATA,
             NET_SDK_ALARMINFO,
             NET_SDK_ALARMINFO_EX,
             NET_SDK_REC_FILE,
@@ -344,3 +357,9 @@ class TestStructSizes:
 
     def test_jpegpara_size(self):
         assert ct.sizeof(NET_SDK_JPEGPARA) == 4  # two ushorts
+
+    def test_native_face_struct_sizes_match_packed_64_bit_header(self):
+        assert ct.sizeof(NET_SDK_FACE_IMG_INFO_CH) == 36
+        assert ct.sizeof(NET_SDK_CH_SNAP_FACE_IMG_LIST) == 16
+        assert ct.sizeof(NET_SDK_CH_SNAP_FACE_IMG_LIST_SEARCH) == 52
+        assert ct.sizeof(NET_SDK_FACE_INFO_IMG_DATA) == 16

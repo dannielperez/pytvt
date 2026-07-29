@@ -211,6 +211,13 @@ class SmartEventType(IntEnum):
     THERMAL_AOI_LEAVE = 0x2A
 
 
+class FaceMatchCommand(IntEnum):
+    """Read-only NET_SDK_FaceMatchOperate commands used by pytvt."""
+
+    SEARCH_CHANNEL_CAPTURE_LIST = 0x0E
+    SEARCH_CHANNEL_CAPTURE_IMAGE = 0x0F
+
+
 # ── Access control ──────────────────────────────────────────────────
 
 

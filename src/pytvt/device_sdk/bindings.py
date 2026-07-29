@@ -195,6 +195,20 @@ def bind(lib: ct.CDLL) -> None:
         ct.c_char_p,  # sPicFileName
     ]
 
+    # ── Native face capture search ──────────────────────────────
+    # Optional on older NetSDK drops and recorder families.
+    if hasattr(lib, "NET_SDK_FaceMatchOperate"):
+        lib.NET_SDK_FaceMatchOperate.restype = ct.c_bool
+        lib.NET_SDK_FaceMatchOperate.argtypes = [
+            ct.c_long,  # lUserID
+            ct.c_uint,  # dwCommand
+            ct.c_void_p,  # lpInBuffer
+            ct.c_uint,  # dwInBufferSize
+            ct.c_void_p,  # lpOutBuffer
+            ct.c_uint,  # dwOutBufferSize
+            ct.POINTER(ct.c_uint),  # lpBytesReturned
+        ]
+
     # ── PTZ ─────────────────────────────────────────────────────
     lib.NET_SDK_PTZControl_Other.restype = ct.c_bool
     lib.NET_SDK_PTZControl_Other.argtypes = [

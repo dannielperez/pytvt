@@ -81,6 +81,21 @@ class DD_TIME_EX(ct.Structure):
             self.second,
         )
 
+    @classmethod
+    def from_datetime(cls, dt: datetime) -> DD_TIME_EX:
+        """Build the SDK's extended device-local time representation."""
+        t = cls()
+        t.year = dt.year
+        t.month = dt.month
+        t.mday = dt.day
+        t.hour = dt.hour
+        t.minute = dt.minute
+        t.second = dt.second
+        t.wday = dt.weekday()
+        # TVT encodes sub-seconds as seven 100-nanosecond digits.
+        t.nMicrosecond = dt.microsecond * 10
+        return t
+
 
 # ── Device info ─────────────────────────────────────────────────────
 
@@ -794,6 +809,63 @@ class NVRChlListStruct(ct.Structure):
     _pack_ = 4
     _fields_ = [
         ("chlList", (ct.c_char * 64) * 256),
+    ]
+
+
+# ── Native face capture search ─────────────────────────────────────
+
+
+class NET_SDK_FACE_IMG_INFO_CH(ct.Structure):
+    """One NVR channel face capture returned by FaceMatchOperate."""
+
+    _layout_ = "ms"
+    _pack_ = 4
+    _fields_ = [
+        ("frameTime", DD_TIME_EX),
+        ("snapImgId", ct.c_uint),
+        ("targetImgId", ct.c_uint),
+        ("chl", ct.c_uint),
+        ("isPanorama", ct.c_ubyte),
+        ("resv", ct.c_ubyte * 7),
+    ]
+
+
+class NET_SDK_CH_SNAP_FACE_IMG_LIST(ct.Structure):
+    """Page of native channel face captures."""
+
+    _layout_ = "ms"
+    _pack_ = 4
+    _fields_ = [
+        ("bEnd", ct.c_uint),
+        ("listNum", ct.c_uint),
+        ("pCHFaceImgItem", ct.POINTER(NET_SDK_FACE_IMG_INFO_CH)),
+    ]
+
+
+class NET_SDK_CH_SNAP_FACE_IMG_LIST_SEARCH(ct.Structure):
+    """Read-only native face capture search criteria."""
+
+    _layout_ = "ms"
+    _pack_ = 4
+    _fields_ = [
+        ("dwChannel", ct.c_uint),
+        ("startTime", DD_TIME_EX),
+        ("endTime", DD_TIME_EX),
+        ("pageIndex", ct.c_uint),
+        ("pageSize", ct.c_uint),
+        ("resv", ct.c_ubyte * 8),
+    ]
+
+
+class NET_SDK_FACE_INFO_IMG_DATA(ct.Structure):
+    """Image bytes returned for a native face capture."""
+
+    _layout_ = "ms"
+    _pack_ = 4
+    _fields_ = [
+        ("imgLen", ct.c_uint),
+        ("grade", ct.c_uint),
+        ("imgData", ct.POINTER(ct.c_ubyte)),
     ]
 
 
