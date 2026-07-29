@@ -23,6 +23,9 @@ import json
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from datetime import datetime
+
+from .client import NativeFaceCapture
 
 # ---------------------------------------------------------------------------
 # Response dataclasses
@@ -92,6 +95,29 @@ class CommandResult:
 
     success: bool
     error: str | None = None
+
+
+@dataclass(frozen=True)
+class FaceCaptureSearchResult:
+    """Typed legacy-NVR face index returned by the SDK bridge."""
+
+    success: bool
+    captures: tuple[NativeFaceCapture, ...] = ()
+    complete: bool = False
+    page: int = 1
+    error: str | None = None
+
+
+@dataclass(frozen=True)
+class FaceCaptureImageResult:
+    """One copied legacy-NVR face image, with a reportable failure reason."""
+
+    image: bytes | None = None
+    error: str | None = None
+
+    @property
+    def success(self) -> bool:
+        return bool(self.image)
 
 
 # ---------------------------------------------------------------------------
@@ -312,6 +338,115 @@ class SdkHttpClient:
             return RtspUrlResult(success=False, error=f"Connection error: {e.reason}")
         except TimeoutError:
             return RtspUrlResult(success=False, error=f"Timeout after {self._timeout}s")
+
+    def search_face_captures(
+        self,
+        ip: str,
+        username: str,
+        password: str,
+        *,
+        port: int = 6036,
+        channel: int,
+        start: datetime,
+        end: datetime,
+        page: int = 1,
+        page_size: int = 100,
+    ) -> FaceCaptureSearchResult:
+        """Search stored face captures through the process-isolated bridge.
+
+        ``start`` and ``end`` are naive recorder-local wall-clock values.
+        """
+        if start.utcoffset() is not None or end.utcoffset() is not None:
+            return FaceCaptureSearchResult(
+                success=False,
+                page=page,
+                error="start and end must be naive recorder-local datetimes",
+            )
+        try:
+            data = self._post_json(
+                "/face/captures/search",
+                self._connect_payload(
+                    ip,
+                    username,
+                    password,
+                    port,
+                    channel=channel,
+                    start=start.isoformat(timespec="microseconds"),
+                    end=end.isoformat(timespec="microseconds"),
+                    page=page,
+                    page_size=page_size,
+                ),
+            )
+            captures = tuple(
+                NativeFaceCapture(
+                    channel=item["channel"],
+                    captured_at_device=datetime.fromisoformat(item["captured_at_device"]),
+                    device_time_ticks=item["device_time_ticks"],
+                    snapshot_image_id=item["snapshot_image_id"],
+                    target_image_id=item["target_image_id"],
+                    panorama=item["panorama"],
+                )
+                for item in data.get("captures", ())
+            )
+            return FaceCaptureSearchResult(
+                success=data.get("success", False),
+                captures=captures,
+                complete=data.get("complete", False),
+                page=data.get("page", page),
+                error=data.get("error"),
+            )
+        except (KeyError, TypeError, ValueError) as error:
+            return FaceCaptureSearchResult(
+                success=False,
+                page=page,
+                error=f"Invalid bridge response: {error}",
+            )
+        except urllib.error.URLError as error:
+            return FaceCaptureSearchResult(
+                success=False,
+                page=page,
+                error=f"Connection error: {error.reason}",
+            )
+        except TimeoutError:
+            return FaceCaptureSearchResult(
+                success=False,
+                page=page,
+                error=f"Timeout after {self._timeout}s",
+            )
+
+    def get_face_capture_image(
+        self,
+        ip: str,
+        username: str,
+        password: str,
+        capture: NativeFaceCapture,
+        *,
+        port: int = 6036,
+    ) -> FaceCaptureImageResult:
+        """Fetch one native face capture image through the SDK bridge."""
+        try:
+            _status, body, content_type = self._post_raw(
+                "/face/captures/image",
+                self._connect_payload(
+                    ip,
+                    username,
+                    password,
+                    port,
+                    channel=capture.channel,
+                    captured_at_device=capture.captured_at_device.isoformat(timespec="microseconds"),
+                    device_time_ticks=capture.device_time_ticks,
+                    snapshot_image_id=capture.snapshot_image_id,
+                    target_image_id=capture.target_image_id,
+                    panorama=capture.panorama,
+                ),
+            )
+            if "image/jpeg" not in content_type or not body.startswith(b"\xff\xd8"):
+                return FaceCaptureImageResult(error="Bridge returned an invalid face JPEG")
+            return FaceCaptureImageResult(image=body)
+        except urllib.error.URLError as error:
+            return FaceCaptureImageResult(error=f"Connection error: {error.reason}")
+        except TimeoutError:
+            return FaceCaptureImageResult(error=f"Timeout after {self._timeout}s")
 
     def ptz(
         self,

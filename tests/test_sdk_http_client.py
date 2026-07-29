@@ -3,16 +3,20 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from http.client import HTTPResponse
 from io import BytesIO
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from pytvt.device_sdk import NativeFaceCapture
 from pytvt.device_sdk.http_client import (
     CommandResult,
     DeviceInfoResult,
     DeviceTimeResult,
+    FaceCaptureImageResult,
+    FaceCaptureSearchResult,
     RtspUrlResult,
     SdkHttpClient,
 )
@@ -255,6 +259,90 @@ class TestRtspUrl:
 
         assert isinstance(result, RtspUrlResult)
         assert "sub" in (result.rtsp_url or "")
+
+
+class TestFaceCaptures:
+    def test_search_parses_typed_device_local_results(self, client: SdkHttpClient) -> None:
+        with patch("pytvt.device_sdk.http_client.urllib.request.urlopen") as mock_open:
+            mock_open.return_value = _mock_response(
+                {
+                    "success": True,
+                    "captures": [
+                        {
+                            "channel": 6,
+                            "captured_at_device": "2026-07-28T13:04:05.123456",
+                            "device_time_ticks": 1_234_567,
+                            "snapshot_image_id": 41,
+                            "target_image_id": 7,
+                            "panorama": False,
+                        }
+                    ],
+                    "complete": True,
+                    "page": 2,
+                    "error": None,
+                }
+            )
+            result = client.search_face_captures(
+                *CREDS,
+                channel=6,
+                start=datetime(2026, 7, 28, 12),
+                end=datetime(2026, 7, 28, 14),
+                page=2,
+                page_size=10,
+            )
+
+        assert result == FaceCaptureSearchResult(
+            success=True,
+            captures=(
+                NativeFaceCapture(
+                    channel=6,
+                    captured_at_device=datetime(2026, 7, 28, 13, 4, 5, 123456),
+                    device_time_ticks=1_234_567,
+                    snapshot_image_id=41,
+                    target_image_id=7,
+                    panorama=False,
+                ),
+            ),
+            complete=True,
+            page=2,
+        )
+        request_body = json.loads(mock_open.call_args.args[0].data)
+        assert request_body["channel"] == 6
+        assert request_body["start"] == "2026-07-28T12:00:00.000000"
+        assert request_body["page_size"] == 10
+
+    def test_search_rejects_timezone_aware_input_without_http(self, client: SdkHttpClient) -> None:
+        with patch("pytvt.device_sdk.http_client.urllib.request.urlopen") as mock_open:
+            result = client.search_face_captures(
+                *CREDS,
+                channel=6,
+                start=datetime(2026, 7, 28, tzinfo=UTC),
+                end=datetime(2026, 7, 29, tzinfo=UTC),
+            )
+        assert result.success is False
+        assert "recorder-local" in (result.error or "")
+        mock_open.assert_not_called()
+
+    def test_image_returns_typed_jpeg(self, client: SdkHttpClient) -> None:
+        capture = NativeFaceCapture(6, datetime(2026, 7, 28, 13), 0, 41, 7, False)
+        jpeg = b"\xff\xd8face\xff\xd9"
+        with patch("pytvt.device_sdk.http_client.urllib.request.urlopen") as mock_open:
+            mock_open.return_value = _mock_response(jpeg, content_type="image/jpeg")
+            result = client.get_face_capture_image(*CREDS, capture)
+
+        assert result == FaceCaptureImageResult(image=jpeg)
+        request_body = json.loads(mock_open.call_args.args[0].data)
+        assert request_body["snapshot_image_id"] == 41
+        assert request_body["captured_at_device"] == "2026-07-28T13:00:00.000000"
+
+    def test_image_rejects_non_jpeg_response(self, client: SdkHttpClient) -> None:
+        capture = NativeFaceCapture(6, datetime(2026, 7, 28, 13), 0, 41, 7, False)
+        with patch("pytvt.device_sdk.http_client.urllib.request.urlopen") as mock_open:
+            mock_open.return_value = _mock_response(b"not-jpeg", content_type="image/jpeg")
+            result = client.get_face_capture_image(*CREDS, capture)
+
+        assert result.success is False
+        assert "invalid face JPEG" in (result.error or "")
 
 
 # ---------------------------------------------------------------------------
