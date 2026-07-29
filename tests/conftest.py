@@ -26,6 +26,20 @@ def isolate_pytvt_env(monkeypatch):
         monkeypatch.delenv(key, raising=False)
 
 
+@pytest.fixture(autouse=True)
+def no_http_rtsp_resolve(monkeypatch):
+    """Keep the RTSP-URL-over-HTTP resolve off the wire by default.
+
+    ``DeviceManager._rtsp_snapshot_attempt`` tries the web CGI before the
+    native resolver, so without this every snapshot test would dial the fake
+    IP it was constructed with and block until the socket timed out. Tests that
+    exercise this path patch it themselves; the inner patch wins.
+    """
+    from pytvt.device_sdk.manager import DeviceManager
+
+    monkeypatch.setattr(DeviceManager, "_http_rtsp_url", lambda *a, **k: None)
+
+
 @pytest.fixture()
 def default_config() -> ScannerConfig:
     return ScannerConfig(

@@ -42,9 +42,16 @@ class TestRtspSnapshotBytes:
         with patch.object(xml_api.subprocess, "run", return_value=proc):
             assert xml_api.rtsp_snapshot_bytes(RTSP) is None
 
-    def test_none_when_ffmpeg_missing(self):
+    def test_raises_when_ffmpeg_missing(self):
+        """A missing binary is a deployment fault, not a frameless stream.
+
+        This used to return ``None`` like every other failure, so an image
+        shipped without ffmpeg reported "RTSP stream yielded no frame" and
+        looked like a broken recorder. It has to be its own signal.
+        """
         with patch.object(xml_api.subprocess, "run", side_effect=FileNotFoundError):
-            assert xml_api.rtsp_snapshot_bytes(RTSP) is None
+            with pytest.raises(xml_api.FfmpegUnavailable):
+                xml_api.rtsp_snapshot_bytes(RTSP)
 
     def test_none_on_timeout(self):
         with patch.object(xml_api.subprocess, "run", side_effect=subprocess.TimeoutExpired("ffmpeg", 5)):
@@ -127,3 +134,68 @@ class TestManagerSnapshotPrefersRtsp:
             out = mgr.snapshot(channel=1)
         assert out == JPEG
         netsdk.assert_called_once()
+
+
+class TestRtspUrlIsResolvedWithoutANativeLogin:
+    """The RTSP leg must not pay for a NetSDK session just to learn a URL.
+
+    ``NET_SDK_GetRtspUrl`` needs a native login, measured at ~5.9s on a loaded
+    Palmares recorder. The bridge runs each capture in a throwaway process, so
+    that cost was paid on every single snapshot. The web CGI answers the same
+    question over HTTP.
+    """
+
+    def test_http_resolved_url_is_used_and_the_native_resolver_is_never_called(self):
+        mgr = DeviceManager(**CREDS, backend=Backend.NETSDK)
+        with (
+            patch.object(DeviceManager, "_http_rtsp_url", return_value=RTSP) as http_url,
+            patch.object(mgr, "rtsp_url") as native_url,
+            patch.object(xml_api, "rtsp_snapshot_bytes", return_value=JPEG) as grab,
+        ):
+            attempt = mgr._rtsp_snapshot_attempt(channel=1)
+
+        assert attempt.success is True
+        assert attempt.image == JPEG
+        http_url.assert_called_once()
+        native_url.assert_not_called()
+        assert grab.call_args.args[0] == RTSP
+
+    def test_native_resolver_still_covers_a_recorder_the_web_cgi_cannot_answer(self):
+        mgr = DeviceManager(**CREDS, backend=Backend.NETSDK)
+        with (
+            patch.object(DeviceManager, "_http_rtsp_url", return_value=None),
+            patch.object(mgr, "rtsp_url", return_value=RtspUrlResult(success=True, rtsp_url=RTSP)) as native_url,
+            patch.object(xml_api, "rtsp_snapshot_bytes", return_value=JPEG),
+        ):
+            attempt = mgr._rtsp_snapshot_attempt(channel=1)
+
+        assert attempt.success is True
+        native_url.assert_called_once()
+
+    def test_a_missing_ffmpeg_is_not_reported_as_an_empty_stream(self):
+        """The regression that hid this: a deployment fault blamed on the camera."""
+        mgr = DeviceManager(**CREDS, backend=Backend.NETSDK)
+        with (
+            patch.object(DeviceManager, "_http_rtsp_url", return_value=RTSP),
+            patch.object(
+                xml_api,
+                "rtsp_snapshot_bytes",
+                side_effect=xml_api.FfmpegUnavailable("ffmpeg is not installed"),
+            ),
+        ):
+            attempt = mgr._rtsp_snapshot_attempt(channel=1)
+
+        assert attempt.success is False
+        assert attempt.error_kind == "rtsp_error"
+        assert attempt.error_kind != "empty_frame"
+        assert "ffmpeg" in attempt.error
+
+
+class TestFfmpegAvailability:
+    def test_reports_present_when_on_path(self):
+        with patch.object(xml_api.shutil, "which", return_value="/usr/bin/ffmpeg"):
+            assert xml_api.ffmpeg_available() is True
+
+    def test_reports_absent_when_not_on_path(self):
+        with patch.object(xml_api.shutil, "which", return_value=None):
+            assert xml_api.ffmpeg_available() is False

@@ -112,6 +112,7 @@ import base64
 import hashlib
 import http.client
 import re
+import shutil
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -1790,6 +1791,20 @@ def _maybe_b64(value: str) -> bytes:
         return b""
 
 
+class FfmpegUnavailable(RuntimeError):
+    """The ``ffmpeg`` binary these frame grabs shell out to is not installed.
+
+    This is a deployment fault, not a device fault. It used to collapse into
+    the same ``None`` that a genuinely frameless stream returns, which made an
+    image missing ``ffmpeg`` look exactly like a broken recorder.
+    """
+
+
+def ffmpeg_available() -> bool:
+    """Return whether the ``ffmpeg`` binary can be found on PATH."""
+    return shutil.which("ffmpeg") is not None
+
+
 def _ffmpeg_rtsp_frame_args(rtsp_url: str, timeout: int) -> list[str]:
     """Shared ffmpeg argument list for grabbing one JPEG frame from RTSP."""
     return [
@@ -1801,6 +1816,8 @@ def _ffmpeg_rtsp_frame_args(rtsp_url: str, timeout: int) -> list[str]:
         str(timeout * 1_000_000),
         "-i",
         rtsp_url,
+        # Audio is never wanted for a still and decoding it only adds latency.
+        "-an",
         "-frames:v",
         "1",
         "-q:v",
@@ -1829,7 +1846,9 @@ def rtsp_snapshot(rtsp_url: str, output_path: str, timeout: int = 10) -> bool:
             timeout=timeout + 5,
         )
         return result.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0
-    except (subprocess.TimeoutExpired, FileNotFoundError):
+    except FileNotFoundError as exc:
+        raise FfmpegUnavailable("ffmpeg is not installed; RTSP frame grabs cannot run.") from exc
+    except subprocess.TimeoutExpired:
         return False
 
 
@@ -1840,8 +1859,13 @@ def rtsp_snapshot_bytes(rtsp_url: str, timeout: int = 10) -> bytes | None:
     but written to ``pipe:1`` so callers that want a JPEG in memory (e.g. the
     device-SDK ``snapshot`` preferred path) avoid a temp file.
 
-    Returns the JPEG bytes, or ``None`` on any failure (non-zero exit, empty
-    output, ffmpeg missing, or timeout).
+    Returns the JPEG bytes, or ``None`` when the stream yielded no frame
+    (non-zero exit, empty output, or timeout).
+
+    Raises:
+        FfmpegUnavailable: ``ffmpeg`` is not installed. This is deliberately
+            *not* folded into the ``None`` return: a missing binary is a
+            deployment fault and must not be reported as a frameless stream.
     """
     try:
         result = subprocess.run(
@@ -1849,7 +1873,9 @@ def rtsp_snapshot_bytes(rtsp_url: str, timeout: int = 10) -> bytes | None:
             capture_output=True,
             timeout=timeout + 5,
         )
-    except (subprocess.TimeoutExpired, FileNotFoundError):
+    except FileNotFoundError as exc:
+        raise FfmpegUnavailable("ffmpeg is not installed; RTSP frame grabs cannot run.") from exc
+    except subprocess.TimeoutExpired:
         return None
     if result.returncode == 0 and result.stdout:
         return result.stdout

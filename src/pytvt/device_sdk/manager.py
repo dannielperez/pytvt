@@ -164,6 +164,8 @@ class DeviceManager:
         username: Login username.
         password: Login password.
         port: SDK/protocol port (default 6036).
+        http_port: NVR web-CGI port, used to resolve an RTSP URL without a
+            native SDK login (default 80).
         backend: Force a specific backend (``None`` = auto-detect).
         api_url: Base URL for the SDK bridge service (used by sdk_http backend).
         sdk_path: Optional vendor SDK path for the netsdk backend.
@@ -180,6 +182,7 @@ class DeviceManager:
         password: str,
         *,
         port: int = 6036,
+        http_port: int = 80,
         identifier: str | None = None,
         connection_method: str | None = None,
         nat_server: str | None = None,
@@ -194,6 +197,7 @@ class DeviceManager:
         self._username = username
         self._password = password
         self._port = port
+        self._http_port = http_port
         self._identifier = (identifier or "").strip()
         self._connection_method = _resolve_connection_method(self._ip, self._identifier, connection_method)
         self._nat_server = (nat_server or "").strip() or None
@@ -442,6 +446,46 @@ class DeviceManager:
         """Direct-RTSP JPEG grab via the resolved RTSP URL; ``None`` on any failure."""
         return self._rtsp_snapshot_attempt(channel=channel, stream_type=stream_type, timeout=timeout).image
 
+    def _http_rtsp_url(self, *, channel: int = 0, stream_type: int = 0) -> str | None:
+        """Resolve the channel's RTSP URL over the NVR web CGI. ``None`` if it can't.
+
+        The point of this path is what it *doesn't* do. ``NET_SDK_GetRtspUrl``
+        needs a native session, and on a loaded recorder that login was
+        measured at ~5.9s — paid on every capture, because the bridge runs each
+        operation in a throwaway process and keeps no session. The web CGI
+        answers the same question over HTTP and points straight at the camera
+        rather than the NVR's relay.
+
+        Best-effort by design: any failure returns ``None`` so the caller falls
+        back to the native resolver it used before.
+        """
+        if not self._ip:
+            return None
+        # Lazy import keeps the NVR XML/HTTP module off the device_sdk load path.
+        from ..xml_api import NvrClient
+
+        stream_name = {0: "main", 1: "sub", 2: "third"}.get(stream_type, "main")
+        try:
+            with NvrClient(
+                self._ip,
+                self._username,
+                self._password,
+                port=self._http_port,
+                timeout=min(self._timeout, 10),
+            ) as nvr:
+                nvr.login()
+                # The web CGI numbers channels from 1; device_sdk from 0.
+                return nvr.get_rtsp_url(channel + 1, stream_name) or None
+        except Exception as exc:
+            logger.info(
+                "HTTP RTSP url resolve failed ip=%s channel=%s: %s: %s",
+                self._ip,
+                channel,
+                type(exc).__name__,
+                exc,
+            )
+            return None
+
     def _rtsp_snapshot_attempt(self, *, channel: int = 0, stream_type: int = 0, timeout: int = 10) -> SnapshotAttempt:
         """RTSP leg, reporting which step produced no frame.
 
@@ -449,16 +493,19 @@ class DeviceManager:
         us a stream URL, and it gave us one that yielded no frame. They point
         at different problems, so they are reported apart.
         """
-        result = self.rtsp_url(channel=channel, stream_type=stream_type)
-        if not result.success or not isinstance(result.rtsp_url, str) or not result.rtsp_url:
-            detail = result.error or "Device did not return an RTSP URL."
-            logger.info("RTSP url unavailable ip=%s channel=%s: %s", self._ip, channel, detail)
-            return SnapshotAttempt(method="rtsp", error=str(detail), error_kind="no_stream_url")
+        rtsp_url = self._http_rtsp_url(channel=channel, stream_type=stream_type)
+        if rtsp_url is None:
+            result = self.rtsp_url(channel=channel, stream_type=stream_type)
+            if not result.success or not isinstance(result.rtsp_url, str) or not result.rtsp_url:
+                detail = result.error or "Device did not return an RTSP URL."
+                logger.info("RTSP url unavailable ip=%s channel=%s: %s", self._ip, channel, detail)
+                return SnapshotAttempt(method="rtsp", error=str(detail), error_kind="no_stream_url")
+            rtsp_url = result.rtsp_url
         # Lazy import avoids pulling the NVR XML/HTTP module at device_sdk load.
         from ..xml_api import rtsp_snapshot_bytes
 
         try:
-            data = rtsp_snapshot_bytes(result.rtsp_url, timeout=timeout)
+            data = rtsp_snapshot_bytes(rtsp_url, timeout=timeout)
         except Exception as exc:
             logger.warning(
                 "RTSP frame grab failed ip=%s channel=%s: %s: %s",
