@@ -27,7 +27,7 @@ import time
 import weakref
 from collections.abc import Callable, Iterable
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -184,7 +184,9 @@ class NativeFaceCapture:
     reinterpret it in the bridge/container timezone.
     """
 
-    channel: int
+    _native_channel: int = field(repr=False)
+    channel_index: int | None = field(init=False)
+    channel_deleted: bool = field(init=False)
     captured_at_device: datetime
     device_time_ticks: int
     snapshot_image_id: int
@@ -192,8 +194,15 @@ class NativeFaceCapture:
     panorama: bool
 
     def __post_init__(self) -> None:
-        if isinstance(self.channel, bool) or not isinstance(self.channel, int) or not 0 <= self.channel <= 255:
-            raise ValueError("channel must be a NetSDK index between 0 and 255")
+        if (
+            isinstance(self._native_channel, bool)
+            or not isinstance(self._native_channel, int)
+            or not 0 <= self._native_channel <= 255
+        ):
+            raise ValueError("_native_channel must be a NetSDK identity between 0 and 255")
+        deleted = self._native_channel == 255
+        object.__setattr__(self, "channel_deleted", deleted)
+        object.__setattr__(self, "channel_index", None if deleted else self._native_channel)
         if not isinstance(self.captured_at_device, datetime):
             raise TypeError("captured_at_device must be a datetime")
         if self.captured_at_device.utcoffset() is not None:
@@ -221,6 +230,28 @@ class NativeFaceCapturePage:
     captures: tuple[NativeFaceCapture, ...]
     complete: bool
     page: int
+
+
+def _validate_face_search_input(
+    channel: int,
+    start: datetime,
+    end: datetime,
+    page: int,
+    page_size: int,
+) -> None:
+    """Keep local and HTTP face search backends on one input contract."""
+    if isinstance(channel, bool) or not isinstance(channel, int) or not 0 <= channel < 255:
+        raise ValueError("channel must be a routeable NetSDK index between 0 and 254")
+    if not isinstance(start, datetime) or not isinstance(end, datetime):
+        raise TypeError("start and end must be datetimes")
+    if start.utcoffset() is not None or end.utcoffset() is not None:
+        raise ValueError("start and end must be naive recorder-local datetimes")
+    if start > end:
+        raise ValueError("start must be before or equal to end")
+    if isinstance(page, bool) or not isinstance(page, int) or not 1 <= page <= 0xFFFFFFFF:
+        raise ValueError("page must be an unsigned 32-bit positive integer")
+    if isinstance(page_size, bool) or not isinstance(page_size, int) or not 1 <= page_size <= 100:
+        raise ValueError("page_size must be between 1 and 100")
 
 
 @dataclass(frozen=True, slots=True)
@@ -966,18 +997,7 @@ class DeviceSession:
         carries no timezone. Results copy out every vendor-owned structure
         before this method returns.
         """
-        if isinstance(channel, bool) or not isinstance(channel, int) or not 0 <= channel <= 255:
-            raise ValueError("channel must be a NetSDK index between 0 and 255")
-        if not isinstance(start, datetime) or not isinstance(end, datetime):
-            raise TypeError("start and end must be datetimes")
-        if start.utcoffset() is not None or end.utcoffset() is not None:
-            raise ValueError("start and end must be naive recorder-local datetimes")
-        if start > end:
-            raise ValueError("start must be before or equal to end")
-        if isinstance(page, bool) or not isinstance(page, int) or not 1 <= page <= 0xFFFFFFFF:
-            raise ValueError("page must be an unsigned 32-bit positive integer")
-        if isinstance(page_size, bool) or not isinstance(page_size, int) or not 1 <= page_size <= 100:
-            raise ValueError("page_size must be between 1 and 100")
+        _validate_face_search_input(channel, start, end, page, page_size)
 
         operate = self._require("NET_SDK_FaceMatchOperate")
         query = NET_SDK_CH_SNAP_FACE_IMG_LIST_SEARCH(
@@ -1004,6 +1024,8 @@ class DeviceSession:
         )
         if returned.value > output_size:
             raise NetSdkError("Face capture search returned an invalid byte count")
+        if returned.value < ct.sizeof(NET_SDK_CH_SNAP_FACE_IMG_LIST):
+            raise NetSdkError("Face capture search returned a truncated result header")
 
         result = ct.cast(output, ct.POINTER(NET_SDK_CH_SNAP_FACE_IMG_LIST)).contents
         if result.listNum > page_size:
@@ -1019,7 +1041,7 @@ class DeviceSession:
             )
             captures.append(
                 NativeFaceCapture(
-                    channel=int(native.chl),
+                    _native_channel=int(native.chl),
                     captured_at_device=captured_at,
                     device_time_ticks=int(native.frameTime.nMicrosecond),
                     snapshot_image_id=int(native.snapImgId),
@@ -1050,7 +1072,7 @@ class DeviceSession:
             frameTime=DD_TIME_EX.from_datetime(capture.captured_at_device),
             snapImgId=capture.snapshot_image_id,
             targetImgId=capture.target_image_id,
-            chl=capture.channel,
+            chl=capture._native_channel,
             isPanorama=int(capture.panorama),
         )
         native.frameTime.nMicrosecond = capture.device_time_ticks
@@ -1071,6 +1093,8 @@ class DeviceSession:
         )
         if returned.value > output_size:
             raise NetSdkError("Face capture image returned an invalid byte count")
+        if returned.value < ct.sizeof(NET_SDK_FACE_INFO_IMG_DATA):
+            raise NetSdkError("Face capture image returned a truncated result header")
 
         result = ct.cast(output, ct.POINTER(NET_SDK_FACE_INFO_IMG_DATA)).contents
         if result.imgLen > max_image_bytes:

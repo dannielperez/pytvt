@@ -25,7 +25,10 @@ import urllib.request
 from dataclasses import dataclass
 from datetime import datetime
 
-from .client import NativeFaceCapture
+from .client import NativeFaceCapture, _validate_face_search_input
+
+MAX_JSON_RESPONSE_BYTES = 1024 * 1024
+MAX_BINARY_RESPONSE_BYTES = 32 * 1024 * 1024
 
 # ---------------------------------------------------------------------------
 # Response dataclasses
@@ -156,6 +159,22 @@ class SdkHttpClient:
         body.update(extra)
         return json.dumps(body).encode()
 
+    @staticmethod
+    def _read_bounded(response: object, max_bytes: int) -> bytes:
+        headers = getattr(response, "headers", {})
+        content_length = headers.get("Content-Length") if hasattr(headers, "get") else None
+        if content_length is not None:
+            try:
+                declared = int(content_length)
+            except (TypeError, ValueError) as error:
+                raise ValueError("Bridge returned an invalid Content-Length") from error
+            if declared > max_bytes:
+                raise ValueError("Bridge response exceeds configured byte limit")
+        body = response.read(max_bytes + 1)
+        if len(body) > max_bytes:
+            raise ValueError("Bridge response exceeds configured byte limit")
+        return body
+
     def _post_json(self, path: str, payload: bytes) -> dict:
         req = urllib.request.Request(
             f"{self._base_url}{path}",
@@ -164,9 +183,15 @@ class SdkHttpClient:
             method="POST",
         )
         with urllib.request.urlopen(req, timeout=self._timeout) as resp:
-            return json.loads(resp.read().decode())
+            return json.loads(self._read_bounded(resp, MAX_JSON_RESPONSE_BYTES).decode())
 
-    def _post_raw(self, path: str, payload: bytes) -> tuple[int, bytes, str]:
+    def _post_raw(
+        self,
+        path: str,
+        payload: bytes,
+        *,
+        max_bytes: int = MAX_BINARY_RESPONSE_BYTES,
+    ) -> tuple[int, bytes, str]:
         """POST returning (status, body_bytes, content_type)."""
         req = urllib.request.Request(
             f"{self._base_url}{path}",
@@ -175,7 +200,7 @@ class SdkHttpClient:
             method="POST",
         )
         with urllib.request.urlopen(req, timeout=self._timeout) as resp:
-            return resp.status, resp.read(), resp.headers.get("Content-Type", "")
+            return resp.status, self._read_bounded(resp, max_bytes), resp.headers.get("Content-Type", "")
 
     # -- public API ---------------------------------------------------------
 
@@ -356,12 +381,7 @@ class SdkHttpClient:
 
         ``start`` and ``end`` are naive recorder-local wall-clock values.
         """
-        if start.utcoffset() is not None or end.utcoffset() is not None:
-            return FaceCaptureSearchResult(
-                success=False,
-                page=page,
-                error="start and end must be naive recorder-local datetimes",
-            )
+        _validate_face_search_input(channel, start, end, page, page_size)
         try:
             data = self._post_json(
                 "/face/captures/search",
@@ -377,16 +397,19 @@ class SdkHttpClient:
                     page_size=page_size,
                 ),
             )
+            raw_captures = data.get("captures", ())
+            if not isinstance(raw_captures, list) or len(raw_captures) > page_size:
+                raise ValueError("capture count exceeds the requested page size")
             captures = tuple(
                 NativeFaceCapture(
-                    channel=item["channel"],
+                    _native_channel=item["native_channel_identity"],
                     captured_at_device=datetime.fromisoformat(item["captured_at_device"]),
                     device_time_ticks=item["device_time_ticks"],
                     snapshot_image_id=item["snapshot_image_id"],
                     target_image_id=item["target_image_id"],
                     panorama=item["panorama"],
                 )
-                for item in data.get("captures", ())
+                for item in raw_captures
             )
             return FaceCaptureSearchResult(
                 success=data.get("success", False),
@@ -432,7 +455,7 @@ class SdkHttpClient:
                     username,
                     password,
                     port,
-                    channel=capture.channel,
+                    native_channel_identity=capture._native_channel,
                     captured_at_device=capture.captured_at_device.isoformat(timespec="microseconds"),
                     device_time_ticks=capture.device_time_ticks,
                     snapshot_image_id=capture.snapshot_image_id,
@@ -443,6 +466,8 @@ class SdkHttpClient:
             if "image/jpeg" not in content_type or not body.startswith(b"\xff\xd8"):
                 return FaceCaptureImageResult(error="Bridge returned an invalid face JPEG")
             return FaceCaptureImageResult(image=body)
+        except ValueError as error:
+            return FaceCaptureImageResult(error=str(error))
         except urllib.error.URLError as error:
             return FaceCaptureImageResult(error=f"Connection error: {error.reason}")
         except TimeoutError:

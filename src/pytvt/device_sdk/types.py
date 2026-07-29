@@ -91,7 +91,8 @@ class DD_TIME_EX(ct.Structure):
         t.hour = dt.hour
         t.minute = dt.minute
         t.second = dt.second
-        t.wday = dt.weekday()
+        # SDK convention matches C tm_wday: Sunday=0 ... Saturday=6.
+        t.wday = dt.isoweekday() % 7
         # TVT encodes sub-seconds as seven 100-nanosecond digits.
         t.nMicrosecond = dt.microsecond * 10
         return t

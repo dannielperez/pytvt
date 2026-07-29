@@ -96,6 +96,16 @@ class TestDDTimeEX:
         assert t.to_datetime() == datetime(2026, 7, 28, 13, 4, 5)
         assert t.nMicrosecond == 1_234_560
 
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            (datetime(2026, 8, 2), 0),  # Sunday
+            (datetime(2026, 8, 3), 1),  # Monday
+        ],
+    )
+    def test_from_datetime_uses_sdk_sunday_based_weekday(self, value, expected):
+        assert DD_TIME_EX.from_datetime(value).wday == expected
+
 
 # ── NET_SDK_DEVICEINFO ──────────────────────────────────────────────
 

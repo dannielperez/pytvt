@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from http.client import HTTPResponse
 from io import BytesIO
 from unittest.mock import MagicMock, patch
@@ -269,7 +269,9 @@ class TestFaceCaptures:
                     "success": True,
                     "captures": [
                         {
-                            "channel": 6,
+                            "channel_index": 6,
+                            "channel_deleted": False,
+                            "native_channel_identity": 6,
                             "captured_at_device": "2026-07-28T13:04:05.123456",
                             "device_time_ticks": 1_234_567,
                             "snapshot_image_id": 41,
@@ -295,7 +297,7 @@ class TestFaceCaptures:
             success=True,
             captures=(
                 NativeFaceCapture(
-                    channel=6,
+                    _native_channel=6,
                     captured_at_device=datetime(2026, 7, 28, 13, 4, 5, 123456),
                     device_time_ticks=1_234_567,
                     snapshot_image_id=41,
@@ -313,15 +315,72 @@ class TestFaceCaptures:
 
     def test_search_rejects_timezone_aware_input_without_http(self, client: SdkHttpClient) -> None:
         with patch("pytvt.device_sdk.http_client.urllib.request.urlopen") as mock_open:
+            with pytest.raises(ValueError, match="recorder-local"):
+                client.search_face_captures(
+                    *CREDS,
+                    channel=6,
+                    start=datetime(2026, 7, 28, tzinfo=timezone.utc),
+                    end=datetime(2026, 7, 29, tzinfo=timezone.utc),
+                )
+        mock_open.assert_not_called()
+
+    @pytest.mark.parametrize(
+        ("channel", "start", "end", "page", "page_size"),
+        [
+            (255, datetime(2026, 7, 28), datetime(2026, 7, 29), 1, 100),
+            (6, datetime(2026, 7, 29), datetime(2026, 7, 28), 1, 100),
+            (6, datetime(2026, 7, 28), datetime(2026, 7, 29), 0, 100),
+            (6, datetime(2026, 7, 28), datetime(2026, 7, 29), 1, 101),
+        ],
+    )
+    def test_search_uses_native_validation_before_http(
+        self,
+        client: SdkHttpClient,
+        channel,
+        start,
+        end,
+        page,
+        page_size,
+    ) -> None:
+        with patch("pytvt.device_sdk.http_client.urllib.request.urlopen") as mock_open:
+            with pytest.raises(ValueError):
+                client.search_face_captures(
+                    *CREDS,
+                    channel=channel,
+                    start=start,
+                    end=end,
+                    page=page,
+                    page_size=page_size,
+                )
+        mock_open.assert_not_called()
+
+    def test_search_rejects_more_results_than_requested(self, client: SdkHttpClient) -> None:
+        capture = {
+            "native_channel_identity": 6,
+            "captured_at_device": "2026-07-28T13:04:05",
+            "device_time_ticks": 0,
+            "snapshot_image_id": 41,
+            "target_image_id": 7,
+            "panorama": False,
+        }
+        with patch("pytvt.device_sdk.http_client.urllib.request.urlopen") as mock_open:
+            mock_open.return_value = _mock_response(
+                {
+                    "success": True,
+                    "captures": [capture, capture],
+                    "complete": False,
+                    "page": 1,
+                }
+            )
             result = client.search_face_captures(
                 *CREDS,
                 channel=6,
-                start=datetime(2026, 7, 28, tzinfo=UTC),
-                end=datetime(2026, 7, 29, tzinfo=UTC),
+                start=datetime(2026, 7, 28),
+                end=datetime(2026, 7, 29),
+                page_size=1,
             )
         assert result.success is False
-        assert "recorder-local" in (result.error or "")
-        mock_open.assert_not_called()
+        assert "page size" in (result.error or "")
 
     def test_image_returns_typed_jpeg(self, client: SdkHttpClient) -> None:
         capture = NativeFaceCapture(6, datetime(2026, 7, 28, 13), 0, 41, 7, False)
@@ -332,6 +391,7 @@ class TestFaceCaptures:
 
         assert result == FaceCaptureImageResult(image=jpeg)
         request_body = json.loads(mock_open.call_args.args[0].data)
+        assert request_body["native_channel_identity"] == 6
         assert request_body["snapshot_image_id"] == 41
         assert request_body["captured_at_device"] == "2026-07-28T13:00:00.000000"
 
@@ -343,6 +403,15 @@ class TestFaceCaptures:
 
         assert result.success is False
         assert "invalid face JPEG" in (result.error or "")
+
+    def test_image_rejects_oversized_content_length(self, client: SdkHttpClient) -> None:
+        capture = NativeFaceCapture(6, datetime(2026, 7, 28, 13), 0, 41, 7, False)
+        response = _mock_response(b"\xff\xd8face", content_type="image/jpeg")
+        response.headers["Content-Length"] = str(32 * 1024 * 1024 + 1)
+        with patch("pytvt.device_sdk.http_client.urllib.request.urlopen", return_value=response):
+            result = client.get_face_capture_image(*CREDS, capture)
+        assert result.success is False
+        assert "byte limit" in (result.error or "")
 
 
 # ---------------------------------------------------------------------------
