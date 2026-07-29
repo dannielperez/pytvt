@@ -72,6 +72,7 @@ from .models import (
     RtspServerConfig,
     ScannerConfig,
     ScanResult,
+    netsdk_channel_index,
     parse_face_event_timestamp,
 )
 from .output import save_csv, save_failed_devices, save_json, save_xlsx_per_site
@@ -143,6 +144,7 @@ __all__ = [
     "RtspServerConfig",
     "ScannerConfig",
     "ScanResult",
+    "netsdk_channel_index",
     # NVR API client (NVR CGI / session auth)
     "NvrClient",
     # Web API client (TVT HTTP API / LAPI / Basic auth)

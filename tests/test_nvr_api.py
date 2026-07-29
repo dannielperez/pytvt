@@ -192,6 +192,7 @@ class TestDeleteNvrDevices:
         assert channels[0].poe_index == 1
         assert channels[0].chl_type == "digital"
         assert channels[0].access_type == "0"
+        assert channels[0].netsdk_channel_index == 0
 
     def test_query_channels_genuine_empty_returns_empty_list(self):
         # success + recognized <content> container + total=0 → genuinely empty,
