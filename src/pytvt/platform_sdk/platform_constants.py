@@ -98,6 +98,80 @@ def connect_state_is_online(value: int) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# SDK error codes (PlatErrorDef.h)
+# ---------------------------------------------------------------------------
+# ``Plat_LoginEx`` collapses every failure mode into a bare ``-1``.
+# ``Plat_GetLastErrorEx`` is the only thing that separates a locked account from
+# a wrong password from an unreachable server, so reporting the return value
+# alone reports nothing actionable.
+
+PLAT_SUCCESS: Final = 0
+PLAT_ERROR_UNKNOWN: Final = 1
+PLAT_ERROR_NOINIT: Final = 2
+PLAT_ERROR_NO_LOGIN: Final = 3
+PLAT_ERROR_PASSWORD: Final = 4
+PLAT_ERROR_NOENOUGHPRI: Final = 5
+PLAT_ERROR_FAIL_CONNECT: Final = 6
+PLAT_ERROR_NO_USER: Final = 7
+PLAT_ERROR_USER_LOCKED: Final = 8
+PLAT_ERROR_USER_ALREADY_LOGIN: Final = 9
+PLAT_ERROR_DISK_SPACE_NO_ENOUGH: Final = 10
+PLAT_ERROR_NODE_NET_DISCONNECT: Final = 11
+PLAT_ERROR_NODE_NET_OFFLINE: Final = 12
+PLAT_ERROR_INVALID_PARAM: Final = 13
+PLAT_ERROR_NO_SUPPORT: Final = 14
+PLAT_ERROR_DEVICE_BUSY: Final = 15
+PLAT_ERROR_TIMEOUT: Final = 24
+PLAT_ERROR_BUFFER_TOO_SMALL: Final = 25
+
+_PLAT_ERROR_NAMES: Final[Mapping[int, str]] = {
+    PLAT_SUCCESS: "success",
+    PLAT_ERROR_UNKNOWN: "unknown_error",
+    PLAT_ERROR_NOINIT: "not_initialized",
+    PLAT_ERROR_NO_LOGIN: "not_logged_in",
+    PLAT_ERROR_PASSWORD: "password_mismatch",
+    PLAT_ERROR_NOENOUGHPRI: "insufficient_authority",
+    PLAT_ERROR_FAIL_CONNECT: "connect_failed",
+    PLAT_ERROR_NO_USER: "no_such_user",
+    PLAT_ERROR_USER_LOCKED: "user_locked",
+    PLAT_ERROR_USER_ALREADY_LOGIN: "user_already_logged_in",
+    PLAT_ERROR_DISK_SPACE_NO_ENOUGH: "disk_space_low",
+    PLAT_ERROR_NODE_NET_DISCONNECT: "node_disconnected",
+    PLAT_ERROR_NODE_NET_OFFLINE: "node_offline",
+    PLAT_ERROR_INVALID_PARAM: "invalid_param",
+    PLAT_ERROR_NO_SUPPORT: "not_supported",
+    PLAT_ERROR_DEVICE_BUSY: "device_busy",
+    PLAT_ERROR_TIMEOUT: "timeout",
+    PLAT_ERROR_BUFFER_TOO_SMALL: "buffer_too_small",
+}
+
+# Failures that point at the account rather than the transport.
+_PLAT_CREDENTIAL_ERRORS: Final[frozenset[int]] = frozenset(
+    {
+        PLAT_ERROR_PASSWORD,
+        PLAT_ERROR_NOENOUGHPRI,
+        PLAT_ERROR_NO_USER,
+        PLAT_ERROR_USER_LOCKED,
+        PLAT_ERROR_USER_ALREADY_LOGIN,
+    }
+)
+
+
+def plat_error_name(value: int) -> str:
+    """Return the lower_snake_case semantic name for a PlatErrorDef.h code."""
+    return _PLAT_ERROR_NAMES.get(int(value), "unknown")
+
+
+def plat_error_is_credential(value: int) -> bool:
+    """Return True when the code points at the account rather than the network.
+
+    Lets a caller separate "fix the account" (locked, wrong password, no such
+    user) from "fix the connection" — a distinction the bare ``-1`` erases.
+    """
+    return int(value) in _PLAT_CREDENTIAL_ERRORS
+
+
+# ---------------------------------------------------------------------------
 # Node types (enPlat_NodeType — SDKDefs.h)
 # ---------------------------------------------------------------------------
 

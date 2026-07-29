@@ -120,6 +120,8 @@ CAPABILITY_SYMBOLS: dict[str, dict[SdkNamespace, str]] = {
     },
     "get_last_error": {
         SdkNamespace.NET_SDK: "NET_SDK_GetLastError",
+        # Plat_* collapses every failure into -1; this is the only reason source.
+        SdkNamespace.PLAT: "Plat_GetLastErrorEx",
     },
 }
 
@@ -224,6 +226,7 @@ def _build_argtypes() -> dict[str, dict[SdkNamespace, tuple[Any, ...]]]:
         },
         "get_last_error": {
             SdkNamespace.NET_SDK: (),
+            SdkNamespace.PLAT: (),
         },
     }
 
@@ -272,6 +275,8 @@ def _build_restypes() -> dict[str, dict[SdkNamespace, Any]]:
         },
         "get_last_error": {
             SdkNamespace.NET_SDK: ct.c_uint,
+            # PlatErrorDef.h codes are small signed ints, not NET_SDK's c_uint.
+            SdkNamespace.PLAT: ct.c_int,
         },
     }
 

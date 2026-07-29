@@ -598,6 +598,25 @@ class PlatformSDKClient:
         """Resolve, bind, and return the ctypes function for *capability*."""
         return self._ns.bind_function(capability)
 
+    def _reason_suffix(self) -> str:
+        """Render the SDK's last error as a human-readable clause.
+
+        Reuses ``NamespacedLibrary.call_get_last_error`` rather than rebinding
+        the symbol. ``Plat_GetLastErrorEx`` is absent from some builds, so a
+        missing reason degrades to a note — it must never replace the failure
+        being reported.
+        """
+        try:
+            code = self._ns.call_get_last_error()
+        except Exception:
+            code = None
+        if code is None:
+            return " (reason unavailable: Plat_GetLastErrorEx not callable)"
+        suffix = f" (reason: {pc.plat_error_name(code)} [{code}]"
+        if pc.plat_error_is_credential(code):
+            suffix += ", account-side — check the user on the management server"
+        return suffix + ")"
+
     def login(self, username: str, password: str) -> None:
         """Authenticate and wait for PLAT_LOGIN_SUCCESS or raise."""
         state = _PlatSessionState()
@@ -662,8 +681,12 @@ class PlatformSDKClient:
             password.encode("utf-8"),
         )
         if login_id < 0:
+            # -1 is the SDK's only return for every failure mode; without the
+            # last-error code a locked account is indistinguishable from an
+            # unreachable server.
             raise ManagementAuthError(
-                f"Plat_LoginEx returned invalid login ID {login_id} for {self._host}:{self._port}"
+                f"Plat_LoginEx returned invalid login ID {login_id} "
+                f"for {self._host}:{self._port}{self._reason_suffix()}"
             )
 
         self._login_id = login_id
@@ -675,6 +698,7 @@ class PlatformSDKClient:
             raise ManagementAuthError(
                 f"PlatformSDK login timed out or failed for {self._host}:{self._port} "
                 f"(connect_state={connect_state}, error_id={error_id})"
+                f"{self._reason_suffix()}"
             )
 
         self._authenticated = True
