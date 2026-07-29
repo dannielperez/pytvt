@@ -36,7 +36,7 @@ native SDK bindings. It still requires a local vendor SDK installation, but it
 no longer depends on Node.js or any bridge scripts.
 """
 
-__version__ = "1.2.0"
+__version__ = "1.2.1"
 
 from . import workflows  # Provisional — technician-facing workflow orchestrations.
 from .alarm_protocol import ParsedAlarmFrame, parse_alarm_frame
@@ -72,6 +72,7 @@ from .models import (
     RtspServerConfig,
     ScannerConfig,
     ScanResult,
+    netsdk_channel_index,
     parse_face_event_timestamp,
 )
 from .output import save_csv, save_failed_devices, save_json, save_xlsx_per_site
@@ -143,6 +144,7 @@ __all__ = [
     "RtspServerConfig",
     "ScannerConfig",
     "ScanResult",
+    "netsdk_channel_index",
     # NVR API client (NVR CGI / session auth)
     "NvrClient",
     # Web API client (TVT HTTP API / LAPI / Basic auth)

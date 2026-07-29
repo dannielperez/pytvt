@@ -306,6 +306,21 @@ class PlatformAccessConfig:
     report_id: str
 
 
+def netsdk_channel_index(channel_number: int) -> int:
+    """Convert a recorder display channel number to its NetSDK index.
+
+    ``queryDevList`` numbers channels from 1, matching the recorder UI, while
+    native NetSDK media and smart-event calls number the same channels from 0.
+    Keep that vendor-specific conversion here so consumers do not duplicate an
+    easy-to-miss off-by-one rule.
+    """
+    if isinstance(channel_number, bool) or not isinstance(channel_number, int):
+        raise TypeError("channel_number must be an integer")
+    if channel_number < 1:
+        raise ValueError("channel_number must be 1 or greater")
+    return channel_number - 1
+
+
 @dataclass
 class Channel:
     """A camera channel registered on the NVR (from ``queryDevList``)."""
@@ -325,6 +340,11 @@ class Channel:
     access_type: str = ""
     auto_report_id: str = ""
     guid: str = ""  # channel GUID ({0000000N-...}) used by per-channel AI commands
+
+    @property
+    def netsdk_channel_index(self) -> int:
+        """Return this 1-based inventory channel as a 0-based NetSDK index."""
+        return netsdk_channel_index(self.chl_num)
 
 
 @dataclass
