@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 from datetime import datetime, timezone
 from http.client import HTTPResponse
@@ -15,6 +16,8 @@ from pytvt.device_sdk.http_client import (
     CommandResult,
     DeviceInfoResult,
     DeviceTimeResult,
+    FaceCaptureBatchItem,
+    FaceCaptureBatchResult,
     FaceCaptureImageResult,
     FaceCaptureSearchResult,
     RtspUrlResult,
@@ -394,6 +397,111 @@ class TestFaceCaptures:
         assert request_body["native_channel_identity"] == 6
         assert request_body["snapshot_image_id"] == 41
         assert request_body["captured_at_device"] == "2026-07-28T13:00:00.000000"
+
+    def test_batch_parses_images_and_per_item_gaps(self, client: SdkHttpClient) -> None:
+        jpeg = b"\xff\xd8face\xff\xd9"
+        capture = {
+            "channel_index": 6,
+            "channel_deleted": False,
+            "native_channel_identity": 6,
+            "captured_at_device": "2026-07-28T13:04:05.123456",
+            "device_time_ticks": 1_234_567,
+            "snapshot_image_id": 41,
+            "target_image_id": 7,
+            "panorama": False,
+        }
+        with patch("pytvt.device_sdk.http_client.urllib.request.urlopen") as mock_open:
+            mock_open.return_value = _mock_response(
+                {
+                    "success": True,
+                    "captures": [
+                        {
+                            **capture,
+                            "image_base64": base64.b64encode(jpeg).decode(),
+                            "image_error": None,
+                        },
+                        {
+                            **capture,
+                            "snapshot_image_id": 42,
+                            "image_base64": None,
+                            "image_error": "copy failed",
+                        },
+                    ],
+                    "complete": True,
+                    "page": 1,
+                    "error": None,
+                },
+            )
+            result = client.search_face_capture_images(
+                *CREDS,
+                channel=6,
+                start=datetime(2026, 7, 28, 12),
+                end=datetime(2026, 7, 28, 14),
+                page_size=2,
+            )
+
+        assert result == FaceCaptureBatchResult(
+            success=True,
+            items=(
+                FaceCaptureBatchItem(
+                    capture=NativeFaceCapture(
+                        6,
+                        datetime(2026, 7, 28, 13, 4, 5, 123456),
+                        1_234_567,
+                        41,
+                        7,
+                        False,
+                    ),
+                    image=jpeg,
+                ),
+                FaceCaptureBatchItem(
+                    capture=NativeFaceCapture(
+                        6,
+                        datetime(2026, 7, 28, 13, 4, 5, 123456),
+                        1_234_567,
+                        42,
+                        7,
+                        False,
+                    ),
+                    error="copy failed",
+                ),
+            ),
+            complete=True,
+            page=1,
+        )
+        request = mock_open.call_args.args[0]
+        assert request.full_url.endswith("/face/captures/batch")
+
+    def test_batch_rejects_invalid_image_base64(self, client: SdkHttpClient) -> None:
+        with patch("pytvt.device_sdk.http_client.urllib.request.urlopen") as mock_open:
+            mock_open.return_value = _mock_response(
+                {
+                    "success": True,
+                    "captures": [
+                        {
+                            "native_channel_identity": 6,
+                            "captured_at_device": "2026-07-28T13:04:05",
+                            "device_time_ticks": 0,
+                            "snapshot_image_id": 41,
+                            "target_image_id": 7,
+                            "panorama": False,
+                            "image_base64": "not-valid-base64!",
+                            "image_error": None,
+                        },
+                    ],
+                    "complete": True,
+                    "page": 1,
+                },
+            )
+            result = client.search_face_capture_images(
+                *CREDS,
+                channel=6,
+                start=datetime(2026, 7, 28, 12),
+                end=datetime(2026, 7, 28, 14),
+            )
+
+        assert result.success is False
+        assert "Invalid bridge response" in (result.error or "")
 
     def test_image_rejects_non_jpeg_response(self, client: SdkHttpClient) -> None:
         capture = NativeFaceCapture(6, datetime(2026, 7, 28, 13), 0, 41, 7, False)
