@@ -174,7 +174,12 @@ class SdkHttpClient:
         timeout: Default HTTP timeout in seconds.
     """
 
-    def __init__(self, base_url: str = "http://localhost:3000", *, timeout: int = 30) -> None:
+    def __init__(
+        self,
+        base_url: str = "http://localhost:3000",
+        *,
+        timeout: float = 30,
+    ) -> None:
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
 

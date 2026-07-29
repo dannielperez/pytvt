@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import base64
+from unittest.mock import patch
 
 import pytest
 
 import pytvt.xml_api as nvr_api
+from pytvt import xml_api
 from pytvt.models import (
     NvrApiError,
     NvrApiResponseShapeError,
@@ -523,3 +525,22 @@ class TestPlatformAccess:
             assert "Platform Access is disabled" in str(exc)
         else:
             raise AssertionError("Expected PlatformAccessDisabledError")
+
+
+def test_expired_request_deadline_starts_no_http_connection():
+    client = NvrClient(
+        "10.0.0.1",
+        "admin",
+        "pass",
+        timeout=5,
+        deadline=100,
+    )
+
+    with (
+        patch.object(xml_api.time, "monotonic", return_value=100),
+        patch.object(xml_api.http.client, "HTTPConnection") as connection,
+        pytest.raises(TimeoutError, match="deadline expired"),
+    ):
+        client._post("query", "<request/>")
+
+    connection.assert_not_called()

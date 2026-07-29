@@ -66,6 +66,20 @@ class TestRtspSnapshotBytes:
         with patch.object(xml_api.subprocess, "run", side_effect=subprocess.TimeoutExpired("ffmpeg", 5)):
             assert xml_api.rtsp_snapshot_bytes(RTSP) is None
 
+    def test_wall_timeout_caps_the_ffmpeg_process(self):
+        proc = MagicMock(returncode=0, stdout=JPEG)
+        with patch.object(xml_api.subprocess, "run", return_value=proc) as run:
+            assert (
+                xml_api.rtsp_snapshot_bytes(
+                    RTSP,
+                    timeout=3,
+                    wall_timeout=1.25,
+                )
+                == JPEG
+            )
+
+        assert run.call_args.kwargs["timeout"] == 1.25
+
     def test_shares_args_with_file_variant(self):
         # The file and bytes paths must build the same core ffmpeg frame grab.
         base = xml_api._ffmpeg_rtsp_frame_args(RTSP, 10)
@@ -124,6 +138,45 @@ class TestManagerSnapshotPrefersRtsp:
             out = mgr.snapshot(channel=1, prefer_rtsp=False)
         assert out == JPEG
         grab.assert_not_called()
+
+    def test_semantic_substream_is_mapped_inside_the_wrapper(self, mgr):
+        with patch.object(
+            mgr,
+            "_rtsp_snapshot_attempt",
+            return_value=SnapshotAttempt(image=JPEG, method="rtsp"),
+        ) as rtsp:
+            attempt = mgr.snapshot_attempt(channel=1, stream="sub")
+
+        assert attempt.image == JPEG
+        rtsp.assert_called_once_with(
+            channel=1,
+            stream_type=1,
+            timeout=10,
+            deadline=None,
+            allow_resolver_fallback=True,
+        )
+
+    def test_unknown_semantic_stream_is_rejected(self, mgr):
+        with pytest.raises(ValueError, match="main, sub, third"):
+            mgr.snapshot_attempt(channel=1, stream="unsupported")
+
+    def test_bounded_direct_mode_does_not_enter_bridge_fallback(self, mgr):
+        with (
+            patch.object(mgr, "_http_rtsp_url", return_value=None),
+            patch.object(mgr, "rtsp_url") as bridge_url,
+            patch.object(mgr, "_get_http") as bridge_snapshot,
+        ):
+            attempt = mgr.snapshot_attempt(
+                channel=1,
+                stream="sub",
+                total_timeout=3,
+                allow_fallback=False,
+            )
+
+        assert attempt.success is False
+        assert attempt.error_kind == "no_stream_url"
+        bridge_url.assert_not_called()
+        bridge_snapshot.assert_not_called()
 
     def test_netsdk_backend_falls_back_when_rtsp_fails(self):
         mgr = DeviceManager(**CREDS, backend=Backend.NETSDK)

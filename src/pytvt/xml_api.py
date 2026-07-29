@@ -115,6 +115,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 from xml.sax.saxutils import escape
 
@@ -172,12 +173,22 @@ class NvrClient:
         timeout: HTTP request timeout in seconds.
     """
 
-    def __init__(self, host: str, username: str, password: str, port: int = 80, timeout: int = 10):
+    def __init__(
+        self,
+        host: str,
+        username: str,
+        password: str,
+        port: int = 80,
+        timeout: float = 10,
+        *,
+        deadline: float | None = None,
+    ):
         self.host = host
         self.username = username
         self.password = password
         self.port = port
         self.timeout = timeout
+        self.deadline = deadline
         self._cookie: str | None = None
         self._token: str | None = None
         self._logged_in = False
@@ -194,7 +205,13 @@ class NvrClient:
 
     def _post(self, path: str, body: str) -> str:
         """POST XML to NVR and return response body."""
-        conn = http.client.HTTPConnection(self.host, self.port, timeout=self.timeout)
+        timeout = self.timeout
+        if self.deadline is not None:
+            remaining = self.deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("NVR request deadline expired")
+            timeout = min(timeout, remaining)
+        conn = http.client.HTTPConnection(self.host, self.port, timeout=timeout)
         try:
             headers = {"Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"}
             if self._cookie:
@@ -1876,7 +1893,12 @@ def rtsp_snapshot(rtsp_url: str, output_path: str, timeout: int = 10) -> bool:
         return False
 
 
-def rtsp_snapshot_bytes(rtsp_url: str, timeout: int = 10) -> bytes | None:
+def rtsp_snapshot_bytes(
+    rtsp_url: str,
+    timeout: int = 10,
+    *,
+    wall_timeout: float | None = None,
+) -> bytes | None:
     """Capture a single JPEG frame from an RTSP stream as bytes (ffmpeg -> stdout).
 
     The byte-returning sibling of :func:`rtsp_snapshot` — same ffmpeg frame-grab,
@@ -1891,11 +1913,12 @@ def rtsp_snapshot_bytes(rtsp_url: str, timeout: int = 10) -> bytes | None:
             *not* folded into the ``None`` return: a missing binary is a
             deployment fault and must not be reported as a frameless stream.
     """
+    process_timeout = timeout + 5 if wall_timeout is None else max(0.001, wall_timeout)
     try:
         result = subprocess.run(
             [*_ffmpeg_rtsp_frame_args(rtsp_url, timeout), "-f", "image2", "pipe:1"],
             capture_output=True,
-            timeout=timeout + 5,
+            timeout=process_timeout,
         )
     except FileNotFoundError as exc:
         raise FfmpegUnavailable("ffmpeg is not installed; RTSP frame grabs cannot run.") from exc
