@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Treat recorder error `536870942` from `searchImageByImageV2` as an empty
+  face-event window. Field validation proved the same command returns events
+  and JPEGs for populated windows, so capability probes no longer depend on an
+  event occurring during their one-second sample.
 - Correct `NetSdkClient`'s `NET_SDK_SetConnectTime` binding contract: the
   vendor function's second argument is a connection retry count, not a receive
   timeout in milliseconds. Native callers now send the documented default of
