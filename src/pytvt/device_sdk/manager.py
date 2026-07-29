@@ -495,6 +495,8 @@ class DeviceManager:
             return _first_failure(attempts)
 
         if self._backend == Backend.NETSDK:
+            if deadline is not None:
+                return _first_failure(attempts)
             netsdk = self._netsdk_snapshot_attempt(channel=channel)
             if netsdk.image:
                 return netsdk
@@ -665,7 +667,7 @@ class DeviceManager:
             deadline=deadline,
         )
         if rtsp_url is None:
-            if not allow_resolver_fallback:
+            if not allow_resolver_fallback or deadline is not None:
                 return SnapshotAttempt(
                     method="rtsp",
                     error="Direct RTSP URL is not cached or could not be resolved.",
