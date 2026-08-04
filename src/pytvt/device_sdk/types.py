@@ -698,6 +698,77 @@ class NET_SDK_IVE_PICTURE_INFO(ct.Structure):
     ]
 
 
+class NET_SDK_IVE_VSD_RECTANGLE(ct.Structure):
+    """Unsigned target rectangle used by video-structured-data event 26."""
+
+    _layout_ = "ms"
+    _pack_ = 4
+    _fields_ = [
+        ("X1", ct.c_uint),
+        ("Y1", ct.c_uint),
+        ("X2", ct.c_uint),
+        ("Y2", ct.c_uint),
+    ]
+
+
+class NET_SDK_IVE_VSD_TARGET_CAR(ct.Structure):
+    """Car attributes carried in a VSD target record."""
+
+    _layout_ = "ms"
+    _pack_ = 4
+    _fields_ = [
+        ("byColor", ct.c_uint),
+        ("byYear", ct.c_uint),
+        ("byType", ct.c_uint),
+        ("byReserve1", ct.c_uint),
+        ("szBrand", ct.c_char * 64),
+        ("szModel", ct.c_char * 64),
+        ("dwBrandType", ct.c_uint),
+        ("dwModelType", ct.c_uint),
+        ("szReserve", ct.c_char * 120),
+    ]
+
+
+class NET_SDK_IVE_VSD_TARGET_ATTRIBUTES(ct.Union):
+    """Fixed-width VSD target union; only the car view is currently exposed."""
+
+    _layout_ = "ms"
+    _pack_ = 4
+    _fields_ = [  # noqa: RUF012 - ctypes requires this mutable class declaration
+        ("car", NET_SDK_IVE_VSD_TARGET_CAR),
+        ("raw", ct.c_ubyte * 1088),
+    ]
+
+
+class NET_SDK_IVE_VSD_TARGET_INFO(ct.Structure):
+    """One target plus attributes and crop descriptor in event 26."""
+
+    _layout_ = "ms"
+    _pack_ = 4
+    _fields_ = [
+        ("dwTargetId", ct.c_uint),
+        ("dwTargetType", ct.c_uint),
+        ("dwDataLen", ct.c_uint),
+        ("rect", NET_SDK_IVE_VSD_RECTANGLE),
+        ("iWidth", ct.c_int),
+        ("iHeight", ct.c_int),
+        ("iPicFormat", ct.c_int),
+        ("attributes", NET_SDK_IVE_VSD_TARGET_ATTRIBUTES),
+    ]
+
+
+class NET_SDK_IVE_VSD_HEAD_INFO(ct.Structure):
+    """Header for video-structured-data event 26."""
+
+    _layout_ = "ms"
+    _pack_ = 4
+    _fields_ = [
+        ("dwTargetCount", ct.c_uint),
+        ("dwChannel", ct.c_uint),
+        ("dwRelativeTick", ct.c_uint),
+    ]
+
+
 # ── GUID (channel node id) ──────────────────────────────────────────
 # The SDK's `BOOL` typedef resolves to C++ ``bool`` (1 byte) on the Linux
 # target — every BOOL-returning binding uses ``ct.c_bool``, so BOOL struct
