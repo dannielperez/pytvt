@@ -20,6 +20,8 @@ from .types import (
     NET_SDK_IVE_PICTURE_INFO,
     NET_SDK_IVE_VEHICE_HEAD_INFO,
     NET_SDK_IVE_VEHICE_ITEM_INFO,
+    NET_SDK_IVE_VSD_HEAD_INFO,
+    NET_SDK_IVE_VSD_TARGET_INFO,
     VEHICE_PLATE_INFO,
 )
 
@@ -28,6 +30,8 @@ DEFAULT_MAX_IMAGE_BYTES = 8 * 1024 * 1024
 DEFAULT_MAX_EVENTS = 256
 DEFAULT_MAX_BUFFER_BYTES = 64 * 1024 * 1024
 MAX_PLATES_PER_CALLBACK = 32
+MAX_VSD_TARGETS_PER_CALLBACK = 64
+VSD_TARGET_CAR = 2
 
 
 class PlatePayloadError(ValueError):
@@ -62,6 +66,54 @@ class EdgePlateMatch(str, Enum):
     UNKNOWN = "unknown"
 
 
+class PlateColor(str, Enum):
+    UNKNOWN = "unknown"
+    BLUE = "blue"
+    BLACK = "black"
+    YELLOW = "yellow"
+    WHITE = "white"
+    GREEN = "green"
+    GREEN_BLACK = "green_black"
+    RED = "red"
+    ORANGE = "orange"
+    CYAN = "cyan"
+    PURPLE = "purple"
+    GRAY = "gray"
+
+
+class VehicleColor(str, Enum):
+    UNKNOWN = "unknown"
+    RED = "red"
+    ORANGE = "orange"
+    YELLOW = "yellow"
+    GREEN = "green"
+    BLUE = "blue"
+    CYAN = "cyan"
+    PURPLE = "purple"
+    BLACK = "black"
+    WHITE = "white"
+    SILVER = "silver"
+    GRAY = "gray"
+    GOLD = "gold"
+    BROWN = "brown"
+
+
+class VehicleType(str, Enum):
+    UNKNOWN = "unknown"
+    SEDAN = "sedan"
+    SUV = "suv"
+    MPV = "mpv"
+    SPORTS_CAR = "sports_car"
+    VAN = "van"
+    BUS = "bus"
+    SCHOOL_BUS = "school_bus"
+    PUBLIC_BUS = "public_bus"
+    LIGHT_PASSENGER = "light_passenger"
+    PICKUP = "pickup"
+    TRUCK = "truck"
+    SPECIAL = "special"
+
+
 class DropPolicy(str, Enum):
     """Backpressure policy used when the in-memory stream buffer is full."""
 
@@ -80,6 +132,8 @@ class PlateEvent:
     occurred_at: datetime | None
     source_event_id: str
     plate: str
+    declared_plate_char_count: int | None = None
+    source_encryption_version: int | None = None
     confidence: int | None = None
     char_confidences: tuple[int, ...] = ()
     direction: VehicleDirection = VehicleDirection.UNKNOWN
@@ -87,10 +141,52 @@ class PlateEvent:
     plate_size: tuple[int, int] | None = None
     channel_guid: str | None = None
     edge_match: EdgePlateMatch = EdgePlateMatch.UNKNOWN
+    edge_match_code: int | None = None
+    plate_color: PlateColor = PlateColor.UNKNOWN
+    plate_color_code: int | None = None
+    plate_brightness: int | None = None
+    plate_color_confidence: int | None = None
+    vehicle_type: VehicleType = VehicleType.UNKNOWN
+    vehicle_type_code: int | None = None
+    vehicle_color: VehicleColor = VehicleColor.UNKNOWN
+    vehicle_color_code: int | None = None
+    vehicle_brand_code: int | None = None
+    source_end_at: datetime | None = None
     full_image: bytes | None = None
     plate_image: bytes | None = None
     full_image_format: ImageFormat | None = None
     plate_image_format: ImageFormat | None = None
+    full_image_size: tuple[int, int] | None = None
+    is_partial: bool = False
+    warnings: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class VehicleMetadataEvent:
+    """One car target decoded from TVT video-structured-data event 26."""
+
+    user_id: int
+    channel_id: int
+    received_at: datetime
+    relative_tick: int
+    target_id: int
+    target_rect: tuple[int, int, int, int]
+    vehicle_color: VehicleColor
+    vehicle_color_code: int
+    vehicle_year: int | None
+    vehicle_year_code: int
+    vehicle_type: VehicleType
+    vehicle_type_code: int
+    vehicle_brand: str
+    vehicle_model: str
+    vehicle_brand_code: int
+    vehicle_model_code: int
+    full_image: bytes | None
+    target_image: bytes | None
+    full_image_format: ImageFormat | None
+    target_image_format: ImageFormat | None
+    full_image_size: tuple[int, int] | None
+    target_image_size: tuple[int, int] | None
     is_partial: bool = False
     warnings: tuple[str, ...] = ()
 
@@ -198,6 +294,89 @@ def _edge_match(value: int) -> EdgePlateMatch:
     return EdgePlateMatch.UNKNOWN
 
 
+def _vehicle_color(value: int) -> VehicleColor:
+    colors = (
+        VehicleColor.UNKNOWN,
+        VehicleColor.RED,
+        VehicleColor.ORANGE,
+        VehicleColor.YELLOW,
+        VehicleColor.GREEN,
+        VehicleColor.BLUE,
+        VehicleColor.CYAN,
+        VehicleColor.PURPLE,
+        VehicleColor.BLACK,
+        VehicleColor.WHITE,
+        VehicleColor.SILVER,
+        VehicleColor.GRAY,
+        VehicleColor.GOLD,
+        VehicleColor.BROWN,
+    )
+    return colors[value] if 0 <= value < len(colors) else VehicleColor.UNKNOWN
+
+
+def _ipc_plate_color(value: int) -> PlateColor:
+    colors = {
+        1: PlateColor.BLUE,
+        2: PlateColor.YELLOW,
+        3: PlateColor.WHITE,
+        4: PlateColor.BLACK,
+        5: PlateColor.GREEN,
+        6: PlateColor.GREEN_BLACK,
+        7: PlateColor.RED,
+        8: PlateColor.ORANGE,
+        9: PlateColor.CYAN,
+        10: PlateColor.PURPLE,
+        11: PlateColor.GRAY,
+    }
+    return colors.get(value, PlateColor.UNKNOWN)
+
+
+def _nvr_plate_color(value: int) -> PlateColor:
+    colors = {
+        1: PlateColor.BLUE,
+        2: PlateColor.BLACK,
+        3: PlateColor.YELLOW,
+        4: PlateColor.WHITE,
+        5: PlateColor.GREEN,
+        6: PlateColor.RED,
+        7: PlateColor.GRAY,
+        8: PlateColor.PURPLE,
+    }
+    return colors.get(value, PlateColor.UNKNOWN)
+
+
+def _vehicle_type(value: int) -> VehicleType:
+    types = (
+        VehicleType.UNKNOWN,
+        VehicleType.SEDAN,
+        VehicleType.SUV,
+        VehicleType.MPV,
+        VehicleType.SPORTS_CAR,
+        VehicleType.VAN,
+        VehicleType.BUS,
+        VehicleType.SCHOOL_BUS,
+        VehicleType.PUBLIC_BUS,
+        VehicleType.LIGHT_PASSENGER,
+        VehicleType.PICKUP,
+        VehicleType.TRUCK,
+        VehicleType.SPECIAL,
+    )
+    return types[value] if 0 <= value < len(types) else VehicleType.UNKNOWN
+
+
+def _vehicle_year(value: int) -> int | None:
+    return value + 2007 if 1 <= value <= 11 else None
+
+
+def _decode_vsd_text(raw: bytes, *, field_name: str, warnings: list[str]) -> str:
+    bounded = raw.split(b"\0", 1)[0]
+    try:
+        return bounded.decode("utf-8", errors="strict").strip()
+    except UnicodeDecodeError:
+        warnings.append(f"{field_name}_invalid_utf8")
+        return ""
+
+
 def _occurred_at_from_epoch_seconds(value: int) -> datetime | None:
     if value <= 0:
         return None
@@ -235,6 +414,7 @@ def _ipc_event(
         occurred_at=None,
         source_event_id=str(int(item.plateId)),
         plate=plate,
+        declared_plate_char_count=int(item.plateCharCount),
         confidence=int(item.plateConfidence),
         char_confidences=tuple(int(value) for value in item.plateCharConfid[:char_count]),
         direction=_direction(int(item.iVehicleDirect)),
@@ -246,10 +426,22 @@ def _ipc_event(
         ),
         plate_size=(int(item.plateWidth), int(item.plateHeight)),
         edge_match=_edge_match(int(item.listType)),
+        edge_match_code=int(item.listType),
+        plate_color=_ipc_plate_color(int(item.plateColor)),
+        plate_color_code=int(item.plateColor),
+        plate_brightness=int(item.plateIntensity),
+        plate_color_confidence=int(item.PlateColorRate),
+        vehicle_type=_vehicle_type(int(item.plateStyle)),
+        vehicle_type_code=int(item.plateStyle),
+        vehicle_color=_vehicle_color(int(item.vehicleColor)),
+        vehicle_color_code=int(item.vehicleColor),
         full_image=full_image,
         plate_image=plate_image,
         full_image_format=full_image_format,
         plate_image_format=_image_format(int(item.data_type)),
+        full_image_size=(
+            (int(item.ptWidth), int(item.ptHeight)) if int(item.ptWidth) > 0 and int(item.ptHeight) > 0 else None
+        ),
         is_partial=bool(warnings),
         warnings=tuple(warnings),
     )
@@ -331,16 +523,17 @@ def _optional_picture(
     offset: int,
     *,
     max_image_bytes: int,
-) -> tuple[bytes | None, int | None, int, str | None]:
+) -> tuple[bytes | None, int | None, tuple[int, int] | None, int, str | None]:
     if offset == len(payload):
-        return None, None, offset, "picture_descriptor_missing"
+        return None, None, None, offset, "picture_descriptor_missing"
     raw_info, data_offset = _read_structure(payload, NET_SDK_IVE_PICTURE_INFO, offset)
     info = raw_info
     size = int(info.iPicSize)  # type: ignore[attr-defined]
+    dimensions = (int(info.iWidth), int(info.iHeight))  # type: ignore[attr-defined]
     if size < 0:
         raise PlatePayloadError(f"negative picture size {size}")
     if size == 0:
-        return None, int(info.iPicFormat), data_offset, "picture_data_missing"  # type: ignore[attr-defined]
+        return None, int(info.iPicFormat), dimensions, data_offset, "picture_data_missing"  # type: ignore[attr-defined]
     image, end = _take_image(
         payload,
         data_offset,
@@ -348,7 +541,7 @@ def _optional_picture(
         storage_length=size,
         max_image_bytes=max_image_bytes,
     )
-    return image, int(info.iPicFormat), end, None  # type: ignore[attr-defined]
+    return image, int(info.iPicFormat), dimensions, end, None  # type: ignore[attr-defined]
 
 
 def parse_nvr_plate_payload(
@@ -366,12 +559,12 @@ def parse_nvr_plate_payload(
     received_at = received_at or datetime.now(timezone.utc)
     raw_info, offset = _read_structure(payload, VEHICE_PLATE_INFO, 0)
     info = raw_info
-    full_image, full_format, offset, full_warning = _optional_picture(
+    full_image, full_format, full_size, offset, full_warning = _optional_picture(
         payload,
         offset,
         max_image_bytes=max_image_bytes,
     )
-    plate_image, plate_format, offset, plate_warning = _optional_picture(
+    plate_image, plate_format, plate_size, offset, plate_warning = _optional_picture(
         payload,
         offset,
         max_image_bytes=max_image_bytes,
@@ -390,6 +583,8 @@ def parse_nvr_plate_payload(
         occurred_at=_occurred_at_from_epoch_seconds(int(info.dwStartTime)),  # type: ignore[attr-defined]
         source_event_id=str(int(info.dwPlateID)),  # type: ignore[attr-defined]
         plate=plate,
+        declared_plate_char_count=int(info.plateCharCount),  # type: ignore[attr-defined]
+        source_encryption_version=int(info.dwEncryptVer),  # type: ignore[attr-defined]
         confidence=int(info.plateConfidence),  # type: ignore[attr-defined]
         plate_rect=(
             int(info.Rect16.left),  # type: ignore[attr-defined]
@@ -399,13 +594,117 @@ def parse_nvr_plate_payload(
         ),
         channel_guid=info.chlId.as_string,  # type: ignore[attr-defined]
         edge_match=_edge_match(int(info.listType)),  # type: ignore[attr-defined]
+        edge_match_code=int(info.listType),  # type: ignore[attr-defined]
+        plate_color=_nvr_plate_color(int(info.plateColor)),  # type: ignore[attr-defined]
+        plate_color_code=int(info.plateColor),  # type: ignore[attr-defined]
+        plate_brightness=int(info.plateIntensity),  # type: ignore[attr-defined]
+        plate_color_confidence=int(info.PlateColorRate),  # type: ignore[attr-defined]
+        vehicle_type=_vehicle_type(int(info.plateStyle)),  # type: ignore[attr-defined]
+        vehicle_type_code=int(info.plateStyle),  # type: ignore[attr-defined]
+        vehicle_color=_vehicle_color(int(info.vehicleColor)),  # type: ignore[attr-defined]
+        vehicle_color_code=int(info.vehicleColor),  # type: ignore[attr-defined]
+        vehicle_brand_code=int(info.dwBrand),  # type: ignore[attr-defined]
+        source_end_at=_occurred_at_from_epoch_seconds(int(info.dwEndTime)),  # type: ignore[attr-defined]
         full_image=full_image,
         plate_image=plate_image,
         full_image_format=_image_format(full_format) if full_format is not None else None,
         plate_image_format=_image_format(plate_format) if plate_format is not None else None,
+        full_image_size=full_size,
+        plate_size=plate_size,
         is_partial=bool(warnings),
         warnings=tuple(warnings),
     )
+
+
+def parse_vsd_vehicle_payload(
+    payload: bytes,
+    *,
+    user_id: int,
+    channel_id: int,
+    received_at: datetime | None = None,
+    max_payload_bytes: int = DEFAULT_MAX_PAYLOAD_BYTES,
+    max_image_bytes: int = DEFAULT_MAX_IMAGE_BYTES,
+) -> list[VehicleMetadataEvent]:
+    """Parse car targets from event 26 (video structured metadata).
+
+    Person and bike targets are consumed and skipped. This function is kept
+    separate from ``PlateEventStream`` because VSD records do not contain a
+    plate identity and must be correlated by application policy.
+    """
+    if len(payload) > max_payload_bytes:
+        raise PlatePayloadError(f"payload length {len(payload)} exceeds limit {max_payload_bytes}")
+    received_at = received_at or datetime.now(timezone.utc)
+    raw_head, offset = _read_structure(payload, NET_SDK_IVE_VSD_HEAD_INFO, 0)
+    head = raw_head
+    target_count = int(head.dwTargetCount)  # type: ignore[attr-defined]
+    if target_count < 0 or target_count > MAX_VSD_TARGETS_PER_CALLBACK:
+        raise PlatePayloadError(f"invalid VSD target count {target_count}")
+
+    full_image, full_format, full_size, offset, full_warning = _optional_picture(
+        payload,
+        offset,
+        max_image_bytes=max_image_bytes,
+    )
+    events: list[VehicleMetadataEvent] = []
+    for _ in range(target_count):
+        raw_target, offset = _read_structure(payload, NET_SDK_IVE_VSD_TARGET_INFO, offset)
+        target = raw_target
+        data_length = int(target.dwDataLen)  # type: ignore[attr-defined]
+        target_image, offset = _take_image(
+            payload,
+            offset,
+            data_length=data_length,
+            storage_length=data_length,
+            max_image_bytes=max_image_bytes,
+        )
+        if int(target.dwTargetType) != VSD_TARGET_CAR:  # type: ignore[attr-defined]
+            continue
+
+        warnings = [full_warning] if full_warning else []
+        if not target_image:
+            warnings.append("target_image_missing")
+        car = target.attributes.car  # type: ignore[attr-defined]
+        brand = _decode_vsd_text(bytes(car.szBrand), field_name="vehicle_brand", warnings=warnings)
+        model = _decode_vsd_text(bytes(car.szModel), field_name="vehicle_model", warnings=warnings)
+        color_code = int(car.byColor)
+        year_code = int(car.byYear)
+        type_code = int(car.byType)
+        events.append(
+            VehicleMetadataEvent(
+                user_id=user_id,
+                channel_id=int(head.dwChannel) if int(head.dwChannel) >= 0 else channel_id,  # type: ignore[attr-defined]
+                received_at=received_at,
+                relative_tick=int(head.dwRelativeTick),  # type: ignore[attr-defined]
+                target_id=int(target.dwTargetId),  # type: ignore[attr-defined]
+                target_rect=(
+                    int(target.rect.X1),  # type: ignore[attr-defined]
+                    int(target.rect.Y1),  # type: ignore[attr-defined]
+                    int(target.rect.X2),  # type: ignore[attr-defined]
+                    int(target.rect.Y2),  # type: ignore[attr-defined]
+                ),
+                vehicle_color=_vehicle_color(color_code),
+                vehicle_color_code=color_code,
+                vehicle_year=_vehicle_year(year_code),
+                vehicle_year_code=year_code,
+                vehicle_type=_vehicle_type(type_code),
+                vehicle_type_code=type_code,
+                vehicle_brand=brand,
+                vehicle_model=model,
+                vehicle_brand_code=int(car.dwBrandType),
+                vehicle_model_code=int(car.dwModelType),
+                full_image=full_image,
+                target_image=target_image or None,
+                full_image_format=_image_format(full_format) if full_format is not None else None,
+                target_image_format=_image_format(int(target.iPicFormat)),  # type: ignore[attr-defined]
+                full_image_size=full_size,
+                target_image_size=(int(target.iWidth), int(target.iHeight)),  # type: ignore[attr-defined]
+                is_partial=bool(warnings),
+                warnings=tuple(warnings),
+            )
+        )
+    if offset != len(payload):
+        raise PlatePayloadError(f"trailing VSD payload bytes: {len(payload) - offset}")
+    return events
 
 
 class PlateEventStream:

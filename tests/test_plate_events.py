@@ -15,18 +15,24 @@ from pytvt.device_sdk.plate_events import (
     DropPolicy,
     EdgePlateMatch,
     ImageFormat,
+    PlateColor,
     PlateEventStream,
     PlatePayloadError,
     PlateSource,
+    VehicleColor,
     VehicleDirection,
+    VehicleType,
     parse_ipc_plate_payload,
     parse_nvr_plate_payload,
+    parse_vsd_vehicle_payload,
 )
 from pytvt.device_sdk.types import (
     NET_DVR_SUBSCRIBE_REPLY,
     NET_SDK_IVE_PICTURE_INFO,
     NET_SDK_IVE_VEHICE_HEAD_INFO,
     NET_SDK_IVE_VEHICE_ITEM_INFO,
+    NET_SDK_IVE_VSD_HEAD_INFO,
+    NET_SDK_IVE_VSD_TARGET_INFO,
     VEHICE_PLATE_INFO,
 )
 
@@ -96,6 +102,7 @@ def _picture(image: bytes, *, width: int, height: int) -> bytes:
 def _nvr_payload(*, full_image: bytes = b"full", plate_image: bytes = b"crop") -> bytes:
     info = VEHICE_PLATE_INFO()
     info.dwPlateID = 501
+    info.dwEncryptVer = 3
     info.plateCharCount = 6
     info.plate = b"XYZ789"
     info.Rect16.left = 10
@@ -103,12 +110,15 @@ def _nvr_payload(*, full_image: bytes = b"full", plate_image: bytes = b"crop") -
     info.Rect16.right = 110
     info.Rect16.bottom = 60
     info.plateConfidence = 96
+    info.plateIntensity = 73
     info.plateColor = 2
     info.plateStyle = 1
+    info.PlateColorRate = 91
     info.vehicleColor = 5
     info.dwBrand = 88
     info.listType = 2
     info.dwStartTime = 1_721_234_567
+    info.dwEndTime = 1_721_234_569
     info.chlId.Data1 = 7
     info.chlId.Data2 = 0x1234
     info.chlId.Data3 = 0x5678
@@ -116,11 +126,48 @@ def _nvr_payload(*, full_image: bytes = b"full", plate_image: bytes = b"crop") -
     return _bytes_of(info) + _picture(full_image, width=2688, height=1520) + _picture(plate_image, width=320, height=96)
 
 
+def _vsd_payload() -> bytes:
+    full_image = b"vsd-full"
+    target_image = b"vsd-car"
+    head = NET_SDK_IVE_VSD_HEAD_INFO()
+    head.dwTargetCount = 1
+    head.dwChannel = 7
+    head.dwRelativeTick = 4567
+    target = NET_SDK_IVE_VSD_TARGET_INFO()
+    target.dwTargetId = 99
+    target.dwTargetType = 2
+    target.dwDataLen = len(target_image)
+    target.rect.X1 = 10
+    target.rect.Y1 = 20
+    target.rect.X2 = 300
+    target.rect.Y2 = 220
+    target.iWidth = 290
+    target.iHeight = 200
+    target.iPicFormat = 0
+    target.attributes.car.byColor = 9
+    target.attributes.car.byYear = 11
+    target.attributes.car.byType = 2
+    target.attributes.car.szBrand = b"Volkswagen"
+    target.attributes.car.szModel = b"Tiguan"
+    target.attributes.car.dwBrandType = 88
+    target.attributes.car.dwModelType = 901
+    return b"".join(
+        (
+            _bytes_of(head),
+            _picture(full_image, width=2688, height=1520),
+            _bytes_of(target),
+            target_image,
+        )
+    )
+
+
 def test_plate_callback_struct_sizes_match_vendor_pack4_abi():
     assert ct.sizeof(NET_SDK_IVE_VEHICE_HEAD_INFO) == 48
     assert ct.sizeof(NET_SDK_IVE_VEHICE_ITEM_INFO) == 736
     assert ct.sizeof(VEHICE_PLATE_INFO) == 160
     assert ct.sizeof(NET_SDK_IVE_PICTURE_INFO) == 16
+    assert ct.sizeof(NET_SDK_IVE_VSD_HEAD_INFO) == 12
+    assert ct.sizeof(NET_SDK_IVE_VSD_TARGET_INFO) == 1128
     assert ct.sizeof(NET_DVR_SUBSCRIBE_REPLY) == 336
 
 
@@ -129,15 +176,20 @@ def test_normalized_plate_surface_is_exported_from_device_sdk():
 
     for name in (
         "PlateEvent",
+        "PlateColor",
         "PlateEventStream",
         "PlateSubscriptionInfo",
         "PlateStreamStats",
         "PlateSource",
         "VehicleDirection",
+        "VehicleColor",
+        "VehicleType",
+        "VehicleMetadataEvent",
         "EdgePlateMatch",
         "ImageFormat",
         "parse_ipc_plate_payload",
         "parse_nvr_plate_payload",
+        "parse_vsd_vehicle_payload",
     ):
         assert name in package.__all__
         assert hasattr(package, name)
@@ -174,11 +226,22 @@ def test_parse_ipc_plate_payload_copies_metadata_and_images():
 
 
 def test_parse_nvr_plate_payload_copies_guid_metadata_and_images():
-    event = parse_nvr_plate_payload(_nvr_payload(), user_id=5, channel_id=6)
+    received_at = datetime(2026, 8, 4, tzinfo=timezone.utc)
+    event = parse_nvr_plate_payload(
+        _nvr_payload(),
+        user_id=5,
+        channel_id=6,
+        received_at=received_at,
+    )
 
     assert event.source is PlateSource.NVR
+    assert event.user_id == 5
+    assert event.channel_id == 6
+    assert event.received_at == received_at
     assert event.source_event_id == "501"
     assert event.plate == "XYZ789"
+    assert event.declared_plate_char_count == 6
+    assert event.source_encryption_version == 3
     assert event.confidence == 96
     assert event.plate_rect == (10, 20, 110, 60)
     assert event.channel_guid == "{00000007-1234-5678-90AB-CDEF12345678}"
@@ -186,7 +249,53 @@ def test_parse_nvr_plate_payload_copies_guid_metadata_and_images():
     assert event.plate_image == b"crop"
     assert event.occurred_at == datetime.fromtimestamp(1_721_234_567, tz=timezone.utc)
     assert event.edge_match is EdgePlateMatch.ALLOWLIST
+    assert event.edge_match_code == 2
     assert event.plate_image_format is ImageFormat.JPEG
+    assert event.full_image_size == (2688, 1520)
+    assert event.plate_size == (320, 96)
+    assert event.plate_color_code == 2
+    assert event.plate_color is PlateColor.BLACK
+    assert event.plate_brightness == 73
+    assert event.plate_color_confidence == 91
+    assert event.vehicle_type is VehicleType.SEDAN
+    assert event.vehicle_type_code == 1
+    assert event.vehicle_color is VehicleColor.BLUE
+    assert event.vehicle_color_code == 5
+    assert event.vehicle_brand_code == 88
+    assert event.source_end_at == datetime.fromtimestamp(1_721_234_569, tz=timezone.utc)
+    assert event.full_image_format is ImageFormat.JPEG
+    assert event.warnings == ()
+    assert event.is_partial is False
+
+
+def test_parse_vsd_vehicle_payload_copies_readable_vehicle_attributes_and_images():
+    received_at = datetime(2026, 8, 4, tzinfo=timezone.utc)
+    events = parse_vsd_vehicle_payload(
+        _vsd_payload(),
+        user_id=5,
+        channel_id=6,
+        received_at=received_at,
+    )
+
+    assert len(events) == 1
+    event = events[0]
+    assert event.user_id == 5
+    assert event.channel_id == 7
+    assert event.received_at == received_at
+    assert event.relative_tick == 4567
+    assert event.target_id == 99
+    assert event.target_rect == (10, 20, 300, 220)
+    assert event.vehicle_color is VehicleColor.WHITE
+    assert event.vehicle_year == 2018
+    assert event.vehicle_type is VehicleType.SUV
+    assert event.vehicle_brand == "Volkswagen"
+    assert event.vehicle_model == "Tiguan"
+    assert event.vehicle_brand_code == 88
+    assert event.vehicle_model_code == 901
+    assert event.full_image == b"vsd-full"
+    assert event.target_image == b"vsd-car"
+    assert event.full_image_size == (2688, 1520)
+    assert event.target_image_size == (290, 200)
     assert event.is_partial is False
 
 
