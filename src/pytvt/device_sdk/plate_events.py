@@ -440,9 +440,7 @@ def _ipc_event(
         full_image_format=full_image_format,
         plate_image_format=_image_format(int(item.data_type)),
         full_image_size=(
-            (int(item.ptWidth), int(item.ptHeight))
-            if int(item.ptWidth) > 0 and int(item.ptHeight) > 0
-            else None
+            (int(item.ptWidth), int(item.ptHeight)) if int(item.ptWidth) > 0 and int(item.ptHeight) > 0 else None
         ),
         is_partial=bool(warnings),
         warnings=tuple(warnings),
