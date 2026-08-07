@@ -169,7 +169,7 @@ def test_typed_platform_inventory_owns_job_schema_and_validates_result() -> None
             "username": "operator",
             "password": "secret",
         },
-        "timeout_ms": 55_000,
+        "timeout_ms": 60_000,
     }
     assert result.summary == {"site_count": 1, "device_count": 1}
     assert result.devices == ({"id": "nvr-1"},)

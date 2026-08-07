@@ -22,7 +22,7 @@
 ## Compatibility and risk
 
 - Protocol version remains 1; the change is additive.
-- Platform inventory uses a 55-second operation-specific absolute deadline,
+- Platform inventory uses a 60-second operation-specific absolute deadline,
   leaving headroom above the runtime's 45-second native budget without
   lengthening ordinary device calls.
 - The typed operation does not expose raw ctypes structures or arbitrary SDK
