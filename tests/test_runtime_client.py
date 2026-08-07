@@ -172,6 +172,7 @@ def test_typed_platform_inventory_owns_job_schema_and_validates_result() -> None
     assert result.summary == {"site_count": 1, "device_count": 1}
     assert result.devices == ({"id": "nvr-1"},)
     assert result.fetch_status["alarm_events"] == "failed"
+    assert result.as_dict() == _platform_snapshot()
 
 
 def test_typed_platform_inventory_rejects_missing_fetch_status() -> None:

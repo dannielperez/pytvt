@@ -108,6 +108,21 @@ class RuntimePlatformInventoryResult:
     health: tuple[dict[str, Any], ...]
     summary: dict[str, int]
 
+    def as_dict(self) -> dict[str, Any]:
+        """Return the established JSON snapshot shape for existing consumers."""
+        return {
+            "capabilities": dict(self.capabilities),
+            "fetch_status": dict(self.fetch_status),
+            "sites": list(self.sites),
+            "devices": list(self.devices),
+            "channels": list(self.channels),
+            "servers": list(self.servers),
+            "alarm_zones": list(self.alarm_zones),
+            "alarm_events": list(self.alarm_events),
+            "health": list(self.health),
+            "summary": dict(self.summary),
+        }
+
 
 class RuntimeClient:
     """Asynchronous client with one absolute deadline per socket exchange."""
