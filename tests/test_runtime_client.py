@@ -124,3 +124,111 @@ def test_typed_face_batch_rejects_mismatched_page() -> None:
             end=datetime(2026, 8, 7, 10),
             page=1,
         )
+
+
+def _platform_snapshot() -> dict:
+    return {
+        "capabilities": {"resources": True, "servers": True},
+        "fetch_status": {
+            "resources": "ok",
+            "devices": "ok",
+            "channels": "ok",
+            "areas": "ok",
+            "servers": "ok",
+            "alarm_zones": "unavailable",
+            "alarm_events": "failed",
+        },
+        "sites": [{"id": "site-1"}],
+        "devices": [{"id": "nvr-1"}],
+        "channels": [{"id": "camera-1"}],
+        "servers": [{"id": "server-1"}],
+        "alarm_zones": [],
+        "alarm_events": [],
+        "health": [{"id": "nvr-1", "status": "ONLINE"}],
+        "summary": {"site_count": 1, "device_count": 1},
+    }
+
+
+def test_typed_platform_inventory_owns_job_schema_and_validates_result() -> None:
+    captured: dict = {}
+
+    class Client(SyncRuntimeClient):
+        def execute(self, job, **kwargs):
+            captured.update(job)
+            captured["timeout_ms"] = kwargs.get("timeout_ms")
+            return _platform_snapshot()
+
+    result = Client().get_platform_inventory("nvms.example", "operator", "secret")
+
+    assert captured == {
+        "sdkFamily": "platform",
+        "operation": "inventorySnapshot",
+        "credentials": {
+            "host": "nvms.example",
+            "port": 6003,
+            "username": "operator",
+            "password": "secret",
+        },
+        "timeout_ms": 60_000,
+    }
+    assert result.summary == {"site_count": 1, "device_count": 1}
+    assert result.devices == ({"id": "nvr-1"},)
+    assert result.fetch_status["alarm_events"] == "failed"
+    assert result.as_dict() == _platform_snapshot()
+
+
+def test_typed_platform_inventory_rejects_missing_fetch_status() -> None:
+    class Client(SyncRuntimeClient):
+        def execute(self, _job, **_kwargs):
+            snapshot = _platform_snapshot()
+            del snapshot["fetch_status"]["servers"]
+            return snapshot
+
+    with pytest.raises(RuntimeClientError, match="invalid platform inventory snapshot"):
+        Client().get_platform_inventory("nvms.example", "operator", "secret")
+
+
+def test_typed_platform_authority_owns_job_schema_and_validates_result() -> None:
+    captured: dict = {}
+    snapshot = {
+        "fetch_status": {
+            "permission_groups": "ok",
+            "users": "ok",
+            "permission_entries": "ok",
+            "area_permissions": "unavailable",
+            "user_sessions": "ok",
+        },
+        "permission_groups": [{"guid": "group-1"}],
+        "users": [{"guid": "user-1"}],
+        "permission_entries": [],
+        "area_permissions": [],
+        "user_sessions": [],
+    }
+
+    class Client(SyncRuntimeClient):
+        def execute(self, job, **kwargs):
+            captured.update(job)
+            captured["timeout_ms"] = kwargs.get("timeout_ms")
+            return snapshot
+
+    result = Client().get_platform_authority("nvms.example", "operator", "secret")
+
+    assert captured["sdkFamily"] == "platform"
+    assert captured["operation"] == "authoritySnapshot"
+    assert captured["timeout_ms"] == 60_000
+    assert result.users == ({"guid": "user-1"},)
+    assert result.as_dict() == snapshot
+
+
+def test_typed_platform_authority_rejects_partial_result() -> None:
+    class Client(SyncRuntimeClient):
+        def execute(self, _job, **_kwargs):
+            return {"users": []}
+
+    with pytest.raises(RuntimeClientError, match="invalid platform authority snapshot"):
+        Client().get_platform_authority("nvms.example", "operator", "secret")
+
+
+def test_runtime_request_rejects_out_of_range_timeout_before_socket_io() -> None:
+    with pytest.raises(ValueError, match="between 1000 and 60000"):
+        SyncRuntimeClient().execute({}, timeout_ms=999)

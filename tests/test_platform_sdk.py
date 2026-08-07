@@ -556,6 +556,12 @@ class TestLoginFailureReporting:
             client.login("admin", "secret")
         return str(excinfo.value)
 
+    def _login_error(self, **kwargs):
+        client = PlatformSDKClient(ns_lib=_FakeNsLib(**kwargs), host="1.2.3.4", port=6003)
+        with pytest.raises(Exception) as excinfo:
+            client.login("admin", "secret")
+        return excinfo.value
+
     def test_locked_account_is_named_in_the_error(self) -> None:
         message = self._login(last_error=pc.PLAT_ERROR_USER_LOCKED)
         assert "user_locked" in message
@@ -578,6 +584,15 @@ class TestLoginFailureReporting:
         # the original diagnostic must survive
         assert "invalid login ID -1" in message
         assert "1.2.3.4:6003" in message
+
+    def test_login_error_exposes_credential_rejection_without_message_parsing(self) -> None:
+        credential_error = self._login_error(last_error=pc.PLAT_ERROR_PASSWORD)
+        transport_error = self._login_error(last_error=pc.PLAT_ERROR_FAIL_CONNECT)
+        unknown_error = self._login_error(last_error=None)
+
+        assert credential_error.credential_rejected is True
+        assert transport_error.credential_rejected is False
+        assert unknown_error.credential_rejected is None
 
 
 class TestLastErrorSymbolWiring:

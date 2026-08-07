@@ -19,6 +19,10 @@ class ManagementUnsupportedError(ManagementError):
 class ManagementAuthError(ManagementError):
     """Raised when management-server authentication fails."""
 
+    def __init__(self, message: str, *, credential_rejected: bool | None = None) -> None:
+        self.credential_rejected = credential_rejected
+        super().__init__(message)
+
 
 # Canonical alias used by SDK/native backends
 AuthError = ManagementAuthError

@@ -598,7 +598,14 @@ class PlatformSDKClient:
         """Resolve, bind, and return the ctypes function for *capability*."""
         return self._ns.bind_function(capability)
 
-    def _reason_suffix(self) -> str:
+    def _last_error(self) -> int | None:
+        try:
+            return self._ns.call_get_last_error()
+        except Exception:
+            return None
+
+    @staticmethod
+    def _reason_suffix(code: int | None) -> str:
         """Render the SDK's last error as a human-readable clause.
 
         Reuses ``NamespacedLibrary.call_get_last_error`` rather than rebinding
@@ -606,10 +613,6 @@ class PlatformSDKClient:
         missing reason degrades to a note — it must never replace the failure
         being reported.
         """
-        try:
-            code = self._ns.call_get_last_error()
-        except Exception:
-            code = None
         if code is None:
             return " (reason unavailable: Plat_GetLastErrorEx not callable)"
         suffix = f" (reason: {pc.plat_error_name(code)} [{code}]"
@@ -684,9 +687,11 @@ class PlatformSDKClient:
             # -1 is the SDK's only return for every failure mode; without the
             # last-error code a locked account is indistinguishable from an
             # unreachable server.
+            error_code = self._last_error()
             raise ManagementAuthError(
                 f"Plat_LoginEx returned invalid login ID {login_id} "
-                f"for {self._host}:{self._port}{self._reason_suffix()}"
+                f"for {self._host}:{self._port}{self._reason_suffix(error_code)}",
+                credential_rejected=(pc.plat_error_is_credential(error_code) if error_code is not None else None),
             )
 
         self._login_id = login_id
@@ -695,10 +700,12 @@ class PlatformSDKClient:
         if not state.wait_for_login(timeout=_LOGIN_TIMEOUT):
             connect_state = state.connect_state
             error_id = state.login_error_id
+            error_code = error_id if error_id else self._last_error()
             raise ManagementAuthError(
                 f"PlatformSDK login timed out or failed for {self._host}:{self._port} "
                 f"(connect_state={connect_state}, error_id={error_id})"
-                f"{self._reason_suffix()}"
+                f"{self._reason_suffix(error_code)}",
+                credential_rejected=(pc.plat_error_is_credential(error_code) if error_code is not None else None),
             )
 
         self._authenticated = True
