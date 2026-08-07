@@ -70,6 +70,14 @@ class RuntimeFaceBatchResult:
     complete: bool
     page: int
 
+    @property
+    def success(self) -> bool:
+        return True
+
+    @property
+    def error(self) -> None:
+        return None
+
 
 class RuntimeClient:
     """Asynchronous client with one absolute deadline per socket exchange."""
