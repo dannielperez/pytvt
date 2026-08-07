@@ -12,6 +12,7 @@ Public API:
     Net SDK:   pytvt.device_sdk — ctypes bindings for libdvrnetsdk.so (Linux only;
                requires a vendor-supplied shared library — NOT included in this package)
     SDK HTTP:  SdkHttpClient — typed client for a compatible SDK bridge service
+    SDK runtime: SyncRuntimeClient / RuntimeClient — typed Unix-socket clients
     Unified:   DeviceManager — auto-selects netsdk or sdk_http backend
     Config:    load_config
     Scanner:   scan_single_nvr, load_devices, filter_tvt_devices
@@ -36,7 +37,7 @@ native SDK bindings. It still requires a local vendor SDK installation, but it
 no longer depends on Node.js or any bridge scripts.
 """
 
-__version__ = "1.3.2"
+__version__ = "1.3.3"
 
 from . import workflows  # Provisional — technician-facing workflow orchestrations.
 from .alarm_protocol import ParsedAlarmFrame, parse_alarm_frame
@@ -88,6 +89,16 @@ from .models import (
 from .output import save_csv, save_failed_devices, save_json, save_xlsx_per_site
 from .platform_sdk import ManagementClient, ManagementError
 from .registry import resolve_execution_plan
+from .runtime_client import (
+    RUNTIME_PROTOCOL_VERSION,
+    RuntimeClient,
+    RuntimeClientError,
+    RuntimeFaceBatchItem,
+    RuntimeFaceBatchResult,
+    RuntimeFaceCapture,
+    RuntimeRemoteError,
+    SyncRuntimeClient,
+)
 from .scanner import filter_tvt_devices, load_devices, scan_single_nvr
 from .status_log import (
     NodeIdentity,
@@ -164,6 +175,14 @@ __all__ = [
     "ManagementError",
     # SDK HTTP client
     "SdkHttpClient",
+    "RUNTIME_PROTOCOL_VERSION",
+    "RuntimeClient",
+    "RuntimeClientError",
+    "RuntimeFaceBatchItem",
+    "RuntimeFaceBatchResult",
+    "RuntimeFaceCapture",
+    "RuntimeRemoteError",
+    "SyncRuntimeClient",
     "CommandResult",
     "DeviceInfoResult",
     "DeviceTimeResult",

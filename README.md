@@ -53,6 +53,13 @@ Repository guardrails enforce this policy through tests, packaging checks, `.git
 
 ## Runtime and SDK matrix
 
+`pytvt` also ships typed `RuntimeClient` and `SyncRuntimeClient` clients for a
+compatible local Unix-socket runtime. The client is pure Python: it contains no
+vendor shared objects and does not start or supervise the private runtime.
+Requests and responses carry a protocol version so client/server skew fails
+closed. Operation-specific methods, such as `search_face_capture_images`, own
+the runtime job schema and return typed DTOs instead of exposing raw IPC maps.
+
 | Runtime family | What it powers | Requirement | Packaging policy |
 |---|---|---|---|
 | Pure Python | `protocol`, discovery, diffing, NVR CGI, Web API, most CLI flows | `pip install pytvt` | Included in wheel/sdist |
