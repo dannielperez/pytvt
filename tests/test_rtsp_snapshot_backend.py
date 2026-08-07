@@ -313,6 +313,31 @@ class TestRtspUrlIsResolvedWithoutANativeLogin:
         assert url == (f"rtsp://operator%40example.com:p%40ss%2Fword@10.0.0.25:554/{profile}")
         nvr_client.assert_not_called()
 
+    def test_standalone_camera_uses_a_configured_rtsp_port(self, monkeypatch):
+        monkeypatch.setattr(
+            DeviceManager,
+            "_http_rtsp_url",
+            ORIGINAL_HTTP_RTSP_URL,
+        )
+        mgr = DeviceManager(
+            **CREDS,
+            backend=Backend.NETSDK,
+            direct_camera=True,
+            rtsp_port=8554,
+        )
+
+        assert mgr._http_rtsp_url() == "rtsp://admin:pass123@10.0.0.1:8554/profile1"
+
+    @pytest.mark.parametrize("rtsp_port", (True, 0, 65536))
+    def test_rejects_an_invalid_rtsp_port(self, rtsp_port):
+        with pytest.raises(ValueError, match="rtsp_port"):
+            DeviceManager(
+                **CREDS,
+                backend=Backend.NETSDK,
+                direct_camera=True,
+                rtsp_port=rtsp_port,
+            )
+
     def test_native_resolver_still_covers_a_recorder_the_web_cgi_cannot_answer(self):
         mgr = DeviceManager(**CREDS, backend=Backend.NETSDK)
         with (

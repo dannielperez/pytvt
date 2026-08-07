@@ -241,6 +241,7 @@ class DeviceManager:
         port: SDK/protocol port (default 6036).
         http_port: NVR web-CGI port, used to resolve an RTSP URL without a
             native SDK login (default 80).
+        rtsp_port: Standalone camera RTSP port (default 554).
         backend: Force a specific backend (``None`` = auto-detect).
         api_url: Base URL for the SDK bridge service (used by sdk_http backend).
         sdk_path: Optional vendor SDK path for the netsdk backend.
@@ -262,6 +263,7 @@ class DeviceManager:
         *,
         port: int = 6036,
         http_port: int = 80,
+        rtsp_port: int = 554,
         identifier: str | None = None,
         connection_method: str | None = None,
         nat_server: str | None = None,
@@ -279,6 +281,9 @@ class DeviceManager:
         self._password = password
         self._port = port
         self._http_port = http_port
+        if isinstance(rtsp_port, bool) or not isinstance(rtsp_port, int) or not 1 <= rtsp_port <= 65535:
+            raise ValueError("rtsp_port must be an integer between 1 and 65535.")
+        self._rtsp_port = rtsp_port
         self._identifier = (identifier or "").strip()
         self._connection_method = _resolve_connection_method(self._ip, self._identifier, connection_method)
         self._nat_server = (nat_server or "").strip() or None
@@ -588,7 +593,7 @@ class DeviceManager:
                 stream_type,
                 "profile1",
             )
-            return f"rtsp://{user}:{password}@{self._ip}:554/{profile}"
+            return f"rtsp://{user}:{password}@{self._ip}:{self._rtsp_port}/{profile}"
         cache_key = self._rtsp_url_cache_key(
             channel=channel,
             stream_type=stream_type,
