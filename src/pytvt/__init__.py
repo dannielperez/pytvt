@@ -37,7 +37,7 @@ native SDK bindings. It still requires a local vendor SDK installation, but it
 no longer depends on Node.js or any bridge scripts.
 """
 
-__version__ = "1.3.3"
+__version__ = "1.3.4"
 
 from . import workflows  # Provisional — technician-facing workflow orchestrations.
 from .alarm_protocol import ParsedAlarmFrame, parse_alarm_frame
@@ -96,6 +96,7 @@ from .runtime_client import (
     RuntimeFaceBatchItem,
     RuntimeFaceBatchResult,
     RuntimeFaceCapture,
+    RuntimePlatformInventoryResult,
     RuntimeRemoteError,
     SyncRuntimeClient,
 )
@@ -181,6 +182,7 @@ __all__ = [
     "RuntimeFaceBatchItem",
     "RuntimeFaceBatchResult",
     "RuntimeFaceCapture",
+    "RuntimePlatformInventoryResult",
     "RuntimeRemoteError",
     "SyncRuntimeClient",
     "CommandResult",

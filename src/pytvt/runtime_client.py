@@ -22,6 +22,18 @@ MAX_RUNTIME_REQUEST_BYTES = 64 * 1024
 MAX_RUNTIME_RESPONSE_BYTES = 17 * 1024 * 1024
 MAX_FACE_BATCH_ITEMS = 100
 MAX_FACE_BATCH_BYTES = 12 * 1024 * 1024
+PLATFORM_FETCH_SECTIONS = frozenset(
+    {"resources", "devices", "channels", "areas", "servers", "alarm_zones", "alarm_events"}
+)
+PLATFORM_SNAPSHOT_LISTS = (
+    "sites",
+    "devices",
+    "channels",
+    "servers",
+    "alarm_zones",
+    "alarm_events",
+    "health",
+)
 
 
 class RuntimeClientError(RuntimeError):
@@ -79,6 +91,22 @@ class RuntimeFaceBatchResult:
         return None
 
 
+@dataclass(frozen=True)
+class RuntimePlatformInventoryResult:
+    """Validated JSON-safe inventory returned by the persistent Server SDK session."""
+
+    capabilities: dict[str, bool]
+    fetch_status: dict[str, str]
+    sites: tuple[dict[str, Any], ...]
+    devices: tuple[dict[str, Any], ...]
+    channels: tuple[dict[str, Any], ...]
+    servers: tuple[dict[str, Any], ...]
+    alarm_zones: tuple[dict[str, Any], ...]
+    alarm_events: tuple[dict[str, Any], ...]
+    health: tuple[dict[str, Any], ...]
+    summary: dict[str, int]
+
+
 class RuntimeClient:
     """Asynchronous client with one absolute deadline per socket exchange."""
 
@@ -99,6 +127,18 @@ class RuntimeClient:
 
     async def execute(self, job: dict[str, Any]) -> Any:
         return await self._request("execute", job=job)
+
+    async def get_platform_inventory(
+        self,
+        host: str,
+        username: str,
+        password: str,
+        *,
+        port: int = 6003,
+    ) -> RuntimePlatformInventoryResult:
+        """Read one NVMS inventory snapshot through a persistent PlatformSDK session."""
+        result = await self.execute(_platform_inventory_job(host, port, username, password))
+        return _parse_platform_inventory(result)
 
     async def _request(self, method: str, *, job: dict[str, Any] | None = None) -> Any:
         request_id = uuid.uuid4().hex
@@ -145,6 +185,18 @@ class SyncRuntimeClient:
 
     def execute(self, job: dict[str, Any]) -> Any:
         return self._request("execute", job=job)
+
+    def get_platform_inventory(
+        self,
+        host: str,
+        username: str,
+        password: str,
+        *,
+        port: int = 6003,
+    ) -> RuntimePlatformInventoryResult:
+        """Read one NVMS inventory snapshot through a persistent PlatformSDK session."""
+        result = self.execute(_platform_inventory_job(host, port, username, password))
+        return _parse_platform_inventory(result)
 
     def search_face_capture_images(
         self,
@@ -231,6 +283,27 @@ def _request_payload(
     if len(payload) > MAX_RUNTIME_REQUEST_BYTES:
         raise RuntimeClientError("runtime request exceeds configured byte limit")
     return payload + b"\n"
+
+
+def _platform_inventory_job(host: str, port: int, username: str, password: str) -> dict[str, Any]:
+    if not isinstance(host, str) or not host.strip():
+        raise ValueError("host is required")
+    if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65_535:
+        raise ValueError("port is invalid")
+    if not isinstance(username, str) or not username:
+        raise ValueError("username is required")
+    if not isinstance(password, str) or not password:
+        raise ValueError("password is required")
+    return {
+        "sdkFamily": "platform",
+        "operation": "inventorySnapshot",
+        "credentials": {
+            "host": host.strip(),
+            "port": port,
+            "username": username,
+            "password": password,
+        },
+    }
 
 
 def _parse_response(response_bytes: bytes, request_id: str) -> Any:
@@ -325,4 +398,48 @@ def _parse_face_item(raw: Any) -> RuntimeFaceBatchItem:
         ),
         image=image,
         error=error,
+    )
+
+
+def _parse_platform_inventory(result: Any) -> RuntimePlatformInventoryResult:
+    try:
+        if not isinstance(result, dict):
+            raise TypeError
+        capabilities = result["capabilities"]
+        fetch_status = result["fetch_status"]
+        summary = result["summary"]
+        if not isinstance(capabilities, dict) or any(
+            not isinstance(key, str) or not isinstance(value, bool) for key, value in capabilities.items()
+        ):
+            raise TypeError
+        if (
+            not isinstance(fetch_status, dict)
+            or set(fetch_status) != PLATFORM_FETCH_SECTIONS
+            or any(value not in {"ok", "unavailable", "failed"} for value in fetch_status.values())
+        ):
+            raise TypeError
+        if not isinstance(summary, dict) or any(
+            not isinstance(key, str) or isinstance(value, bool) or not isinstance(value, int) or value < 0
+            for key, value in summary.items()
+        ):
+            raise TypeError
+        lists: dict[str, tuple[dict[str, Any], ...]] = {}
+        for name in PLATFORM_SNAPSHOT_LISTS:
+            value = result[name]
+            if not isinstance(value, list) or any(not isinstance(item, dict) for item in value):
+                raise TypeError
+            lists[name] = tuple(value)
+    except (KeyError, TypeError, ValueError):
+        raise RuntimeClientError("runtime returned an invalid platform inventory snapshot") from None
+    return RuntimePlatformInventoryResult(
+        capabilities=dict(capabilities),
+        fetch_status=dict(fetch_status),
+        sites=lists["sites"],
+        devices=lists["devices"],
+        channels=lists["channels"],
+        servers=lists["servers"],
+        alarm_zones=lists["alarm_zones"],
+        alarm_events=lists["alarm_events"],
+        health=lists["health"],
+        summary=dict(summary),
     )

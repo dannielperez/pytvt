@@ -124,3 +124,62 @@ def test_typed_face_batch_rejects_mismatched_page() -> None:
             end=datetime(2026, 8, 7, 10),
             page=1,
         )
+
+
+def _platform_snapshot() -> dict:
+    return {
+        "capabilities": {"resources": True, "servers": True},
+        "fetch_status": {
+            "resources": "ok",
+            "devices": "ok",
+            "channels": "ok",
+            "areas": "ok",
+            "servers": "ok",
+            "alarm_zones": "unavailable",
+            "alarm_events": "failed",
+        },
+        "sites": [{"id": "site-1"}],
+        "devices": [{"id": "nvr-1"}],
+        "channels": [{"id": "camera-1"}],
+        "servers": [{"id": "server-1"}],
+        "alarm_zones": [],
+        "alarm_events": [],
+        "health": [{"id": "nvr-1", "status": "ONLINE"}],
+        "summary": {"site_count": 1, "device_count": 1},
+    }
+
+
+def test_typed_platform_inventory_owns_job_schema_and_validates_result() -> None:
+    captured: dict = {}
+
+    class Client(SyncRuntimeClient):
+        def execute(self, job):
+            captured.update(job)
+            return _platform_snapshot()
+
+    result = Client().get_platform_inventory("nvms.example", "operator", "secret")
+
+    assert captured == {
+        "sdkFamily": "platform",
+        "operation": "inventorySnapshot",
+        "credentials": {
+            "host": "nvms.example",
+            "port": 6003,
+            "username": "operator",
+            "password": "secret",
+        },
+    }
+    assert result.summary == {"site_count": 1, "device_count": 1}
+    assert result.devices == ({"id": "nvr-1"},)
+    assert result.fetch_status["alarm_events"] == "failed"
+
+
+def test_typed_platform_inventory_rejects_missing_fetch_status() -> None:
+    class Client(SyncRuntimeClient):
+        def execute(self, _job):
+            snapshot = _platform_snapshot()
+            del snapshot["fetch_status"]["servers"]
+            return snapshot
+
+    with pytest.raises(RuntimeClientError, match="invalid platform inventory snapshot"):
+        Client().get_platform_inventory("nvms.example", "operator", "secret")

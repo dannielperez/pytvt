@@ -59,6 +59,19 @@ vendor shared objects and does not start or supervise the private runtime.
 Requests and responses carry a protocol version so client/server skew fails
 closed. Operation-specific methods, such as `search_face_capture_images`, own
 the runtime job schema and return typed DTOs instead of exposing raw IPC maps.
+`get_platform_inventory` does the same for an NVMS Server/Platform SDK session:
+
+```python
+snapshot = client.get_platform_inventory(
+    "nvms.example",
+    "operator",
+    password,
+    port=6003,
+)
+```
+
+Recorder NetSDK and NVMS PlatformSDK sessions remain separate runtime
+capability families even when one local daemon supervises both.
 
 | Runtime family | What it powers | Requirement | Packaging policy |
 |---|---|---|---|
