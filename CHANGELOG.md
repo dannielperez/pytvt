@@ -27,6 +27,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Typed direct-login credential rejection** (`device_sdk`).
+  `NetSdkClient.login()` now raises `NetSdkCredentialRejectedError` when the
+  recorder explicitly rejects the account or password, while network and
+  other transient failures remain generic `NetSdkError` values. Consumers no
+  longer need to interpret vendor error codes outside `pytvt`.
 - **NVR-side face detection / recognition over the web CGI API**
   (`xml_api.py`, `models.py`). `NvrClient` gains `query_ai_resource()` (the recorder's
   AI-compute pool + per-channel allocation — how a standard camera is turned into a
