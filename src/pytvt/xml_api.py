@@ -116,6 +116,7 @@ import shutil
 import subprocess
 import sys
 import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from xml.sax.saxutils import escape
 
@@ -1825,6 +1826,50 @@ class FfmpegUnavailable(RuntimeError):
     """
 
 
+@dataclass(frozen=True, slots=True)
+class RtspFrameGrabResult:
+    """Secret-free outcome of one bounded ffmpeg RTSP frame grab."""
+
+    image: bytes | None = None
+    error: str = ""
+    error_kind: str = ""
+    returncode: int | None = None
+
+
+def _classify_rtsp_frame_failure(stderr: bytes) -> tuple[str, str]:
+    """Map ffmpeg diagnostics to stable reasons without returning raw stderr.
+
+    ffmpeg commonly echoes its input URL, which may contain recorder
+    credentials.  Only inspect the output locally and return fixed strings.
+    """
+    detail = stderr.decode("utf-8", errors="replace").casefold()
+    if "401 unauthorized" in detail or "authentication failed" in detail:
+        return "RTSP authentication was rejected.", "rtsp_auth"
+    if "404 not found" in detail:
+        return "The RTSP stream path was not found.", "rtsp_not_found"
+    if any(
+        marker in detail
+        for marker in (
+            "connection refused",
+            "network is unreachable",
+            "no route to host",
+            "connection timed out",
+        )
+    ):
+        return "The RTSP endpoint could not be reached.", "rtsp_connection"
+    if any(
+        marker in detail
+        for marker in (
+            "could not find codec parameters",
+            "decoder not found",
+            "invalid data found when processing input",
+            "unsupported codec",
+        )
+    ):
+        return "The RTSP video stream could not be decoded.", "rtsp_decode"
+    return "ffmpeg could not capture a frame from the RTSP stream.", "rtsp_error"
+
+
 def ffmpeg_available() -> bool:
     """Return whether the ``ffmpeg`` binary can be found on PATH."""
     return shutil.which("ffmpeg") is not None
@@ -1901,6 +1946,47 @@ def rtsp_snapshot(rtsp_url: str, output_path: str, timeout: int = 10) -> bool:
         return False
 
 
+def rtsp_snapshot_attempt_bytes(
+    rtsp_url: str,
+    timeout: int = 10,
+    *,
+    wall_timeout: float | None = None,
+) -> RtspFrameGrabResult:
+    """Capture one frame and preserve a bounded, secret-free failure reason."""
+    process_timeout = timeout + 5 if wall_timeout is None else max(0.001, wall_timeout)
+    try:
+        result = subprocess.run(
+            [*_ffmpeg_rtsp_frame_args(rtsp_url, timeout), "-f", "image2", "pipe:1"],
+            capture_output=True,
+            timeout=process_timeout,
+        )
+    except FileNotFoundError as exc:
+        raise FfmpegUnavailable("ffmpeg is not installed; RTSP frame grabs cannot run.") from exc
+    except subprocess.TimeoutExpired:
+        return RtspFrameGrabResult(
+            error="RTSP frame grab timed out before a frame arrived.",
+            error_kind="rtsp_timeout",
+        )
+
+    if result.returncode == 0 and result.stdout:
+        return RtspFrameGrabResult(
+            image=result.stdout,
+            returncode=result.returncode,
+        )
+    if result.returncode == 0:
+        return RtspFrameGrabResult(
+            error="RTSP stream produced no JPEG frame.",
+            error_kind="empty_frame",
+            returncode=result.returncode,
+        )
+    error, error_kind = _classify_rtsp_frame_failure(result.stderr)
+    return RtspFrameGrabResult(
+        error=error,
+        error_kind=error_kind,
+        returncode=result.returncode,
+    )
+
+
 def rtsp_snapshot_bytes(
     rtsp_url: str,
     timeout: int = 10,
@@ -1921,20 +2007,11 @@ def rtsp_snapshot_bytes(
             *not* folded into the ``None`` return: a missing binary is a
             deployment fault and must not be reported as a frameless stream.
     """
-    process_timeout = timeout + 5 if wall_timeout is None else max(0.001, wall_timeout)
-    try:
-        result = subprocess.run(
-            [*_ffmpeg_rtsp_frame_args(rtsp_url, timeout), "-f", "image2", "pipe:1"],
-            capture_output=True,
-            timeout=process_timeout,
-        )
-    except FileNotFoundError as exc:
-        raise FfmpegUnavailable("ffmpeg is not installed; RTSP frame grabs cannot run.") from exc
-    except subprocess.TimeoutExpired:
-        return None
-    if result.returncode == 0 and result.stdout:
-        return result.stdout
-    return None
+    return rtsp_snapshot_attempt_bytes(
+        rtsp_url,
+        timeout=timeout,
+        wall_timeout=wall_timeout,
+    ).image
 
 
 def main():

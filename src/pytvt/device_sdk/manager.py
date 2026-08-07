@@ -680,7 +680,7 @@ class DeviceManager:
                 return SnapshotAttempt(method="rtsp", error=str(detail), error_kind="no_stream_url")
             rtsp_url = result.rtsp_url
         # Lazy import avoids pulling the NVR XML/HTTP module at device_sdk load.
-        from ..xml_api import rtsp_snapshot_bytes
+        from ..xml_api import rtsp_snapshot_attempt_bytes
 
         remaining = None if deadline is None else deadline - time.monotonic()
         if remaining is not None and remaining <= 0:
@@ -692,9 +692,9 @@ class DeviceManager:
         try:
             frame_timeout = timeout if remaining is None else max(1, min(timeout, int(remaining)))
             if remaining is None:
-                data = rtsp_snapshot_bytes(rtsp_url, timeout=frame_timeout)
+                frame = rtsp_snapshot_attempt_bytes(rtsp_url, timeout=frame_timeout)
             else:
-                data = rtsp_snapshot_bytes(
+                frame = rtsp_snapshot_attempt_bytes(
                     rtsp_url,
                     timeout=frame_timeout,
                     wall_timeout=remaining,
@@ -716,18 +716,23 @@ class DeviceManager:
                 error=f"{type(exc).__name__}: {exc}",
                 error_kind="rtsp_error",
             )
-        if not data:
+        if not frame.image:
             self._discard_cached_rtsp_url(
                 channel=channel,
                 stream_type=stream_type,
             )
-            logger.info("RTSP stream yielded no frame ip=%s channel=%s", self._ip, channel)
+            logger.info(
+                "RTSP frame grab failed ip=%s channel=%s kind=%s",
+                self._ip,
+                channel,
+                frame.error_kind,
+            )
             return SnapshotAttempt(
                 method="rtsp",
-                error="RTSP stream yielded no frame.",
-                error_kind="empty_frame",
+                error=frame.error or "RTSP stream yielded no frame.",
+                error_kind=frame.error_kind or "empty_frame",
             )
-        return SnapshotAttempt(image=data, method="rtsp")
+        return SnapshotAttempt(image=frame.image, method="rtsp")
 
     def rtsp_url(self, *, channel: int = 0, stream_type: int = 0) -> RtspUrlResult:
         """Get RTSP stream URL for a channel."""
