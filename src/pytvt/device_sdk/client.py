@@ -591,6 +591,10 @@ class NetSdkError(Exception):
         super().__init__(f"{message} (error={code})" if code else message)
 
 
+class NetSdkCredentialRejectedError(NetSdkError):
+    """Raised when a recorder explicitly rejects login credentials."""
+
+
 class NatUnavailableError(NetSdkError):
     """Raised when AutoNAT support is unavailable in the current SDK setup."""
 
@@ -2715,9 +2719,20 @@ class NetSdkClient:
         elapsed_ms = int((time.perf_counter() - started_at) * 1000)
         if handle < 0:
             code = self._last_error()
-            raise NetSdkError(
+            sdk_error = self._sdk_error(code)
+            credential_errors = {
+                SdkError.LOGIN_REFUSED,
+                SdkError.NOENOUGH_AUTH,
+                SdkError.PASSWORD_ERROR,
+                SdkError.PASSWORD_FORMAT_ERROR,
+                SdkError.USERNOTEXIST,
+                SdkError.USER_ERROR_NO_USER,
+                SdkError.USER_ERROR_USER_OR_PASSWORD_IS_NULL,
+            }
+            error_type = NetSdkCredentialRejectedError if sdk_error in credential_errors else NetSdkError
+            raise error_type(
                 f"Login to {host}:{port} as {username}",
-                self._sdk_error(code),
+                sdk_error,
             )
         logger.info(
             "Connected via direct SDK to %s:%d in %dms — %s (%s) SN=%s",

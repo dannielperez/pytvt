@@ -33,6 +33,7 @@ from pytvt.device_sdk.client import (
     NatUnavailableError,
     NetSdkCapabilityError,
     NetSdkClient,
+    NetSdkCredentialRejectedError,
     NetSdkError,
     NodeEncodeInfo,
     NvrChannelInfo,
@@ -280,8 +281,39 @@ class TestLogin:
     def test_login_failure(self, client, mock_lib):
         mock_lib.NET_SDK_Login.return_value = -1
         mock_lib.NET_SDK_GetLastError.return_value = 1  # PASSWORD_ERROR
-        with pytest.raises(NetSdkError, match="Login"):
+        with pytest.raises(NetSdkCredentialRejectedError, match="Login"):
             client.login("10.0.0.1", "admin", "wrong")
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            SdkError.LOGIN_REFUSED,
+            SdkError.NOENOUGH_AUTH,
+            SdkError.PASSWORD_ERROR,
+            SdkError.PASSWORD_FORMAT_ERROR,
+            SdkError.USERNOTEXIST,
+            SdkError.USER_ERROR_NO_USER,
+            SdkError.USER_ERROR_USER_OR_PASSWORD_IS_NULL,
+        ],
+    )
+    def test_login_classifies_explicit_credential_rejection(self, client, mock_lib, code):
+        mock_lib.NET_SDK_Login.return_value = -1
+        mock_lib.NET_SDK_GetLastError.return_value = code
+
+        with pytest.raises(NetSdkCredentialRejectedError) as failure:
+            client.login("10.0.0.1", "admin", "wrong")
+
+        assert failure.value.code == code
+
+    def test_login_keeps_transport_failure_generic(self, client, mock_lib):
+        mock_lib.NET_SDK_Login.return_value = -1
+        mock_lib.NET_SDK_GetLastError.return_value = SdkError.NETWORK_RECV_TIMEOUT
+
+        with pytest.raises(NetSdkError) as failure:
+            client.login("10.0.0.1", "admin", "pass")
+
+        assert not isinstance(failure.value, NetSdkCredentialRejectedError)
+        assert failure.value.code == SdkError.NETWORK_RECV_TIMEOUT
 
     def test_login_custom_port(self, client, mock_lib):
         client.login("10.0.0.1", "admin", "pass", port=9009)
