@@ -40,6 +40,7 @@ from collections import OrderedDict
 from enum import Enum, unique
 from threading import Lock
 from typing import TypeAlias
+from urllib.parse import quote
 
 from ..models import DeviceEntry
 from .http_client import (
@@ -244,6 +245,8 @@ class DeviceManager:
         api_url: Base URL for the SDK bridge service (used by sdk_http backend).
         sdk_path: Optional vendor SDK path for the netsdk backend.
         timeout: HTTP/connection timeout in seconds.
+        direct_camera: Treat the target as a standalone TVT IPC and use its
+            standard RTSP profile URL instead of the NVR channel resolver.
         rtsp_url_cache_ttl: Seconds to reuse a resolved camera-direct URL in
             this process. Set to zero to disable caching.
 
@@ -268,6 +271,7 @@ class DeviceManager:
         api_url: str = "http://localhost:3000",
         sdk_path: str | None = None,
         timeout: int = 30,
+        direct_camera: bool = False,
         rtsp_url_cache_ttl: float = _DEFAULT_RTSP_URL_CACHE_TTL_SECONDS,
     ) -> None:
         self._ip = ip or ""
@@ -283,6 +287,7 @@ class DeviceManager:
         self._api_url = api_url
         self._sdk_path = sdk_path
         self._timeout = timeout
+        self._direct_camera = direct_camera
         self._rtsp_url_cache_ttl = max(0.0, float(rtsp_url_cache_ttl))
 
         # Resolve backend
@@ -558,7 +563,7 @@ class DeviceManager:
         stream_type: int = 0,
         deadline: float | None = None,
     ) -> str | None:
-        """Resolve the channel's RTSP URL over the NVR web CGI. ``None`` if it can't.
+        """Resolve a direct-camera or NVR-channel RTSP URL. ``None`` if it can't.
 
         The point of this path is what it *doesn't* do. ``NET_SDK_GetRtspUrl``
         needs a native session, and on a loaded recorder that login was
@@ -576,6 +581,14 @@ class DeviceManager:
         """
         if not self._ip:
             return None
+        if self._direct_camera:
+            user = quote(self._username, safe="")
+            password = quote(self._password, safe="")
+            profile = {0: "profile1", 1: "profile2", 2: "profile3"}.get(
+                stream_type,
+                "profile1",
+            )
+            return f"rtsp://{user}:{password}@{self._ip}:554/{profile}"
         cache_key = self._rtsp_url_cache_key(
             channel=channel,
             stream_type=stream_type,
