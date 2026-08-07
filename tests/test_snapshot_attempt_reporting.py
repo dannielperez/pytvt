@@ -113,11 +113,38 @@ class TestRtspLegSeparatesItsTwoFailures:
 
         with (
             patch.object(mgr, "rtsp_url", return_value=result),
-            patch.object(xml_api, "rtsp_snapshot_bytes", return_value=b""),
+            patch.object(
+                xml_api,
+                "rtsp_snapshot_attempt_bytes",
+                return_value=xml_api.RtspFrameGrabResult(
+                    error="RTSP stream produced no JPEG frame.",
+                    error_kind="empty_frame",
+                ),
+            ),
         ):
             attempt = mgr._rtsp_snapshot_attempt(channel=1)
 
         assert attempt.error_kind == "empty_frame"
+
+    def test_frame_grab_reason_reaches_the_snapshot_attempt(self):
+        mgr = _manager()
+        result = RtspUrlResult(success=True, rtsp_url=RTSP)
+
+        with (
+            patch.object(mgr, "rtsp_url", return_value=result),
+            patch.object(
+                xml_api,
+                "rtsp_snapshot_attempt_bytes",
+                return_value=xml_api.RtspFrameGrabResult(
+                    error="RTSP authentication was rejected.",
+                    error_kind="rtsp_auth",
+                ),
+            ),
+        ):
+            attempt = mgr._rtsp_snapshot_attempt(channel=1)
+
+        assert attempt.error_kind == "rtsp_auth"
+        assert attempt.error == "RTSP authentication was rejected."
 
     def test_grab_exception_is_preserved(self):
         mgr = _manager()
@@ -125,7 +152,11 @@ class TestRtspLegSeparatesItsTwoFailures:
 
         with (
             patch.object(mgr, "rtsp_url", return_value=result),
-            patch.object(xml_api, "rtsp_snapshot_bytes", side_effect=TimeoutError("ffmpeg timed out")),
+            patch.object(
+                xml_api,
+                "rtsp_snapshot_attempt_bytes",
+                side_effect=TimeoutError("ffmpeg timed out"),
+            ),
         ):
             attempt = mgr._rtsp_snapshot_attempt(channel=1)
 
@@ -158,7 +189,11 @@ class TestFallbackReportsTheMostSpecificReason:
 
         with (
             patch.object(mgr, "rtsp_url", return_value=RtspUrlResult(success=True, rtsp_url=RTSP)),
-            patch.object(xml_api, "rtsp_snapshot_bytes", return_value=JPEG),
+            patch.object(
+                xml_api,
+                "rtsp_snapshot_attempt_bytes",
+                return_value=xml_api.RtspFrameGrabResult(image=JPEG),
+            ),
         ):
             attempt = mgr.snapshot_attempt(channel=1)
 

@@ -42,7 +42,7 @@ class TestRtspSnapshotBytes:
         assert "-frames:v" in argv and "1" in argv
 
     def test_none_on_nonzero_exit(self):
-        proc = MagicMock(returncode=1, stdout=b"")
+        proc = MagicMock(returncode=1, stdout=b"", stderr=b"")
         with patch.object(xml_api.subprocess, "run", return_value=proc):
             assert xml_api.rtsp_snapshot_bytes(RTSP) is None
 
@@ -87,6 +87,46 @@ class TestRtspSnapshotBytes:
         assert "tcp" in base and RTSP in base and "-q:v" in base
 
 
+class TestRtspSnapshotDiagnostics:
+    def test_auth_failure_is_typed_without_returning_the_secret_url(self):
+        secret_url = "rtsp://admin:super-secret@10.0.0.1/stream"
+        proc = MagicMock(
+            returncode=1,
+            stdout=b"",
+            stderr=(f"{secret_url}: Server returned 401 Unauthorized").encode(),
+        )
+
+        with patch.object(xml_api.subprocess, "run", return_value=proc):
+            result = xml_api.rtsp_snapshot_attempt_bytes(secret_url)
+
+        assert result.error_kind == "rtsp_auth"
+        assert result.error == "RTSP authentication was rejected."
+        assert "super-secret" not in result.error
+
+    def test_timeout_is_distinct_from_an_empty_stream(self):
+        with patch.object(
+            xml_api.subprocess,
+            "run",
+            side_effect=subprocess.TimeoutExpired("ffmpeg", 5),
+        ):
+            result = xml_api.rtsp_snapshot_attempt_bytes(RTSP)
+
+        assert result.error_kind == "rtsp_timeout"
+        assert "timed out" in result.error
+
+    def test_decoder_failure_is_typed(self):
+        proc = MagicMock(
+            returncode=1,
+            stdout=b"",
+            stderr=b"Invalid data found when processing input",
+        )
+
+        with patch.object(xml_api.subprocess, "run", return_value=proc):
+            result = xml_api.rtsp_snapshot_attempt_bytes(RTSP)
+
+        assert result.error_kind == "rtsp_decode"
+
+
 class TestManagerSnapshotPrefersRtsp:
     @pytest.fixture
     def mgr(self) -> DeviceManager:
@@ -96,7 +136,11 @@ class TestManagerSnapshotPrefersRtsp:
         ok_url = RtspUrlResult(success=True, rtsp_url=RTSP)
         with (
             patch.object(mgr, "rtsp_url", return_value=ok_url),
-            patch.object(xml_api, "rtsp_snapshot_bytes", return_value=JPEG) as grab,
+            patch.object(
+                xml_api,
+                "rtsp_snapshot_attempt_bytes",
+                return_value=xml_api.RtspFrameGrabResult(image=JPEG),
+            ) as grab,
             patch.object(mgr, "_get_http") as http,
         ):
             out = mgr.snapshot(channel=1)
@@ -108,7 +152,14 @@ class TestManagerSnapshotPrefersRtsp:
         ok_url = RtspUrlResult(success=True, rtsp_url=RTSP)
         with (
             patch.object(mgr, "rtsp_url", return_value=ok_url),
-            patch.object(xml_api, "rtsp_snapshot_bytes", return_value=None),
+            patch.object(
+                xml_api,
+                "rtsp_snapshot_attempt_bytes",
+                return_value=xml_api.RtspFrameGrabResult(
+                    error="RTSP stream produced no JPEG frame.",
+                    error_kind="empty_frame",
+                ),
+            ),
             patch.object(mgr, "_get_http") as http,
         ):
             http.return_value.snapshot.return_value = JPEG
@@ -120,7 +171,7 @@ class TestManagerSnapshotPrefersRtsp:
         bad_url = RtspUrlResult(success=False, error="no url")
         with (
             patch.object(mgr, "rtsp_url", return_value=bad_url),
-            patch.object(xml_api, "rtsp_snapshot_bytes") as grab,
+            patch.object(xml_api, "rtsp_snapshot_attempt_bytes") as grab,
             patch.object(mgr, "_get_http") as http,
         ):
             http.return_value.snapshot.return_value = JPEG
@@ -131,7 +182,7 @@ class TestManagerSnapshotPrefersRtsp:
 
     def test_prefer_rtsp_false_skips_rtsp(self, mgr):
         with (
-            patch.object(xml_api, "rtsp_snapshot_bytes") as grab,
+            patch.object(xml_api, "rtsp_snapshot_attempt_bytes") as grab,
             patch.object(mgr, "_get_http") as http,
         ):
             http.return_value.snapshot.return_value = JPEG
@@ -183,7 +234,14 @@ class TestManagerSnapshotPrefersRtsp:
         ok_url = RtspUrlResult(success=True, rtsp_url=RTSP)
         with (
             patch.object(mgr, "rtsp_url", return_value=ok_url),
-            patch.object(xml_api, "rtsp_snapshot_bytes", return_value=None),
+            patch.object(
+                xml_api,
+                "rtsp_snapshot_attempt_bytes",
+                return_value=xml_api.RtspFrameGrabResult(
+                    error="RTSP stream produced no JPEG frame.",
+                    error_kind="empty_frame",
+                ),
+            ),
             # The NETSDK leg now reports WHY it produced no image, so the seam
             # snapshot() reaches is the attempt-returning helper. _netsdk_snapshot
             # remains as the bytes|None form for direct callers.
@@ -212,7 +270,11 @@ class TestRtspUrlIsResolvedWithoutANativeLogin:
         with (
             patch.object(DeviceManager, "_http_rtsp_url", return_value=RTSP) as http_url,
             patch.object(mgr, "rtsp_url") as native_url,
-            patch.object(xml_api, "rtsp_snapshot_bytes", return_value=JPEG) as grab,
+            patch.object(
+                xml_api,
+                "rtsp_snapshot_attempt_bytes",
+                return_value=xml_api.RtspFrameGrabResult(image=JPEG),
+            ) as grab,
         ):
             attempt = mgr._rtsp_snapshot_attempt(channel=1)
 
@@ -227,7 +289,11 @@ class TestRtspUrlIsResolvedWithoutANativeLogin:
         with (
             patch.object(DeviceManager, "_http_rtsp_url", return_value=None),
             patch.object(mgr, "rtsp_url", return_value=RtspUrlResult(success=True, rtsp_url=RTSP)) as native_url,
-            patch.object(xml_api, "rtsp_snapshot_bytes", return_value=JPEG),
+            patch.object(
+                xml_api,
+                "rtsp_snapshot_attempt_bytes",
+                return_value=xml_api.RtspFrameGrabResult(image=JPEG),
+            ),
         ):
             attempt = mgr._rtsp_snapshot_attempt(channel=1)
 
@@ -241,7 +307,7 @@ class TestRtspUrlIsResolvedWithoutANativeLogin:
             patch.object(DeviceManager, "_http_rtsp_url", return_value=RTSP),
             patch.object(
                 xml_api,
-                "rtsp_snapshot_bytes",
+                "rtsp_snapshot_attempt_bytes",
                 side_effect=xml_api.FfmpegUnavailable("ffmpeg is not installed"),
             ),
         ):
@@ -330,7 +396,14 @@ class TestCameraDirectRtspUrlCache:
 
         with (
             patch.object(xml_api, "NvrClient", return_value=nvr),
-            patch.object(xml_api, "rtsp_snapshot_bytes", return_value=None),
+            patch.object(
+                xml_api,
+                "rtsp_snapshot_attempt_bytes",
+                return_value=xml_api.RtspFrameGrabResult(
+                    error="RTSP stream produced no JPEG frame.",
+                    error_kind="empty_frame",
+                ),
+            ),
         ):
             assert mgr._rtsp_snapshot_attempt(channel=1).success is False
             assert mgr._http_rtsp_url(channel=1) == RTSP
