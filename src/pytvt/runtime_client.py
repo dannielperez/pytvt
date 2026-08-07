@@ -19,7 +19,9 @@ RUNTIME_PROTOCOL_VERSION = 1
 DEFAULT_RUNTIME_SOCKET_PATH = Path("/run/pytvt-runtime/runtime.sock")
 DEFAULT_RUNTIME_TIMEOUT_MS = 30_000
 MAX_RUNTIME_REQUEST_BYTES = 64 * 1024
-MAX_RUNTIME_RESPONSE_BYTES = 32 * 1024 * 1024
+# The runtime caps a PlatformSDK worker/server response at 32 MiB. Leave a
+# fixed envelope margin so a maximum-sized result still fits the framed reply.
+MAX_RUNTIME_RESPONSE_BYTES = 34 * 1024 * 1024
 MAX_FACE_BATCH_ITEMS = 100
 MAX_FACE_BATCH_BYTES = 12 * 1024 * 1024
 PLATFORM_FETCH_SECTIONS = frozenset(
