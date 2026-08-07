@@ -68,6 +68,14 @@ snapshot = client.get_platform_inventory(
     password,
     port=6003,
 )
+
+# Reuses the same runtime-owned PlatformSDK server session.
+authority = client.get_platform_authority(
+    "nvms.example",
+    "operator",
+    password,
+    port=6003,
+)
 ```
 
 Recorder NetSDK and NVMS PlatformSDK sessions remain separate runtime

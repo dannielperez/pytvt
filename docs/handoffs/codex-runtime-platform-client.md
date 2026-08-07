@@ -4,6 +4,8 @@
 
 - Added a typed `get_platform_inventory()` Unix-runtime operation and validated
   `RuntimePlatformInventoryResult` DTO.
+- Added typed `get_platform_authority()` so authority reads reuse the same
+  persistent server session instead of creating a direct follow-up login.
 - Classified PlatformSDK authentication failures with a structured
   `credential_rejected` field for downstream cooldown policy.
 - Raised the bounded runtime response allowance to include a 32 MiB Server SDK

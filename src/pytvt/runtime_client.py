@@ -37,6 +37,13 @@ PLATFORM_SNAPSHOT_LISTS = (
     "alarm_events",
     "health",
 )
+PLATFORM_AUTHORITY_LISTS = (
+    "permission_groups",
+    "users",
+    "permission_entries",
+    "area_permissions",
+    "user_sessions",
+)
 
 
 class RuntimeClientError(RuntimeError):
@@ -125,6 +132,24 @@ class RuntimePlatformInventoryResult:
         }
 
 
+@dataclass(frozen=True)
+class RuntimePlatformAuthorityResult:
+    """Validated authority data returned by the persistent Server SDK session."""
+
+    fetch_status: dict[str, str]
+    permission_groups: tuple[dict[str, Any], ...]
+    users: tuple[dict[str, Any], ...]
+    permission_entries: tuple[dict[str, Any], ...]
+    area_permissions: tuple[dict[str, Any], ...]
+    user_sessions: tuple[dict[str, Any], ...]
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "fetch_status": dict(self.fetch_status),
+            **{name: list(getattr(self, name)) for name in PLATFORM_AUTHORITY_LISTS},
+        }
+
+
 class RuntimeClient:
     """Asynchronous client with one absolute deadline per socket exchange."""
 
@@ -161,6 +186,22 @@ class RuntimeClient:
             timeout_ms=timeout_ms,
         )
         return _parse_platform_inventory(result)
+
+    async def get_platform_authority(
+        self,
+        host: str,
+        username: str,
+        password: str,
+        *,
+        port: int = 6003,
+        timeout_ms: int = DEFAULT_PLATFORM_RUNTIME_TIMEOUT_MS,
+    ) -> RuntimePlatformAuthorityResult:
+        """Read NVMS authority data through the same persistent server session."""
+        result = await self.execute(
+            _platform_job("authoritySnapshot", host, port, username, password),
+            timeout_ms=timeout_ms,
+        )
+        return _parse_platform_authority(result)
 
     async def _request(
         self,
@@ -229,6 +270,22 @@ class SyncRuntimeClient:
             timeout_ms=timeout_ms,
         )
         return _parse_platform_inventory(result)
+
+    def get_platform_authority(
+        self,
+        host: str,
+        username: str,
+        password: str,
+        *,
+        port: int = 6003,
+        timeout_ms: int = DEFAULT_PLATFORM_RUNTIME_TIMEOUT_MS,
+    ) -> RuntimePlatformAuthorityResult:
+        """Read NVMS authority data through the same persistent server session."""
+        result = self.execute(
+            _platform_job("authoritySnapshot", host, port, username, password),
+            timeout_ms=timeout_ms,
+        )
+        return _parse_platform_authority(result)
 
     def search_face_capture_images(
         self,
@@ -332,6 +389,16 @@ def _request_timeout_seconds(timeout_ms: int | None, fallback: float) -> float:
 
 
 def _platform_inventory_job(host: str, port: int, username: str, password: str) -> dict[str, Any]:
+    return _platform_job("inventorySnapshot", host, port, username, password)
+
+
+def _platform_job(
+    operation: str,
+    host: str,
+    port: int,
+    username: str,
+    password: str,
+) -> dict[str, Any]:
     if not isinstance(host, str) or not host.strip():
         raise ValueError("host is required")
     if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65_535:
@@ -342,7 +409,7 @@ def _platform_inventory_job(host: str, port: int, username: str, password: str) 
         raise ValueError("password is required")
     return {
         "sdkFamily": "platform",
-        "operation": "inventorySnapshot",
+        "operation": operation,
         "credentials": {
             "host": host.strip(),
             "port": port,
@@ -489,3 +556,25 @@ def _parse_platform_inventory(result: Any) -> RuntimePlatformInventoryResult:
         health=lists["health"],
         summary=dict(summary),
     )
+
+
+def _parse_platform_authority(result: Any) -> RuntimePlatformAuthorityResult:
+    try:
+        if not isinstance(result, dict) or set(result) != {*PLATFORM_AUTHORITY_LISTS, "fetch_status"}:
+            raise TypeError
+        fetch_status = result["fetch_status"]
+        if (
+            not isinstance(fetch_status, dict)
+            or set(fetch_status) != set(PLATFORM_AUTHORITY_LISTS)
+            or any(value not in {"ok", "unavailable", "failed"} for value in fetch_status.values())
+        ):
+            raise TypeError
+        lists: dict[str, tuple[dict[str, Any], ...]] = {}
+        for name in PLATFORM_AUTHORITY_LISTS:
+            value = result[name]
+            if not isinstance(value, list) or any(not isinstance(item, dict) for item in value):
+                raise TypeError
+            lists[name] = tuple(value)
+    except (KeyError, TypeError, ValueError):
+        raise RuntimeClientError("runtime returned an invalid platform authority snapshot") from None
+    return RuntimePlatformAuthorityResult(fetch_status=dict(fetch_status), **lists)
