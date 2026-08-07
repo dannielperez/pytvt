@@ -18,6 +18,7 @@ from typing import Any
 RUNTIME_PROTOCOL_VERSION = 1
 DEFAULT_RUNTIME_SOCKET_PATH = Path("/run/pytvt-runtime/runtime.sock")
 DEFAULT_RUNTIME_TIMEOUT_MS = 30_000
+DEFAULT_PLATFORM_RUNTIME_TIMEOUT_MS = 55_000
 MAX_RUNTIME_REQUEST_BYTES = 64 * 1024
 # The runtime caps a PlatformSDK worker/server response at 32 MiB. Leave a
 # fixed envelope margin so a maximum-sized result still fits the framed reply.
@@ -142,8 +143,8 @@ class RuntimeClient:
             raise RuntimeClientError("runtime returned an invalid health result")
         return result
 
-    async def execute(self, job: dict[str, Any]) -> Any:
-        return await self._request("execute", job=job)
+    async def execute(self, job: dict[str, Any], *, timeout_ms: int | None = None) -> Any:
+        return await self._request("execute", job=job, timeout_ms=timeout_ms)
 
     async def get_platform_inventory(
         self,
@@ -152,17 +153,27 @@ class RuntimeClient:
         password: str,
         *,
         port: int = 6003,
+        timeout_ms: int = DEFAULT_PLATFORM_RUNTIME_TIMEOUT_MS,
     ) -> RuntimePlatformInventoryResult:
         """Read one NVMS inventory snapshot through a persistent PlatformSDK session."""
-        result = await self.execute(_platform_inventory_job(host, port, username, password))
+        result = await self.execute(
+            _platform_inventory_job(host, port, username, password),
+            timeout_ms=timeout_ms,
+        )
         return _parse_platform_inventory(result)
 
-    async def _request(self, method: str, *, job: dict[str, Any] | None = None) -> Any:
+    async def _request(
+        self,
+        method: str,
+        *,
+        job: dict[str, Any] | None = None,
+        timeout_ms: int | None = None,
+    ) -> Any:
         request_id = uuid.uuid4().hex
         payload = _request_payload(request_id, method, job)
         writer: asyncio.StreamWriter | None = None
         try:
-            async with asyncio.timeout(self.timeout_seconds):
+            async with asyncio.timeout(_request_timeout_seconds(timeout_ms, self.timeout_seconds)):
                 reader, writer = await asyncio.open_unix_connection(
                     self.socket_path,
                     limit=MAX_RUNTIME_RESPONSE_BYTES,
@@ -200,8 +211,8 @@ class SyncRuntimeClient:
             raise RuntimeClientError("runtime returned an invalid health result")
         return result
 
-    def execute(self, job: dict[str, Any]) -> Any:
-        return self._request("execute", job=job)
+    def execute(self, job: dict[str, Any], *, timeout_ms: int | None = None) -> Any:
+        return self._request("execute", job=job, timeout_ms=timeout_ms)
 
     def get_platform_inventory(
         self,
@@ -210,9 +221,13 @@ class SyncRuntimeClient:
         password: str,
         *,
         port: int = 6003,
+        timeout_ms: int = DEFAULT_PLATFORM_RUNTIME_TIMEOUT_MS,
     ) -> RuntimePlatformInventoryResult:
         """Read one NVMS inventory snapshot through a persistent PlatformSDK session."""
-        result = self.execute(_platform_inventory_job(host, port, username, password))
+        result = self.execute(
+            _platform_inventory_job(host, port, username, password),
+            timeout_ms=timeout_ms,
+        )
         return _parse_platform_inventory(result)
 
     def search_face_capture_images(
@@ -247,10 +262,16 @@ class SyncRuntimeClient:
         )
         return _parse_face_batch(result, expected_page=page, max_items=page_size)
 
-    def _request(self, method: str, *, job: dict[str, Any] | None = None) -> Any:
+    def _request(
+        self,
+        method: str,
+        *,
+        job: dict[str, Any] | None = None,
+        timeout_ms: int | None = None,
+    ) -> Any:
         request_id = uuid.uuid4().hex
         payload = _request_payload(request_id, method, job)
-        deadline = time.monotonic() + self.timeout_seconds
+        deadline = time.monotonic() + _request_timeout_seconds(timeout_ms, self.timeout_seconds)
 
         def remaining() -> float:
             seconds = deadline - time.monotonic()
@@ -300,6 +321,14 @@ def _request_payload(
     if len(payload) > MAX_RUNTIME_REQUEST_BYTES:
         raise RuntimeClientError("runtime request exceeds configured byte limit")
     return payload + b"\n"
+
+
+def _request_timeout_seconds(timeout_ms: int | None, fallback: float) -> float:
+    if timeout_ms is None:
+        return fallback
+    if isinstance(timeout_ms, bool) or not isinstance(timeout_ms, int) or not 1_000 <= timeout_ms <= 60_000:
+        raise ValueError("runtime request timeout must be between 1000 and 60000 milliseconds")
+    return timeout_ms / 1000
 
 
 def _platform_inventory_job(host: str, port: int, username: str, password: str) -> dict[str, Any]:

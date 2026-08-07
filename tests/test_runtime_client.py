@@ -153,8 +153,9 @@ def test_typed_platform_inventory_owns_job_schema_and_validates_result() -> None
     captured: dict = {}
 
     class Client(SyncRuntimeClient):
-        def execute(self, job):
+        def execute(self, job, **kwargs):
             captured.update(job)
+            captured["timeout_ms"] = kwargs.get("timeout_ms")
             return _platform_snapshot()
 
     result = Client().get_platform_inventory("nvms.example", "operator", "secret")
@@ -168,6 +169,7 @@ def test_typed_platform_inventory_owns_job_schema_and_validates_result() -> None
             "username": "operator",
             "password": "secret",
         },
+        "timeout_ms": 55_000,
     }
     assert result.summary == {"site_count": 1, "device_count": 1}
     assert result.devices == ({"id": "nvr-1"},)
@@ -177,10 +179,15 @@ def test_typed_platform_inventory_owns_job_schema_and_validates_result() -> None
 
 def test_typed_platform_inventory_rejects_missing_fetch_status() -> None:
     class Client(SyncRuntimeClient):
-        def execute(self, _job):
+        def execute(self, _job, **_kwargs):
             snapshot = _platform_snapshot()
             del snapshot["fetch_status"]["servers"]
             return snapshot
 
     with pytest.raises(RuntimeClientError, match="invalid platform inventory snapshot"):
         Client().get_platform_inventory("nvms.example", "operator", "secret")
+
+
+def test_runtime_request_rejects_out_of_range_timeout_before_socket_io() -> None:
+    with pytest.raises(ValueError, match="between 1000 and 60000"):
+        SyncRuntimeClient().execute({}, timeout_ms=999)
