@@ -434,6 +434,7 @@ class SyncRuntimeClient:
         max_payload_bytes: int = 16 * 1024 * 1024,
         max_image_bytes: int = 8 * 1024 * 1024,
         max_buffer_bytes: int = 64 * 1024 * 1024,
+        stream_id: str | None = None,
     ) -> RuntimePlateEventStream:
         """Open one bounded plate stream in the persistent native runtime."""
         credentials = _device_credentials(host, port, username, password)
@@ -446,19 +447,26 @@ class SyncRuntimeClient:
             max_image_bytes=max_image_bytes,
             max_buffer_bytes=max_buffer_bytes,
         )
+        stream_id = stream_id or uuid.uuid4().hex
+        if not isinstance(stream_id, str) or not stream_id or len(stream_id) > 128:
+            raise ValueError("plate stream id must contain between 1 and 128 characters")
         result = self.execute(
             {
                 "operation": "plateStreamStart",
                 "credentials": credentials,
                 "channels": list(normalized_channels),
                 "source": source.value,
+                "streamId": stream_id,
                 "maxEvents": max_events,
                 "maxPayloadBytes": max_payload_bytes,
                 "maxImageBytes": max_image_bytes,
                 "maxBufferBytes": max_buffer_bytes,
             }
         )
-        stream_id, subscriptions, stats = _parse_plate_start(result)
+        stream_id, subscriptions, stats = _parse_plate_start(
+            result,
+            expected_stream_id=stream_id,
+        )
         return RuntimePlateEventStream(
             client=self,
             credentials=credentials,
@@ -587,6 +595,8 @@ def _validate_plate_bounds(
 
 def _parse_plate_start(
     result: Any,
+    *,
+    expected_stream_id: str,
 ) -> tuple[str, tuple[PlateSubscriptionInfo, ...], PlateStreamStats]:
     try:
         if not isinstance(result, dict):
@@ -597,6 +607,7 @@ def _parse_plate_start(
             not isinstance(stream_id, str)
             or not stream_id
             or len(stream_id) > 128
+            or stream_id != expected_stream_id
             or not isinstance(raw_subscriptions, list)
             or not 1 <= len(raw_subscriptions) <= MAX_RUNTIME_PLATE_CHANNELS
         ):

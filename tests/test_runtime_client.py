@@ -319,6 +319,7 @@ def test_typed_plate_stream_owns_lifecycle_and_returns_plate_events() -> None:
         max_payload_bytes=1024 * 1024,
         max_image_bytes=512 * 1024,
         max_buffer_bytes=4 * 1024 * 1024,
+        stream_id="stream-1",
     ) as stream:
         event = stream.get(timeout=0.25)
         assert event.plate == "ABC123"
@@ -335,6 +336,7 @@ def test_typed_plate_stream_owns_lifecycle_and_returns_plate_events() -> None:
         "plateStreamStop",
     ]
     assert jobs[0]["source"] == "nvr"
+    assert jobs[0]["streamId"] == "stream-1"
     assert jobs[0]["channels"] == [6]
     assert jobs[1]["waitMilliseconds"] == 250
 
@@ -361,6 +363,7 @@ def test_typed_plate_stream_empty_poll_raises_queue_empty() -> None:
         port=6036,
         channels=(6,),
         source=PlateSource.NVR,
+        stream_id="stream-1",
     )
     try:
         with pytest.raises(queue.Empty):
@@ -389,6 +392,7 @@ def test_typed_plate_stream_rejects_malformed_event() -> None:
         port=6036,
         channels=(6,),
         source=PlateSource.NVR,
+        stream_id="stream-1",
     )
     with pytest.raises(RuntimeClientError, match="invalid plate stream response"):
         stream.get(timeout=0)
