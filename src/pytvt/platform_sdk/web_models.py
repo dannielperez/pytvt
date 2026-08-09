@@ -107,6 +107,25 @@ class PlatformAcsStatus:
 
 
 @dataclass(frozen=True)
+class PlatformAcsSystem:
+    """An access-control system discovered through the management web API."""
+
+    guid: str
+    name: str = ""
+    ip: str = ""
+    port: int | None = None
+    raw_data: dict[str, Any] = field(default_factory=dict)
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "guid": self.guid,
+            "name": self.name,
+            "ip": self.ip,
+            "port": self.port,
+        }
+
+
+@dataclass(frozen=True)
 class PlatformLogEntry:
     """A management-server operation/system log entry via the web API.
 

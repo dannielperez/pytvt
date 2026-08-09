@@ -409,6 +409,9 @@ class ManagementClient:
     def get_acs_statuses(self) -> list[object]:
         return self._platform_call("get_acs_statuses")  # type: ignore[return-value]
 
+    def list_acs_systems(self) -> list[object]:
+        return self._platform_call("list_acs_systems")  # type: ignore[return-value]
+
     # ------------------------------------------------------------------
     # Capability probes (do not require a session)
     # ------------------------------------------------------------------
