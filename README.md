@@ -59,6 +59,9 @@ vendor shared objects and does not start or supervise the private runtime.
 Requests and responses carry a protocol version so client/server skew fails
 closed. Operation-specific methods, such as `search_face_capture_images`, own
 the runtime job schema and return typed DTOs instead of exposing raw IPC maps.
+`subscribe_plate_events` presents the same typed `PlateEvent`/stream contract
+as an in-process NetSDK subscription while the private runtime owns the
+long-lived recorder connection, callback memory, and bounded queue.
 `get_platform_inventory` does the same for an NVMS Server/Platform SDK session:
 
 ```python
