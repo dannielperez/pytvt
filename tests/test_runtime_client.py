@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import base64
 import json
-from datetime import datetime
+import queue
+from datetime import datetime, timezone
 
 import pytest
 
+from pytvt.device_sdk import PlateSource
 from pytvt.runtime_client import (
     RUNTIME_PROTOCOL_VERSION,
     RuntimeClientError,
@@ -232,3 +234,165 @@ def test_typed_platform_authority_rejects_partial_result() -> None:
 def test_runtime_request_rejects_out_of_range_timeout_before_socket_io() -> None:
     with pytest.raises(ValueError, match="between 1000 and 60000"):
         SyncRuntimeClient().execute({}, timeout_ms=999)
+
+
+def _plate_event_result() -> dict:
+    return {
+        "events": [
+            {
+                "user_id": 7,
+                "channel_id": 6,
+                "source": "nvr",
+                "received_at": "2026-08-09T12:00:00.123456+00:00",
+                "occurred_at": "2026-08-09T11:59:59+00:00",
+                "source_event_id": "501",
+                "plate": "ABC123",
+                "declared_plate_char_count": 6,
+                "source_encryption_version": 3,
+                "confidence": 96,
+                "char_confidences": [],
+                "direction": "unknown",
+                "plate_rect": [10, 20, 110, 60],
+                "plate_size": [100, 40],
+                "channel_guid": "channel-guid",
+                "edge_match": "stranger",
+                "edge_match_code": 2,
+                "plate_color": "black",
+                "plate_color_code": 2,
+                "plate_brightness": 73,
+                "plate_color_confidence": 91,
+                "vehicle_type": "sedan",
+                "vehicle_type_code": 1,
+                "vehicle_color": "blue",
+                "vehicle_color_code": 5,
+                "vehicle_brand_code": 88,
+                "source_end_at": "2026-08-09T12:00:01+00:00",
+                "full_image_base64": base64.b64encode(b"full-jpeg").decode(),
+                "plate_image_base64": base64.b64encode(b"plate-jpeg").decode(),
+                "full_image_format": "jpeg",
+                "plate_image_format": "jpeg",
+                "full_image_size": [1920, 1080],
+                "is_partial": False,
+                "warnings": [],
+            }
+        ],
+        "stats": {
+            "callbacks_received": 1,
+            "events_parsed": 1,
+            "events_dropped": 0,
+            "malformed_payloads": 0,
+            "rejected_callbacks": 0,
+            "ignored_commands": 0,
+            "buffered_events": 0,
+            "buffered_image_bytes": 0,
+            "last_error": None,
+        },
+    }
+
+
+def test_typed_plate_stream_owns_lifecycle_and_returns_plate_events() -> None:
+    jobs: list[dict] = []
+
+    class Client(SyncRuntimeClient):
+        def execute(self, job, **_kwargs):
+            jobs.append(job)
+            if job["operation"] == "plateStreamStart":
+                return {
+                    "stream_id": "stream-1",
+                    "subscriptions": [{"source": "nvr", "channel_id": 6}],
+                    "stats": _plate_event_result()["stats"],
+                }
+            if job["operation"] == "plateStreamPoll":
+                return _plate_event_result()
+            if job["operation"] == "plateStreamStop":
+                return {"stopped": True}
+            raise AssertionError("unexpected operation")
+
+    with Client().subscribe_plate_events(
+        "192.0.2.10",
+        "operator",
+        "secret",
+        port=6036,
+        channels=(6,),
+        source=PlateSource.NVR,
+        max_events=32,
+        max_payload_bytes=1024 * 1024,
+        max_image_bytes=512 * 1024,
+        max_buffer_bytes=4 * 1024 * 1024,
+        stream_id="stream-1",
+    ) as stream:
+        event = stream.get(timeout=0.25)
+        assert event.plate == "ABC123"
+        assert event.received_at == datetime(2026, 8, 9, 12, tzinfo=timezone.utc).replace(microsecond=123456)
+        assert event.full_image == b"full-jpeg"
+        assert event.plate_image == b"plate-jpeg"
+        assert stream.stats().events_parsed == 1
+        assert stream.subscriptions[0].channel_id == 6
+        assert stream.drain(limit=0) == []
+
+    assert [job["operation"] for job in jobs] == [
+        "plateStreamStart",
+        "plateStreamPoll",
+        "plateStreamStop",
+    ]
+    assert jobs[0]["source"] == "nvr"
+    assert jobs[0]["streamId"] == "stream-1"
+    assert jobs[0]["channels"] == [6]
+    assert jobs[1]["waitMilliseconds"] == 250
+
+
+def test_typed_plate_stream_empty_poll_raises_queue_empty() -> None:
+    class Client(SyncRuntimeClient):
+        def execute(self, job, **_kwargs):
+            if job["operation"] == "plateStreamStart":
+                return {
+                    "stream_id": "stream-1",
+                    "subscriptions": [{"source": "nvr", "channel_id": 6}],
+                    "stats": _plate_event_result()["stats"],
+                }
+            if job["operation"] == "plateStreamPoll":
+                result = _plate_event_result()
+                result["events"] = []
+                return result
+            return {"stopped": True}
+
+    stream = Client().subscribe_plate_events(
+        "192.0.2.10",
+        "operator",
+        "secret",
+        port=6036,
+        channels=(6,),
+        source=PlateSource.NVR,
+        stream_id="stream-1",
+    )
+    try:
+        with pytest.raises(queue.Empty):
+            stream.get(timeout=0)
+    finally:
+        stream.close()
+
+
+def test_typed_plate_stream_rejects_malformed_event() -> None:
+    class Client(SyncRuntimeClient):
+        def execute(self, job, **_kwargs):
+            if job["operation"] == "plateStreamStart":
+                return {
+                    "stream_id": "stream-1",
+                    "subscriptions": [{"source": "nvr", "channel_id": 6}],
+                    "stats": _plate_event_result()["stats"],
+                }
+            result = _plate_event_result()
+            result["events"][0]["source"] = "invalid"
+            return result
+
+    stream = Client().subscribe_plate_events(
+        "192.0.2.10",
+        "operator",
+        "secret",
+        port=6036,
+        channels=(6,),
+        source=PlateSource.NVR,
+        stream_id="stream-1",
+    )
+    with pytest.raises(RuntimeClientError, match="invalid plate stream response"):
+        stream.get(timeout=0)
