@@ -6,6 +6,7 @@ import asyncio
 import base64
 import binascii
 import json
+import queue
 import socket
 import time
 import uuid
@@ -14,6 +15,19 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+from .device_sdk import (
+    EdgePlateMatch,
+    ImageFormat,
+    PlateColor,
+    PlateEvent,
+    PlateSource,
+    PlateStreamStats,
+    PlateSubscriptionInfo,
+    VehicleColor,
+    VehicleDirection,
+    VehicleType,
+)
 
 RUNTIME_PROTOCOL_VERSION = 1
 DEFAULT_RUNTIME_SOCKET_PATH = Path("/run/pytvt-runtime/runtime.sock")
@@ -25,6 +39,8 @@ MAX_RUNTIME_REQUEST_BYTES = 64 * 1024
 MAX_RUNTIME_RESPONSE_BYTES = 34 * 1024 * 1024
 MAX_FACE_BATCH_ITEMS = 100
 MAX_FACE_BATCH_BYTES = 12 * 1024 * 1024
+MAX_RUNTIME_PLATE_CHANNELS = 32
+MAX_RUNTIME_PLATE_POLL_ITEMS = 16
 PLATFORM_FETCH_SECTIONS = frozenset(
     {"resources", "devices", "channels", "areas", "servers", "alarm_zones", "alarm_events"}
 )
@@ -148,6 +164,89 @@ class RuntimePlatformAuthorityResult:
             "fetch_status": dict(self.fetch_status),
             **{name: list(getattr(self, name)) for name in PLATFORM_AUTHORITY_LISTS},
         }
+
+
+class RuntimePlateEventStream:
+    """Typed proxy for one plate subscription owned by the persistent runtime."""
+
+    def __init__(
+        self,
+        *,
+        client: SyncRuntimeClient,
+        credentials: dict[str, Any],
+        stream_id: str,
+        subscriptions: tuple[PlateSubscriptionInfo, ...],
+        stats: PlateStreamStats,
+    ) -> None:
+        self._client = client
+        self._credentials = credentials
+        self._stream_id = stream_id
+        self._subscriptions = subscriptions
+        self._stats = stats
+        self._closed = False
+
+    @property
+    def closed(self) -> bool:
+        return self._closed
+
+    @property
+    def subscriptions(self) -> tuple[PlateSubscriptionInfo, ...]:
+        return self._subscriptions
+
+    def get(self, timeout: float | None = None) -> PlateEvent:
+        events = self._poll(limit=1, timeout=timeout)
+        if not events:
+            raise queue.Empty
+        return events[0]
+
+    def get_nowait(self) -> PlateEvent:
+        return self.get(timeout=0)
+
+    def drain(self, *, limit: int = 16) -> list[PlateEvent]:
+        return self._poll(limit=max(0, min(limit, MAX_RUNTIME_PLATE_POLL_ITEMS)), timeout=0)
+
+    def stats(self) -> PlateStreamStats:
+        return self._stats
+
+    def _poll(self, *, limit: int, timeout: float | None) -> list[PlateEvent]:
+        if self._closed:
+            raise RuntimeError("plate-event stream is closed")
+        if timeout is None:
+            wait_ms = 10_000
+        elif isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or timeout < 0:
+            raise ValueError("plate stream timeout must be a non-negative number or None")
+        else:
+            wait_ms = min(10_000, int(timeout * 1000))
+        result = self._client.execute(
+            {
+                "operation": "plateStreamPoll",
+                "credentials": dict(self._credentials),
+                "streamId": self._stream_id,
+                "limit": limit,
+                "waitMilliseconds": wait_ms,
+            },
+            timeout_ms=max(1_000, wait_ms + 1_000),
+        )
+        events, self._stats = _parse_plate_poll(result, max_items=limit)
+        return list(events)
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._client.execute(
+            {
+                "operation": "plateStreamStop",
+                "credentials": dict(self._credentials),
+                "streamId": self._stream_id,
+            }
+        )
+        self._closed = True
+
+    def __enter__(self) -> RuntimePlateEventStream:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()
 
 
 class RuntimeClient:
@@ -319,6 +418,52 @@ class SyncRuntimeClient:
         )
         return _parse_face_batch(result, expected_page=page, max_items=page_size)
 
+    def subscribe_plate_events(
+        self,
+        host: str,
+        username: str,
+        password: str,
+        *,
+        port: int,
+        channels: tuple[int, ...],
+        source: PlateSource = PlateSource.NVR,
+        max_events: int = 256,
+        max_payload_bytes: int = 16 * 1024 * 1024,
+        max_image_bytes: int = 8 * 1024 * 1024,
+        max_buffer_bytes: int = 64 * 1024 * 1024,
+    ) -> RuntimePlateEventStream:
+        """Open one bounded plate stream in the persistent native runtime."""
+        credentials = _device_credentials(host, port, username, password)
+        normalized_channels = _plate_channels(channels)
+        if source not in (PlateSource.NVR, PlateSource.IPC):
+            raise ValueError("plate stream source is invalid")
+        _validate_plate_bounds(
+            max_events=max_events,
+            max_payload_bytes=max_payload_bytes,
+            max_image_bytes=max_image_bytes,
+            max_buffer_bytes=max_buffer_bytes,
+        )
+        result = self.execute(
+            {
+                "operation": "plateStreamStart",
+                "credentials": credentials,
+                "channels": list(normalized_channels),
+                "source": source.value,
+                "maxEvents": max_events,
+                "maxPayloadBytes": max_payload_bytes,
+                "maxImageBytes": max_image_bytes,
+                "maxBufferBytes": max_buffer_bytes,
+            }
+        )
+        stream_id, subscriptions, stats = _parse_plate_start(result)
+        return RuntimePlateEventStream(
+            client=self,
+            credentials=credentials,
+            stream_id=stream_id,
+            subscriptions=subscriptions,
+            stats=stats,
+        )
+
     def _request(
         self,
         method: str,
@@ -386,6 +531,229 @@ def _request_timeout_seconds(timeout_ms: int | None, fallback: float) -> float:
     if isinstance(timeout_ms, bool) or not isinstance(timeout_ms, int) or not 1_000 <= timeout_ms <= 60_000:
         raise ValueError("runtime request timeout must be between 1000 and 60000 milliseconds")
     return timeout_ms / 1000
+
+
+def _device_credentials(host: str, port: int, username: str, password: str) -> dict[str, Any]:
+    if not isinstance(host, str) or not host.strip():
+        raise ValueError("host is required")
+    if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65_535:
+        raise ValueError("port is invalid")
+    if not isinstance(username, str) or not username:
+        raise ValueError("username is required")
+    if not isinstance(password, str) or not password:
+        raise ValueError("password is required")
+    return {
+        "ip": host.strip(),
+        "port": port,
+        "username": username,
+        "password": password,
+    }
+
+
+def _plate_channels(channels: tuple[int, ...]) -> tuple[int, ...]:
+    if not isinstance(channels, tuple) or not 1 <= len(channels) <= MAX_RUNTIME_PLATE_CHANNELS:
+        raise ValueError("plate stream channels must contain between 1 and 32 items")
+    if any(
+        isinstance(channel, bool) or not isinstance(channel, int) or not 0 <= channel <= 255 for channel in channels
+    ):
+        raise ValueError("plate stream channel is invalid")
+    if len(set(channels)) != len(channels):
+        raise ValueError("plate stream channels must be unique")
+    return channels
+
+
+def _validate_plate_bounds(
+    *,
+    max_events: int,
+    max_payload_bytes: int,
+    max_image_bytes: int,
+    max_buffer_bytes: int,
+) -> None:
+    values = (max_events, max_payload_bytes, max_image_bytes, max_buffer_bytes)
+    if any(isinstance(value, bool) or not isinstance(value, int) for value in values):
+        raise ValueError("plate stream bounds must be integers")
+    if not 1 <= max_events <= 10_000:
+        raise ValueError("max_events must be between 1 and 10000")
+    if not 1 <= max_payload_bytes <= 64 * 1024 * 1024:
+        raise ValueError("max_payload_bytes must be between 1 byte and 64 MiB")
+    if not 1 <= max_image_bytes <= max_payload_bytes:
+        raise ValueError("max_image_bytes must not exceed max_payload_bytes")
+    if not 1 <= max_buffer_bytes <= 1024 * 1024 * 1024:
+        raise ValueError("max_buffer_bytes must be between 1 byte and 1 GiB")
+
+
+def _parse_plate_start(
+    result: Any,
+) -> tuple[str, tuple[PlateSubscriptionInfo, ...], PlateStreamStats]:
+    try:
+        if not isinstance(result, dict):
+            raise TypeError
+        stream_id = result["stream_id"]
+        raw_subscriptions = result["subscriptions"]
+        if (
+            not isinstance(stream_id, str)
+            or not stream_id
+            or len(stream_id) > 128
+            or not isinstance(raw_subscriptions, list)
+            or not 1 <= len(raw_subscriptions) <= MAX_RUNTIME_PLATE_CHANNELS
+        ):
+            raise TypeError
+        subscriptions = tuple(_parse_plate_subscription(item) for item in raw_subscriptions)
+        stats = _parse_plate_stats(result["stats"])
+    except (KeyError, TypeError, ValueError):
+        raise RuntimeClientError("runtime returned an invalid plate stream response") from None
+    return stream_id, subscriptions, stats
+
+
+def _parse_plate_poll(
+    result: Any,
+    *,
+    max_items: int,
+) -> tuple[tuple[PlateEvent, ...], PlateStreamStats]:
+    try:
+        if not isinstance(result, dict):
+            raise TypeError
+        raw_events = result["events"]
+        if not isinstance(raw_events, list) or len(raw_events) > max_items:
+            raise TypeError
+        events = tuple(_parse_plate_event(item) for item in raw_events)
+        stats = _parse_plate_stats(result["stats"])
+    except (binascii.Error, KeyError, TypeError, ValueError):
+        raise RuntimeClientError("runtime returned an invalid plate stream response") from None
+    return events, stats
+
+
+def _parse_plate_subscription(raw: Any) -> PlateSubscriptionInfo:
+    if not isinstance(raw, dict) or set(raw) != {"source", "channel_id"}:
+        raise TypeError
+    channel_id = _required_nonnegative_int(raw["channel_id"])
+    if channel_id > 255:
+        raise ValueError
+    return PlateSubscriptionInfo(source=PlateSource(raw["source"]), channel_id=channel_id)
+
+
+def _parse_plate_stats(raw: Any) -> PlateStreamStats:
+    integer_fields = (
+        "callbacks_received",
+        "events_parsed",
+        "events_dropped",
+        "malformed_payloads",
+        "rejected_callbacks",
+        "ignored_commands",
+        "buffered_events",
+        "buffered_image_bytes",
+    )
+    if not isinstance(raw, dict):
+        raise TypeError
+    values = {field: _required_nonnegative_int(raw[field]) for field in integer_fields}
+    last_error = raw["last_error"]
+    if last_error is not None and (not isinstance(last_error, str) or len(last_error) > 500):
+        raise TypeError
+    return PlateStreamStats(**values, last_error=last_error)
+
+
+def _parse_plate_event(raw: Any) -> PlateEvent:
+    if not isinstance(raw, dict):
+        raise TypeError
+    warnings = raw["warnings"]
+    char_confidences = raw["char_confidences"]
+    if (
+        not isinstance(warnings, list)
+        or any(not isinstance(value, str) or len(value) > 200 for value in warnings)
+        or not isinstance(char_confidences, list)
+        or any(_required_nonnegative_int(value) > 100 for value in char_confidences)
+    ):
+        raise TypeError
+    plate = raw["plate"]
+    source_event_id = raw["source_event_id"]
+    channel_guid = raw["channel_guid"]
+    if not isinstance(plate, str) or len(plate) > 64 or not isinstance(source_event_id, str):
+        raise TypeError
+    if channel_guid is not None and (not isinstance(channel_guid, str) or len(channel_guid) > 256):
+        raise TypeError
+    return PlateEvent(
+        user_id=_required_nonnegative_int(raw["user_id"]),
+        channel_id=_required_nonnegative_int(raw["channel_id"]),
+        source=PlateSource(raw["source"]),
+        received_at=_aware_datetime(raw["received_at"]),
+        occurred_at=_optional_aware_datetime(raw["occurred_at"]),
+        source_event_id=source_event_id,
+        plate=plate,
+        declared_plate_char_count=_optional_nonnegative_int(raw["declared_plate_char_count"]),
+        source_encryption_version=_optional_nonnegative_int(raw["source_encryption_version"]),
+        confidence=_optional_nonnegative_int(raw["confidence"]),
+        char_confidences=tuple(char_confidences),
+        direction=VehicleDirection(raw["direction"]),
+        plate_rect=_optional_int_tuple(raw["plate_rect"], length=4),
+        plate_size=_optional_int_tuple(raw["plate_size"], length=2),
+        channel_guid=channel_guid,
+        edge_match=EdgePlateMatch(raw["edge_match"]),
+        edge_match_code=_optional_nonnegative_int(raw["edge_match_code"]),
+        plate_color=PlateColor(raw["plate_color"]),
+        plate_color_code=_optional_nonnegative_int(raw["plate_color_code"]),
+        plate_brightness=_optional_nonnegative_int(raw["plate_brightness"]),
+        plate_color_confidence=_optional_nonnegative_int(raw["plate_color_confidence"]),
+        vehicle_type=VehicleType(raw["vehicle_type"]),
+        vehicle_type_code=_optional_nonnegative_int(raw["vehicle_type_code"]),
+        vehicle_color=VehicleColor(raw["vehicle_color"]),
+        vehicle_color_code=_optional_nonnegative_int(raw["vehicle_color_code"]),
+        vehicle_brand_code=_optional_nonnegative_int(raw["vehicle_brand_code"]),
+        source_end_at=_optional_aware_datetime(raw["source_end_at"]),
+        full_image=_optional_base64(raw["full_image_base64"]),
+        plate_image=_optional_base64(raw["plate_image_base64"]),
+        full_image_format=_optional_enum(ImageFormat, raw["full_image_format"]),
+        plate_image_format=_optional_enum(ImageFormat, raw["plate_image_format"]),
+        full_image_size=_optional_int_tuple(raw["full_image_size"], length=2),
+        is_partial=raw["is_partial"] if isinstance(raw["is_partial"], bool) else _raise_type_error(),
+        warnings=tuple(warnings),
+    )
+
+
+def _required_nonnegative_int(value: Any) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise TypeError
+    return value
+
+
+def _optional_nonnegative_int(value: Any) -> int | None:
+    return None if value is None else _required_nonnegative_int(value)
+
+
+def _optional_int_tuple(value: Any, *, length: int) -> tuple[int, ...] | None:
+    if value is None:
+        return None
+    if not isinstance(value, list) or len(value) != length:
+        raise TypeError
+    return tuple(_required_nonnegative_int(item) for item in value)
+
+
+def _aware_datetime(value: Any) -> datetime:
+    if not isinstance(value, str):
+        raise TypeError
+    parsed = datetime.fromisoformat(value)
+    if parsed.utcoffset() is None:
+        raise ValueError
+    return parsed
+
+
+def _optional_aware_datetime(value: Any) -> datetime | None:
+    return None if value is None else _aware_datetime(value)
+
+
+def _optional_base64(value: Any) -> bytes | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise TypeError
+    return base64.b64decode(value, validate=True)
+
+
+def _optional_enum(enum_type: Any, value: Any) -> Any:
+    return None if value is None else enum_type(value)
+
+
+def _raise_type_error() -> Any:
+    raise TypeError
 
 
 def _platform_inventory_job(host: str, port: int, username: str, password: str) -> dict[str, Any]:
