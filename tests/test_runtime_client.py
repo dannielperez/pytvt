@@ -327,6 +327,7 @@ def test_typed_plate_stream_owns_lifecycle_and_returns_plate_events() -> None:
         assert event.plate_image == b"plate-jpeg"
         assert stream.stats().events_parsed == 1
         assert stream.subscriptions[0].channel_id == 6
+        assert stream.drain(limit=0) == []
 
     assert [job["operation"] for job in jobs] == [
         "plateStreamStart",

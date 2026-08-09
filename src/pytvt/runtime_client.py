@@ -203,7 +203,10 @@ class RuntimePlateEventStream:
         return self.get(timeout=0)
 
     def drain(self, *, limit: int = 16) -> list[PlateEvent]:
-        return self._poll(limit=max(0, min(limit, MAX_RUNTIME_PLATE_POLL_ITEMS)), timeout=0)
+        limit = max(0, min(limit, MAX_RUNTIME_PLATE_POLL_ITEMS))
+        if limit == 0:
+            return []
+        return self._poll(limit=limit, timeout=0)
 
     def stats(self) -> PlateStreamStats:
         return self._stats
