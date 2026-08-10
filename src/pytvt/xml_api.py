@@ -2040,6 +2040,11 @@ def _ffmpeg_rtsp_frame_args(rtsp_url: str, timeout: int) -> list[str]:
         "nobuffer",
         "-flags",
         "low_delay",
+        # Joining a live inter-frame stream can expose incomplete P-frames before
+        # their references arrive.  Decode only keyframes so the single JPEG is
+        # never FFmpeg's gray error-concealment frame.
+        "-skip_frame",
+        "nokey",
         "-timeout",
         str(timeout * 1_000_000),
         "-i",

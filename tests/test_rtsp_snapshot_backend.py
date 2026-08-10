@@ -503,5 +503,12 @@ class TestFrameGrabIsTunedForASingleStill:
         assert argv[argv.index("-fflags") + 1] == "nobuffer"
         assert argv[argv.index("-flags") + 1] == "low_delay"
 
+    def test_only_complete_keyframes_can_become_the_snapshot(self):
+        argv = xml_api._ffmpeg_rtsp_frame_args(RTSP, 10)
+        input_index = argv.index("-i")
+
+        assert argv.index("-skip_frame") < input_index
+        assert argv[argv.index("-skip_frame") + 1] == "nokey"
+
     def test_audio_is_not_decoded_for_a_still(self):
         assert "-an" in xml_api._ffmpeg_rtsp_frame_args(RTSP, 10)
