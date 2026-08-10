@@ -927,6 +927,15 @@ class TestNodeEncodeInfo:
         assert ch1.supported_resolutions == ("2560x1440", "1920x1080")
         assert ch1.supported_codecs == ("h264", "h265", "h265p")
         assert ch1.allowed_bitrates == (1024, 2048, 3072, 4096)
+        assert ch1.supported_bitrate_types == ("VBR", "CBR")
+        assert ch1.supported_quality_levels == (
+            "low",
+            "lower",
+            "medium",
+            "higher",
+            "high",
+            "highest",
+        )
 
     def test_lenient_parse_of_malformed_name(self, session):
         # '&' would break a strict XML parser; the channel must still parse.
@@ -1092,6 +1101,189 @@ class TestSetNodeEncode:
                 session.set_node_encode(99, continuous={"fps": 12})
 
 
+class TestUpdateNodeEncodeVerified:
+    @staticmethod
+    def _node(*, fps=12, codec="h265p"):
+        stream = EncodeStream("continuous", "2560x1440", fps, "VBR", "medium", 3072, True, codec)
+        return NodeEncodeInfo(
+            channel=1,
+            node_id="{00000001-0000-0000-0000-000000000000}",
+            name="Entrada Principal",
+            codec=codec,
+            a_gop=60,
+            m_gop=60,
+            continuous=stream,
+            event=EncodeStream("event", "2560x1440", 15, "VBR", "higher", 4096, False, codec),
+            supported_resolutions=("2560x1440",),
+            supported_codecs=("h265p",),
+            allowed_bitrates=(3072, 4096),
+        )
+
+    @staticmethod
+    def _expected():
+        return {
+            "resolution": "2560x1440",
+            "fps": 12,
+            "bitrate_type": "VBR",
+            "quality": "medium",
+            "max_bitrate": 3072,
+            "audio": True,
+        }
+
+    def test_reconnects_to_verify_and_returns_updated(self, client):
+        write_session = MagicMock(connection_method="direct")
+        verify_session = MagicMock(connection_method="direct")
+        write_session.node_encode_info.return_value = [self._node()]
+        verify_session.node_encode_info.return_value = [self._node(fps=10)]
+        write_context = MagicMock()
+        write_context.__enter__.return_value = write_session
+        verify_context = MagicMock()
+        verify_context.__enter__.return_value = verify_session
+
+        with patch.object(client, "connect", side_effect=[write_context, verify_context]) as connect:
+            result = client.update_node_encode_verified(
+                username="admin",
+                password="secret",
+                host="10.0.0.9",
+                channel=1,
+                profile="continuous",
+                expected=self._expected(),
+                changes={"fps": 10},
+                expected_codec="h265p",
+            )
+
+        assert result.status == "updated"
+        assert connect.call_count == 2
+        write_session.set_node_encode.assert_called_once_with(
+            1,
+            continuous={"fps": 10},
+            event=None,
+            codec=None,
+            verify=False,
+        )
+
+    def test_baseline_conflict_does_not_write_or_reconnect(self, client):
+        write_session = MagicMock(connection_method="direct")
+        write_session.node_encode_info.return_value = [self._node(fps=10)]
+        write_context = MagicMock()
+        write_context.__enter__.return_value = write_session
+
+        with patch.object(client, "connect", return_value=write_context) as connect:
+            result = client.update_node_encode_verified(
+                username="admin",
+                password="secret",
+                host="10.0.0.9",
+                channel=1,
+                profile="continuous",
+                expected=self._expected(),
+                changes={"fps": 10},
+                expected_codec="h265p",
+            )
+
+        assert result.status == "conflict"
+        assert connect.call_count == 1
+        write_session.set_node_encode.assert_not_called()
+
+    def test_post_write_mismatch_is_explicitly_ambiguous(self, client):
+        write_session = MagicMock(connection_method="direct")
+        verify_session = MagicMock(connection_method="direct")
+        write_session.node_encode_info.return_value = [self._node()]
+        verify_session.node_encode_info.return_value = [self._node()]
+        write_context = MagicMock()
+        write_context.__enter__.return_value = write_session
+        verify_context = MagicMock()
+        verify_context.__enter__.return_value = verify_session
+
+        with patch.object(client, "connect", side_effect=[write_context, verify_context]):
+            result = client.update_node_encode_verified(
+                username="admin",
+                password="secret",
+                host="10.0.0.9",
+                channel=1,
+                profile="continuous",
+                expected=self._expected(),
+                changes={"fps": 10},
+                expected_codec="h265p",
+            )
+
+        assert result.status == "verification_mismatch"
+
+    def test_codec_only_change_is_guarded_and_verified(self, client):
+        write_session = MagicMock(connection_method="direct")
+        verify_session = MagicMock(connection_method="direct")
+        write_session.node_encode_info.return_value = [self._node()]
+        verified = self._node(codec="h265")
+        verify_session.node_encode_info.return_value = [verified]
+        write_context = MagicMock()
+        write_context.__enter__.return_value = write_session
+        verify_context = MagicMock()
+        verify_context.__enter__.return_value = verify_session
+
+        with patch.object(client, "connect", side_effect=[write_context, verify_context]):
+            result = client.update_node_encode_verified(
+                username="admin",
+                password="secret",
+                host="10.0.0.9",
+                channel=1,
+                profile="continuous",
+                expected=self._expected(),
+                changes={},
+                expected_codec="h265p",
+                codec="h265",
+            )
+
+        assert result.status == "updated"
+        write_session.set_node_encode.assert_called_once_with(
+            1,
+            continuous={},
+            event=None,
+            codec="h265",
+            verify=False,
+        )
+
+    def test_write_exception_is_an_explicit_unknown_outcome(self, client):
+        write_session = MagicMock(connection_method="direct")
+        write_session.node_encode_info.return_value = [self._node()]
+        write_session.set_node_encode.side_effect = TimeoutError
+        write_context = MagicMock()
+        write_context.__enter__.return_value = write_session
+
+        with patch.object(client, "connect", return_value=write_context) as connect:
+            result = client.update_node_encode_verified(
+                username="admin",
+                password="secret",
+                host="10.0.0.9",
+                channel=1,
+                profile="continuous",
+                expected=self._expected(),
+                changes={"fps": 10},
+                expected_codec="h265p",
+            )
+
+        assert result.status == "write_unconfirmed"
+        assert connect.call_count == 1
+
+    def test_verification_exception_is_an_explicit_unknown_outcome(self, client):
+        write_session = MagicMock(connection_method="direct")
+        write_session.node_encode_info.return_value = [self._node()]
+        write_context = MagicMock()
+        write_context.__enter__.return_value = write_session
+
+        with patch.object(client, "connect", side_effect=[write_context, TimeoutError]):
+            result = client.update_node_encode_verified(
+                username="admin",
+                password="secret",
+                host="10.0.0.9",
+                channel=1,
+                profile="continuous",
+                expected=self._expected(),
+                changes={"fps": 10},
+                expected_codec="h265p",
+            )
+
+        assert result.status == "verification_unavailable"
+
+
 class TestPackageExports:
     """The encode-config surface is part of the package's public API.
 
@@ -1110,6 +1302,7 @@ class TestPackageExports:
             "NativeFaceCapture",
             "NativeFaceCapturePage",
             "NodeEncodeInfo",
+            "NodeEncodeUpdateResult",
             "RecordSchedule",
             "NetSdkError",
         ):
