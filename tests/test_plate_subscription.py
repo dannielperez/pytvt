@@ -80,6 +80,30 @@ def test_plate_subscription_registers_all_targets_and_closes_in_reverse(native_l
     assert native_session._plate_stream is None
 
 
+def test_plate_subscription_accepts_successful_empty_server_address(native_lib, native_session):
+    def subscribe(user_id, command, channel_id, reply_pointer):
+        _fill_reply(reply_pointer, b"")
+        return True
+
+    native_lib.NET_SDK_SmartSubscrib.side_effect = subscribe
+
+    stream = native_session.subscribe_plate_events(
+        [0],
+        commands=[SmartEventType.NVR_VEHICLE],
+        experimental=True,
+    )
+
+    assert [(info.source, info.channel_id) for info in stream.subscriptions] == [
+        (PlateSource.NVR, 0),
+    ]
+
+    stream.close()
+
+    native_lib.NET_SDK_UnSmartSubscrib.assert_called_once()
+    assert native_lib.NET_SDK_UnSmartSubscrib.call_args.args[3].value == b""
+    assert stream.closed is True
+
+
 def test_plate_subscription_rolls_back_when_a_later_target_fails(native_lib, native_session):
     attempts = 0
 
