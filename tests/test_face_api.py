@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from pytvt import AlarmServer
+from pytvt import AlarmServer, NvrPlateSearchIncompleteError
 from pytvt.alarm_protocol import TVT_ALARM_CODES
 from pytvt.alarm_server import AlarmServerCapacityError
 from pytvt.models import FaceEvent, FaceSearchApiStatus, NvrApiError, parse_face_event_timestamp
@@ -357,6 +357,45 @@ class TestSearchPlateEvents:
             client.search_plate_events([], "start", "end")
         with pytest.raises(ValueError, match="positive integers"):
             client.search_plate_events([0], "start", "end")
+
+    def test_full_page_raises_instead_of_silently_truncating(self):
+        client = _client()
+        record = "6a619cb3,1,1,1,1,1,{PATH},1,1,1,1,1"
+        client._post = lambda path, body: (
+            f"<response><status>success</status><content><i>{record}</i><i>{record}</i></content></response>"
+        )
+
+        with pytest.raises(NvrPlateSearchIncompleteError, match="result limit"):
+            client.search_plate_events([1], "start", "end", result_limit=2)
+
+    def test_aggregate_deadline_stops_detail_fanout(self, monkeypatch):
+        client = _client()
+        record = "6a619cb3,1,1,1,1,1,{PATH},1,1,1,1,1"
+        client._post = lambda path, body: (
+            f"<response><status>success</status><content><i>{record}</i></content></response>"
+        )
+        times = iter([0.0, 1.0])
+        monkeypatch.setattr("pytvt.xml_api.time.monotonic", lambda: next(times))
+
+        with pytest.raises(NvrPlateSearchIncompleteError, match="deadline"):
+            client.search_plate_events(
+                [1],
+                "start",
+                "end",
+                max_duration_seconds=1,
+            )
+
+    @pytest.mark.parametrize("duration", [0, 301])
+    def test_rejects_unbounded_aggregate_deadline(self, duration):
+        client = _client()
+
+        with pytest.raises(ValueError, match="between 1 and 300"):
+            client.search_plate_events(
+                [1],
+                "start",
+                "end",
+                max_duration_seconds=duration,
+            )
 
 
 class TestProbeFaceSearch:

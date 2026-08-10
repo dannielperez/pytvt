@@ -63,6 +63,10 @@ class NvrApiResponseShapeError(NvrApiError):
     """
 
 
+class NvrPlateSearchIncompleteError(NvrApiError):
+    """Raised when a bounded plate-history search cannot prove completeness."""
+
+
 # ── Scanner models ───────────────────────────────────────────────────
 
 
