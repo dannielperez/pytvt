@@ -41,7 +41,12 @@ def _bytes_of(value: ct.Structure) -> bytes:
     return ct.string_at(ct.byref(value), ct.sizeof(value))
 
 
-def _ipc_payload(*, plate: bytes = b"ABC123", plate_image: bytes = b"plate-jpeg") -> bytes:
+def _ipc_payload(
+    *,
+    plate: bytes = b"ABC123",
+    plate_image: bytes = b"plate-jpeg",
+    confidence: int = 98,
+) -> bytes:
     full_image = b"full-jpeg"
     head = NET_SDK_IVE_VEHICE_HEAD_INFO()
     head.begin_flag = 0x5A5A5A5A
@@ -69,7 +74,7 @@ def _ipc_payload(*, plate: bytes = b"ABC123", plate_image: bytes = b"plate-jpeg"
     crop.ptRightBottom.Y = 260
     crop.plateWidth = 200
     crop.plateHeight = 60
-    crop.plateConfidence = 98
+    crop.plateConfidence = confidence
     crop.plateColor = 3
     crop.plateStyle = 1
     crop.vehicleColor = 4
@@ -99,7 +104,12 @@ def _picture(image: bytes, *, width: int, height: int) -> bytes:
     return _bytes_of(info) + image
 
 
-def _nvr_payload(*, full_image: bytes = b"full", plate_image: bytes = b"crop") -> bytes:
+def _nvr_payload(
+    *,
+    full_image: bytes = b"full",
+    plate_image: bytes = b"crop",
+    confidence: int = 96,
+) -> bytes:
     info = VEHICE_PLATE_INFO()
     info.dwPlateID = 501
     info.dwEncryptVer = 3
@@ -109,7 +119,7 @@ def _nvr_payload(*, full_image: bytes = b"full", plate_image: bytes = b"crop") -
     info.Rect16.top = 20
     info.Rect16.right = 110
     info.Rect16.bottom = 60
-    info.plateConfidence = 96
+    info.plateConfidence = confidence
     info.plateIntensity = 73
     info.plateColor = 2
     info.plateStyle = 1
@@ -225,6 +235,18 @@ def test_parse_ipc_plate_payload_copies_metadata_and_images():
     assert event.is_partial is False
 
 
+def test_parse_ipc_plate_payload_marks_out_of_range_confidence_partial():
+    event = parse_ipc_plate_payload(
+        _ipc_payload(confidence=101),
+        user_id=9,
+        channel_id=2,
+    )[0]
+
+    assert event.confidence is None
+    assert event.warnings == ("plate_confidence_out_of_range",)
+    assert event.is_partial is True
+
+
 def test_parse_nvr_plate_payload_copies_guid_metadata_and_images():
     received_at = datetime(2026, 8, 4, tzinfo=timezone.utc)
     event = parse_nvr_plate_payload(
@@ -266,6 +288,18 @@ def test_parse_nvr_plate_payload_copies_guid_metadata_and_images():
     assert event.full_image_format is ImageFormat.JPEG
     assert event.warnings == ()
     assert event.is_partial is False
+
+
+def test_parse_nvr_plate_payload_marks_unsigned_confidence_sentinel_partial():
+    event = parse_nvr_plate_payload(
+        _nvr_payload(confidence=(1 << 32) - 1),
+        user_id=5,
+        channel_id=6,
+    )
+
+    assert event.confidence is None
+    assert event.warnings == ("plate_confidence_out_of_range",)
+    assert event.is_partial is True
 
 
 def test_parse_vsd_vehicle_payload_copies_readable_vehicle_attributes_and_images():
