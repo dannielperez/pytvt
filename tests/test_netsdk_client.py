@@ -1241,6 +1241,48 @@ class TestUpdateNodeEncodeVerified:
             verify=False,
         )
 
+    def test_write_exception_is_an_explicit_unknown_outcome(self, client):
+        write_session = MagicMock(connection_method="direct")
+        write_session.node_encode_info.return_value = [self._node()]
+        write_session.set_node_encode.side_effect = TimeoutError
+        write_context = MagicMock()
+        write_context.__enter__.return_value = write_session
+
+        with patch.object(client, "connect", return_value=write_context) as connect:
+            result = client.update_node_encode_verified(
+                username="admin",
+                password="secret",
+                host="10.0.0.9",
+                channel=1,
+                profile="continuous",
+                expected=self._expected(),
+                changes={"fps": 10},
+                expected_codec="h265p",
+            )
+
+        assert result.status == "write_unconfirmed"
+        assert connect.call_count == 1
+
+    def test_verification_exception_is_an_explicit_unknown_outcome(self, client):
+        write_session = MagicMock(connection_method="direct")
+        write_session.node_encode_info.return_value = [self._node()]
+        write_context = MagicMock()
+        write_context.__enter__.return_value = write_session
+
+        with patch.object(client, "connect", side_effect=[write_context, TimeoutError]):
+            result = client.update_node_encode_verified(
+                username="admin",
+                password="secret",
+                host="10.0.0.9",
+                channel=1,
+                profile="continuous",
+                expected=self._expected(),
+                changes={"fps": 10},
+                expected_codec="h265p",
+            )
+
+        assert result.status == "verification_unavailable"
+
 
 class TestPackageExports:
     """The encode-config surface is part of the package's public API.

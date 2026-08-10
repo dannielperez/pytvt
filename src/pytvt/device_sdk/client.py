@@ -450,7 +450,13 @@ class NodeEncodeInfo:
 class NodeEncodeUpdateResult:
     """Outcome of a guarded encode mutation verified through a fresh session."""
 
-    status: Literal["updated", "conflict", "verification_mismatch"]
+    status: Literal[
+        "updated",
+        "conflict",
+        "write_unconfirmed",
+        "verification_mismatch",
+        "verification_unavailable",
+    ]
     channel: NodeEncodeInfo
     connection_method: ConnectionMethod
 
@@ -2986,34 +2992,49 @@ class NetSdkClient:
 
         with self.connect(**connection) as session:
             current = _channel(session)
+            connection_method = session.connection_method
             if _profile_state(current) != expected or current.codec != expected_codec:
                 return NodeEncodeUpdateResult(
                     status="conflict",
                     channel=current,
                     connection_method=session.connection_method,
                 )
-            session.set_node_encode(
-                channel,
-                continuous=changes if profile == "continuous" else None,
-                event=changes if profile == "event" else None,
-                codec=codec,
-                verify=False,
-            )
-
-        with self.connect(**connection) as verification_session:
-            verified = _channel(verification_session)
-            status = (
-                "updated"
-                if (
-                    all(_profile_state(verified)[key] == value for key, value in changes.items())
-                    and (codec is None or verified.codec == codec)
+            try:
+                session.set_node_encode(
+                    channel,
+                    continuous=changes if profile == "continuous" else None,
+                    event=changes if profile == "event" else None,
+                    codec=codec,
+                    verify=False,
                 )
-                else "verification_mismatch"
-            )
+            except Exception:
+                return NodeEncodeUpdateResult(
+                    status="write_unconfirmed",
+                    channel=current,
+                    connection_method=connection_method,
+                )
+
+        try:
+            with self.connect(**connection) as verification_session:
+                verified = _channel(verification_session)
+                status = (
+                    "updated"
+                    if (
+                        all(_profile_state(verified)[key] == value for key, value in changes.items())
+                        and (codec is None or verified.codec == codec)
+                    )
+                    else "verification_mismatch"
+                )
+                return NodeEncodeUpdateResult(
+                    status=status,
+                    channel=verified,
+                    connection_method=verification_session.connection_method,
+                )
+        except Exception:
             return NodeEncodeUpdateResult(
-                status=status,
-                channel=verified,
-                connection_method=verification_session.connection_method,
+                status="verification_unavailable",
+                channel=current,
+                connection_method=connection_method,
             )
 
     @staticmethod
