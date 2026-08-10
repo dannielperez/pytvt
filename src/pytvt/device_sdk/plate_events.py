@@ -386,6 +386,18 @@ def _occurred_at_from_epoch_seconds(value: int) -> datetime | None:
         return None
 
 
+def _percent_confidence(
+    value: int,
+    *,
+    warnings: list[str],
+) -> int | None:
+    """Normalize TVT's unsigned confidence field to its percentage contract."""
+    if 0 <= value <= 100:
+        return value
+    warnings.append("plate_confidence_out_of_range")
+    return None
+
+
 def _ipc_event(
     *,
     user_id: int,
@@ -415,7 +427,7 @@ def _ipc_event(
         source_event_id=str(int(item.plateId)),
         plate=plate,
         declared_plate_char_count=int(item.plateCharCount),
-        confidence=int(item.plateConfidence),
+        confidence=_percent_confidence(int(item.plateConfidence), warnings=warnings),
         char_confidences=tuple(int(value) for value in item.plateCharConfid[:char_count]),
         direction=_direction(int(item.iVehicleDirect)),
         plate_rect=(
@@ -585,7 +597,10 @@ def parse_nvr_plate_payload(
         plate=plate,
         declared_plate_char_count=int(info.plateCharCount),  # type: ignore[attr-defined]
         source_encryption_version=int(info.dwEncryptVer),  # type: ignore[attr-defined]
-        confidence=int(info.plateConfidence),  # type: ignore[attr-defined]
+        confidence=_percent_confidence(
+            int(info.plateConfidence),  # type: ignore[attr-defined]
+            warnings=warnings,
+        ),
         plate_rect=(
             int(info.Rect16.left),  # type: ignore[attr-defined]
             int(info.Rect16.top),  # type: ignore[attr-defined]
