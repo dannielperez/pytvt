@@ -533,3 +533,19 @@ class FaceEvent:
     snapshot: bytes = b""  # populated only if the search fetched images
     background: bytes = b""
     occurred_at: datetime | None = None  # parsed UTC event time
+
+
+@dataclass
+class NvrPlateEvent:
+    """License-plate observation read from NVR smart-target history."""
+
+    chl_id: str
+    channel: int
+    timestamp: str
+    occurred_at: datetime | None
+    img_id: int
+    plate: str
+    event_type: str = ""
+    target_type: str = ""
+    direction: str = ""
+    snapshot: bytes = b""

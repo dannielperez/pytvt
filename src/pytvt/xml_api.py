@@ -136,6 +136,7 @@ from .models import (
     NvrApiResponseShapeError,
     NvrFaceDetectionConfig,
     NvrLanFreeDevice,
+    NvrPlateEvent,
     PasswordSecurity,
     PlatformAccessConfig,
     PlatformAccessDisabledError,
@@ -1651,6 +1652,7 @@ class NvrClient:
                 ch = int(f[4], 16)
             except ValueError:
                 continue
+            cal_time_ns %= 10_000_000
             frame_time = (
                 datetime.fromtimestamp(cal_time_s, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
                 + f":{cal_time_ns:07d}"
@@ -1734,7 +1736,121 @@ class NvrClient:
         cdata = re.search(r"<content>\s*<!\[CDATA\[(.*?)\]\]>\s*</content>", data, re.DOTALL)
         return _maybe_b64(cdata.group(1).strip()) if cdata else b""
 
-    # ── Alarm Server (event push target) ─────────────────────────────
+    # ── NVR smart-target history ──────────────────────────────────
+
+    def search_plate_events(
+        self,
+        channels: list[int],
+        start: str,
+        end: str,
+        *,
+        result_limit: int = 50,
+        fetch_snapshots: bool = False,
+    ) -> list[NvrPlateEvent]:
+        """Search recorder-side plate history for a UTC time window.
+
+        The NVR web client uses a bounded two-stage flow: ``searchSmartTarget``
+        returns compact event references, then ``requestSmartTargetSnapImage``
+        returns each recognized plate. Resolving a reference costs one extra
+        recorder request, so this API caps ``result_limit`` at 100.
+        """
+        self._require_login()
+        if not channels:
+            raise ValueError("channels must not be empty")
+        if any(channel < 1 for channel in channels):
+            raise ValueError("channels must contain positive integers")
+        if not 1 <= result_limit <= 100:
+            raise ValueError("result_limit must be between 1 and 100")
+
+        channel_items = "".join(f'<item id="{self.channel_guid(channel)}"></item>' for channel in channels)
+        content = (
+            f"<resultLimit>{result_limit}</resultLimit>"
+            "<condition>"
+            f"<startTime>{escape(start)}</startTime>"
+            f"<endTime>{escape(end)}</endTime>"
+            f'<chls type="list">{channel_items}</chls>'
+            '<events type="list"><item>plateDetection</item>'
+            "<item>plateMatchWhiteList</item><item>plateMatchStranger</item></events>"
+            '<vehicle type="list"><item>car</item><item>motor</item></vehicle>'
+            "</condition>"
+        )
+        data = self._post("searchSmartTarget", self._build_request_with_content(content))
+        error_code = re.search(r"<errorCode>(.*?)</errorCode>", data)
+        if error_code and error_code.group(1) in FACE_SEARCH_EMPTY_CODES:
+            return []
+        self._check_response(data, "searchSmartTarget")
+
+        results: list[NvrPlateEvent] = []
+        for record in re.findall(r"<i>(.*?)</i>", data, re.DOTALL)[:result_limit]:
+            fields = record.split(",")
+            if len(fields) < 12:
+                continue
+            try:
+                cal_time_s = int(fields[0], 16)
+                cal_time_ns = int(fields[1], 16)
+                img_id = int(fields[2], 16)
+                channel = int(fields[3], 16)
+                section_no = int(fields[7], 16)
+                file_index = int(fields[8], 16)
+                block_no = int(fields[9], 16)
+                offset = int(fields[10], 16)
+                event_type_id = int(fields[11], 16)
+            except ValueError:
+                continue
+            if channel not in channels:
+                continue
+            frame_time = (
+                datetime.fromtimestamp(cal_time_s, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+                + f":{cal_time_ns:07d}"
+            )
+            detail_content = (
+                "<condition>"
+                f"<imgId>{img_id}</imgId>"
+                f"<chlId>{self.channel_guid(channel)}</chlId>"
+                f"<frameTime>{frame_time}</frameTime>"
+                f"<pathGUID>{escape(fields[6])}</pathGUID>"
+                f"<sectionNo>{section_no}</sectionNo>"
+                f"<fileIndex>{file_index}</fileIndex>"
+                f"<blockNo>{block_no}</blockNo>"
+                f"<offset>{offset}</offset>"
+                f"<eventType>{event_type_id}</eventType>"
+                "</condition>"
+            )
+            detail = self._post(
+                "requestSmartTargetSnapImage",
+                self._build_request_with_content(detail_content),
+            )
+            detail_error = re.search(r"<errorCode>(.*?)</errorCode>", detail)
+            if detail_error and detail_error.group(1) in {"2871", "536871033"}:
+                # The web client treats these as a deleted/unavailable snapshot
+                # and continues rendering the remaining search results.
+                continue
+            self._check_response(detail, "requestSmartTargetSnapImage")
+            target_type = self._parse_xml_field(detail, "targetType") or ""
+            plate = self._parse_xml_field(detail, "plateNumber") or ""
+            if target_type != "plate" or not plate or plate == "--":
+                continue
+            snapshot = b""
+            if fetch_snapshots:
+                cdata = re.search(r"<content>\s*<!\[CDATA\[(.*?)\]\]>\s*</content>", detail, re.DOTALL)
+                snapshot = _maybe_b64(cdata.group(1).strip()) if cdata else b""
+            results.append(
+                NvrPlateEvent(
+                    chl_id=self.channel_guid(channel),
+                    channel=channel,
+                    timestamp=frame_time,
+                    occurred_at=parse_face_event_timestamp(frame_time),
+                    img_id=img_id,
+                    plate=plate,
+                    event_type=self._parse_xml_field(detail, "eventType") or "",
+                    target_type=target_type,
+                    direction=fields[13] if len(fields) > 13 else "",
+                    snapshot=snapshot,
+                )
+            )
+        return results
+
+    # ── Alarm Server (event push target) ────────────────────────────
 
     def query_alarm_server(self) -> AlarmServerConfig:
         """Query the NVR's Alarm Server push configuration.

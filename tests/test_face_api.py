@@ -270,6 +270,95 @@ class TestSearchFaceEvents:
         assert events == []
 
 
+class TestSearchPlateEvents:
+    def test_decodes_plate_metadata_from_two_stage_search(self):
+        client = _client()
+        sent = []
+
+        def fake_post(path, body):
+            sent.append((path, body))
+            if path == "searchSmartTarget":
+                return (
+                    "<response><status>success</status><content>"
+                    "<i>6a619cb3,335afe,24d1,7,6a619cb1,6a619cb8,{PATH},19,576,2c,10,14,0,2</i>"
+                    "</content></response>"
+                )
+            return (
+                "<response><status>success</status><eventType>plateDetection</eventType>"
+                "<targetType>plate</targetType><plateNumber>ABC123</plateNumber>"
+                "<content><![CDATA[aGVsbG8=]]></content></response>"
+            )
+
+        client._post = fake_post
+        events = client.search_plate_events(
+            [1, 7],
+            "2026-07-23 04:00:00",
+            "2026-07-24 03:59:59",
+            fetch_snapshots=True,
+        )
+
+        assert len(events) == 1
+        assert events[0].channel == 7
+        assert events[0].plate == "ABC123"
+        assert events[0].event_type == "plateDetection"
+        assert events[0].target_type == "plate"
+        assert events[0].direction == "2"
+        assert events[0].snapshot == b"hello"
+        assert events[0].occurred_at == datetime.fromtimestamp(0x6A619CB3, tz=timezone.utc).replace(microsecond=336563)
+        assert sent[0][0] == "searchSmartTarget"
+        assert '<item id="{00000007-0000-0000-0000-000000000000}">' in sent[0][1]
+        assert "<item>plateDetection</item>" in sent[0][1]
+        assert sent[1][0] == "requestSmartTargetSnapImage"
+        assert "<pathGUID>{PATH}</pathGUID>" in sent[1][1]
+        assert "<blockNo>44</blockNo>" in sent[1][1]
+
+    def test_ignores_non_plate_details_and_does_not_decode_image_by_default(self):
+        client = _client()
+        responses = iter(
+            [
+                "<response><status>success</status><content>"
+                "<i>6a619cb3,1,1,1,1,1,{PATH},1,1,1,1,1</i>"
+                "</content></response>",
+                "<response><status>success</status><targetType>car</targetType>"
+                "<plateNumber>SHOULD-NOT-RETURN</plateNumber>"
+                "<content><![CDATA[not-base64]]></content></response>",
+            ]
+        )
+        client._post = lambda path, body: next(responses)
+
+        assert client.search_plate_events([1], "start", "end") == []
+
+    @pytest.mark.parametrize("error_code", ["2871", "536871033"])
+    def test_skips_deleted_snapshots(self, error_code):
+        client = _client()
+        responses = iter(
+            [
+                "<response><status>success</status><content>"
+                "<i>6a619cb3,1,1,1,1,1,{PATH},1,1,1,1,1</i>"
+                "</content></response>",
+                f"<response><status>fail</status><errorCode>{error_code}</errorCode></response>",
+            ]
+        )
+        client._post = lambda path, body: next(responses)
+
+        assert client.search_plate_events([1], "start", "end") == []
+
+    @pytest.mark.parametrize("limit", [0, 101])
+    def test_rejects_unbounded_result_limits(self, limit):
+        client = _client()
+
+        with pytest.raises(ValueError, match="between 1 and 100"):
+            client.search_plate_events([1], "start", "end", result_limit=limit)
+
+    def test_requires_at_least_one_valid_channel(self):
+        client = _client()
+
+        with pytest.raises(ValueError, match="must not be empty"):
+            client.search_plate_events([], "start", "end")
+        with pytest.raises(ValueError, match="positive integers"):
+            client.search_plate_events([0], "start", "end")
+
+
 class TestProbeFaceSearch:
     @staticmethod
     def _response(path):
