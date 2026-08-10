@@ -1330,8 +1330,12 @@ class DeviceSession:
                             termination_time=int(reply.terminationTime),
                         )
                     )
-                    if not server_address:
-                        raise NetSdkError("SmartSubscrib returned an empty unsubscribe token")
+                    # Some supported NetSDK builds leave ``serverAddress``
+                    # empty while still returning success.  The matching
+                    # ``NET_SDK_UnSmartSubscrib`` ABI accepts that empty value;
+                    # the boolean return remains the authoritative lifecycle
+                    # result.  Rejecting it here turns a working subscription
+                    # into a false setup failure.
                     _check_setup_deadline()
         except Exception as setup_error:
             try:

@@ -66,3 +66,21 @@ configuration by inventory channel/node ID, never by parsing the display name.
 
 Live validation so far is read-only. No detector configuration was written
 during protocol discovery.
+
+## NetSDK smart-subscription lifecycle
+
+**Confirmed:** 2026-08-10 against a field NVR using the Linux device SDK that
+exports `NET_SDK_SetSubscribCallBack_V2`, `NET_SDK_SmartSubscrib`, and
+`NET_SDK_UnSmartSubscrib`.
+
+- A successful `NET_SDK_SmartSubscrib` call may leave
+  `NET_DVR_SUBSCRIBE_REPLY.serverAddress` empty. The matching
+  `NET_SDK_UnSmartSubscrib` call accepts that empty value and returns success;
+  the boolean results, not token non-emptiness, are authoritative.
+- One matched channel-0 event reached the native callback 28.890 seconds after
+  the recorder occurrence time. Recorder-history polling exposed the same
+  event after 159.819 seconds, so the persistent callback path arrived 130.929
+  seconds earlier.
+- An abrupt client exit left the deterministic runtime stream available for
+  adoption. A new client reattached in 0.006 seconds and then unsubscribed
+  cleanly. No gate action was performed during validation.
