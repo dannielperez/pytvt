@@ -137,6 +137,7 @@ from .models import (
     NvrFaceDetectionConfig,
     NvrLanFreeDevice,
     NvrPlateEvent,
+    NvrPlateSearchIncompleteError,
     PasswordSecurity,
     PlatformAccessConfig,
     PlatformAccessDisabledError,
@@ -1746,13 +1747,17 @@ class NvrClient:
         *,
         result_limit: int = 50,
         fetch_snapshots: bool = False,
+        max_duration_seconds: float | None = None,
     ) -> list[NvrPlateEvent]:
         """Search recorder-side plate history for a UTC time window.
 
         The NVR web client uses a bounded two-stage flow: ``searchSmartTarget``
         returns compact event references, then ``requestSmartTargetSnapImage``
         returns each recognized plate. Resolving a reference costs one extra
-        recorder request, so this API caps ``result_limit`` at 100.
+        recorder request, so this API caps ``result_limit`` at 100. A full
+        result page raises instead of silently advancing past an incomplete
+        window. ``max_duration_seconds`` bounds the aggregate detail loop
+        between individually timeout-bounded HTTP requests.
         """
         self._require_login()
         if not channels:
@@ -1761,6 +1766,9 @@ class NvrClient:
             raise ValueError("channels must contain positive integers")
         if not 1 <= result_limit <= 100:
             raise ValueError("result_limit must be between 1 and 100")
+        if max_duration_seconds is not None and not 1 <= max_duration_seconds <= 300:
+            raise ValueError("max_duration_seconds must be between 1 and 300")
+        deadline = None if max_duration_seconds is None else time.monotonic() + max_duration_seconds
 
         channel_items = "".join(f'<item id="{self.channel_guid(channel)}"></item>' for channel in channels)
         content = (
@@ -1780,8 +1788,18 @@ class NvrClient:
             return []
         self._check_response(data, "searchSmartTarget")
 
+        records = re.findall(r"<i>(.*?)</i>", data, re.DOTALL)
+        if len(records) >= result_limit:
+            raise NvrPlateSearchIncompleteError(
+                "Plate-history result limit reached; narrow the search window.",
+            )
+
         results: list[NvrPlateEvent] = []
-        for record in re.findall(r"<i>(.*?)</i>", data, re.DOTALL)[:result_limit]:
+        for record in records:
+            if deadline is not None and time.monotonic() >= deadline:
+                raise NvrPlateSearchIncompleteError(
+                    "Plate-history aggregate deadline reached before all details were resolved.",
+                )
             fields = record.split(",")
             if len(fields) < 12:
                 continue
