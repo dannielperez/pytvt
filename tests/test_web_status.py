@@ -1,7 +1,8 @@
 """Tests for pytvt.platform_sdk.web_backend status reads (TVT-6).
 
 No network: a fake transport replays scripted envelopes. Covers
-``get_server_statuses``/``get_device_statuses``/``get_acs_statuses`` mapping
+``get_server_statuses``/``get_device_statuses``/``get_acs_statuses`` and
+``list_acs_systems`` mapping
 sanitized status envelopes to DTOs, the confirmed server-status field set
 (name/ip/port/type/stateType/module flags), tolerant online/offline and
 guid/timestamp derivation on unrecognized shapes, and that an unauthenticated
@@ -20,7 +21,7 @@ from pytvt.platform_sdk import web_crypto
 from pytvt.platform_sdk.exceptions import ManagementNotAuthenticatedError, ProtocolError
 from pytvt.platform_sdk.models import DeviceStatus
 from pytvt.platform_sdk.web_backend import WebManagementBackend
-from pytvt.platform_sdk.web_models import PlatformAcsStatus, PlatformServerStatus
+from pytvt.platform_sdk.web_models import PlatformAcsStatus, PlatformAcsSystem, PlatformServerStatus
 from pytvt.platform_sdk.web_session import WebHttpResponse
 
 
@@ -224,3 +225,36 @@ def test_get_acs_statuses_empty_list() -> None:
     transport.script = [ok_response(status_list_xml(""))]
 
     assert backend.get_acs_statuses() == []
+
+
+def test_list_acs_systems_maps_fixture_to_typed_dto() -> None:
+    transport = FakeTransport()
+    backend = logged_in_backend(transport)
+    items_xml = (
+        "<item><acsGuid>acs-1</acsGuid><name>Palmares Access</name>"
+        "<ipAddress>10.20.30.40</ipAddress><servicePort>8010</servicePort></item>"
+    )
+    transport.script = [ok_response(status_list_xml(items_xml))]
+
+    systems = backend.list_acs_systems()
+
+    assert systems == [
+        PlatformAcsSystem(
+            guid="acs-1",
+            name="Palmares Access",
+            ip="10.20.30.40",
+            port=8010,
+            raw_data={
+                "acsGuid": "acs-1",
+                "name": "Palmares Access",
+                "ipAddress": "10.20.30.40",
+                "servicePort": "8010",
+            },
+        )
+    ]
+
+
+def test_list_acs_systems_requires_login() -> None:
+    backend = WebManagementBackend("nvms.example")
+    with pytest.raises(ManagementNotAuthenticatedError):
+        backend.list_acs_systems()

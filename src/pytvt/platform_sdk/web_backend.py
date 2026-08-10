@@ -5,6 +5,7 @@ reqLogin/doLogin handshake) into the :class:`BaseManagementBackend` contract.
 ``login``/``diagnostics``/``get_context``/``load_sdk``/``close`` are fully
 implemented; ``list_alarm_events``/``list_active_alarms`` (TVT-5),
 ``get_server_statuses``/``get_device_statuses``/``get_acs_statuses`` (TVT-6),
+``list_acs_systems`` (TVT-14),
 ``list_operation_logs``/``list_status_logs`` (TVT-9), and
 ``list_users``/``list_roles``/``list_permission_groups`` (TVT-8) are implemented.
 Every other read method (device/channel enumeration) raises
@@ -32,6 +33,7 @@ from .platform_constants import decode_area_rights, decode_system_rights, redact
 from .platform_models import PlatformPermissionGroup, PlatformUser
 from .web_models import (
     PlatformAcsStatus,
+    PlatformAcsSystem,
     PlatformAlarmRecord,
     PlatformLogEntry,
     PlatformServerStatus,
@@ -61,6 +63,7 @@ _ALARM_TIME_KEYS = ("time", "alarmTime", "occurTime")
 _SERVER_STATUS_PATH = "/service/SystemStatus/getServerStatusList"
 _DEVICE_STATUS_PATH = "/service/SystemStatus/getDeviceStatusList"
 _ACS_STATUS_PATH = "/service/SystemStatus/getAcsSystemStatusList"
+_ACS_SYSTEM_LIST_PATH = "/service/OrgRes/getAcsSystemList"
 
 # Server-status fields ARE confirmed (name/ip/port/type/stateType/last*Time), but no
 # `guid`-shaped field was observed — the guid/name lookup below falls back tolerantly.
@@ -74,6 +77,8 @@ _STATE_KEYS = ("stateType", "state", "status")
 _ONLINE_TRUE_VALUES = frozenset({"online", "1", "true"})
 _ONLINE_FALSE_VALUES = frozenset({"offline", "0", "false"})
 _DEVICE_ID_KEYS = ("id", "deviceId", "guid", "sn", "serialNumber")
+_IP_KEYS = ("ip", "ipAddress", "host")
+_PORT_KEYS = ("port", "serverPort", "servicePort")
 _LAST_SEEN_KEYS = ("lastOnLineTime", "lastSeenTime", "lastSeen", "time")
 _TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S"
 _OPERATION_LOG_PATH = "/service/SystemMaintain/getLog"
@@ -361,6 +366,23 @@ class WebManagementBackend(BaseManagementBackend):
                 )
             )
         return statuses
+
+    def list_acs_systems(self) -> list[PlatformAcsSystem]:
+        """List access-control systems (``OrgRes/getAcsSystemList``)."""
+        systems = []
+        for index, item in enumerate(self._list_statuses(_ACS_SYSTEM_LIST_PATH)):
+            guid = _first_present(item, _GUID_KEYS) or _first_present(item, _NAME_KEYS) or str(index)
+            raw_port = _first_present(item, _PORT_KEYS)
+            systems.append(
+                PlatformAcsSystem(
+                    guid=guid,
+                    name=_first_present(item, _NAME_KEYS),
+                    ip=_first_present(item, _IP_KEYS),
+                    port=_parse_int(raw_port) if raw_port else None,
+                    raw_data=dict(item),
+                )
+            )
+        return systems
 
     def _log_event_dictionary(self, session: WebSession) -> dict[str, str]:
         """Best-effort code->text decode for log entries; empty on any failure.

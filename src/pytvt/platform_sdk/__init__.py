@@ -44,6 +44,7 @@ from .sidecar import SidecarManagementBackend
 from .web_backend import WebManagementBackend
 from .web_models import (
     PlatformAcsStatus,
+    PlatformAcsSystem,
     PlatformAlarmRecord,
     PlatformDeviceStatus,
     PlatformLogEntry,
@@ -82,6 +83,7 @@ __all__ = [
     "ManagementServerInfo",
     "ResolvedSymbol",
     "PlatformAcsStatus",
+    "PlatformAcsSystem",
     "PlatformAlarmRecord",
     "PlatformDeviceStatus",
     "PlatformLogEntry",
