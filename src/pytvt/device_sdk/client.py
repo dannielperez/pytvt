@@ -434,6 +434,25 @@ class NodeEncodeInfo:
     supported_resolutions: tuple[str, ...]  # from <mainCaps>
     supported_codecs: tuple[str, ...]  # from <mainCaps supEnct=...>, e.g. ("h264","h265","h265p")
     allowed_bitrates: tuple[int, ...]  # from <mainStreamQualityNote>
+    supported_bitrate_types: tuple[str, ...] = ()  # from <mainCaps bitType=...>
+    # NVMS-9000's stable ``level`` protocol enum; firmware does not advertise it.
+    supported_quality_levels: tuple[str, ...] = (
+        "low",
+        "lower",
+        "medium",
+        "higher",
+        "high",
+        "highest",
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class NodeEncodeUpdateResult:
+    """Outcome of a guarded encode mutation verified through a fresh session."""
+
+    status: Literal["updated", "conflict", "verification_mismatch"]
+    channel: NodeEncodeInfo
+    connection_method: ConnectionMethod
 
 
 @dataclass(frozen=True, slots=True)
@@ -1534,7 +1553,9 @@ class DeviceSession:
             main = _xml_attrs(mn.group(1)) if mn else {}
             codec = main.get("enct", "")
             caps = re.search(r"<mainCaps\s+([^>]*)>", body)
-            sup_enct = _xml_attrs(caps.group(1)).get("supEnct", "") if caps else ""
+            cap_attrs = _xml_attrs(caps.group(1)) if caps else {}
+            sup_enct = cap_attrs.get("supEnct", "")
+            bitrate_types = cap_attrs.get("bitType", "")
             note = re.search(r"<mainStreamQualityNote>([^<]*)</mainStreamQualityNote>", body)
             bitrates = tuple(int(x) for x in (note.group(1).split(",") if note else []) if x.strip().isdigit())
             out.append(
@@ -1550,6 +1571,7 @@ class DeviceSession:
                     supported_resolutions=tuple(re.findall(r"<res[^>]*>([^<]+)</res>", body)),
                     supported_codecs=tuple(x for x in sup_enct.split(",") if x),
                     allowed_bitrates=bitrates,
+                    supported_bitrate_types=tuple(x for x in bitrate_types.split(",") if x),
                 )
             )
         return out
@@ -2876,6 +2898,123 @@ class NetSdkClient:
                 )
                 return self.login(host, username, password, port=port)
             raise
+
+    def update_node_encode_verified(
+        self,
+        *,
+        method: ConnectionMethod = "direct",
+        username: str,
+        password: str,
+        channel: int,
+        profile: Literal["continuous", "event"],
+        expected: dict[str, object],
+        changes: dict[str, object],
+        expected_codec: str,
+        codec: str | None = None,
+        host: str | None = None,
+        port: int = 9008,
+        identifier: str | None = None,
+        timeout: float | None = None,
+        nat_server: str | None = None,
+        nat_port: int | None = None,
+        connect_type: ConnectType | int | str = ConnectType.NAT20,
+        fallback_to_direct: bool = True,
+    ) -> NodeEncodeUpdateResult:
+        """Guard, apply, and independently verify one encode-profile patch.
+
+        TVT may cache ``queryNodeEncodeInfo`` for the lifetime of a logged-in
+        session. Verification therefore always uses a newly authenticated
+        session. A baseline mismatch is returned as ``conflict`` without a
+        write; a post-write mismatch is explicitly ambiguous so callers do not
+        automatically retry a mutation whose device outcome is uncertain.
+        """
+        writable_fields = {
+            "resolution",
+            "fps",
+            "bitrate_type",
+            "quality",
+            "max_bitrate",
+            "audio",
+        }
+        if channel < 1:
+            raise ValueError("channel must be a 1-based positive integer")
+        if profile not in {"continuous", "event"}:
+            raise ValueError("profile must be 'continuous' or 'event'")
+        if set(expected) != writable_fields:
+            raise ValueError("expected must contain the complete writable encode profile")
+        if set(changes) - writable_fields:
+            raise ValueError("changes must contain only writable encode fields")
+        if not expected_codec:
+            raise ValueError("expected_codec must be non-empty")
+        if codec is not None and not codec:
+            raise ValueError("codec must be non-empty when supplied")
+        if not changes and codec is None:
+            raise ValueError("at least one stream or codec change is required")
+
+        connection = {
+            "method": method,
+            "username": username,
+            "password": password,
+            "host": host,
+            "port": port,
+            "identifier": identifier,
+            "timeout": timeout,
+            "nat_server": nat_server,
+            "nat_port": nat_port,
+            "connect_type": connect_type,
+            "fallback_to_direct": fallback_to_direct,
+        }
+
+        def _channel(session: DeviceSession) -> NodeEncodeInfo:
+            item = {row.channel: row for row in session.node_encode_info()}.get(channel)
+            if item is None:
+                raise NetSdkError(f"queryNodeEncodeInfo: channel {channel} not found", -1)
+            return item
+
+        def _profile_state(item: NodeEncodeInfo) -> dict[str, object]:
+            stream = getattr(item, profile)
+            if stream is None:
+                raise NetSdkError(f"queryNodeEncodeInfo: channel {channel} {profile} profile missing", -1)
+            return {
+                "resolution": stream.resolution,
+                "fps": stream.fps,
+                "bitrate_type": stream.bitrate_type,
+                "quality": stream.quality,
+                "max_bitrate": stream.max_bitrate,
+                "audio": stream.audio,
+            }
+
+        with self.connect(**connection) as session:
+            current = _channel(session)
+            if _profile_state(current) != expected or current.codec != expected_codec:
+                return NodeEncodeUpdateResult(
+                    status="conflict",
+                    channel=current,
+                    connection_method=session.connection_method,
+                )
+            session.set_node_encode(
+                channel,
+                continuous=changes if profile == "continuous" else None,
+                event=changes if profile == "event" else None,
+                codec=codec,
+                verify=False,
+            )
+
+        with self.connect(**connection) as verification_session:
+            verified = _channel(verification_session)
+            status = (
+                "updated"
+                if (
+                    all(_profile_state(verified)[key] == value for key, value in changes.items())
+                    and (codec is None or verified.codec == codec)
+                )
+                else "verification_mismatch"
+            )
+            return NodeEncodeUpdateResult(
+                status=status,
+                channel=verified,
+                connection_method=verification_session.connection_method,
+            )
 
     @staticmethod
     def _coerce_connect_type(connect_type: ConnectType | int | str) -> ConnectType:
