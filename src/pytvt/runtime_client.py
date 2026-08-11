@@ -114,6 +114,14 @@ class RuntimeDeviceInfo:
 
 
 @dataclass(frozen=True)
+class RuntimeDeviceTime:
+    """Validated recorder-local wall clock with explicitly unknown timezone."""
+
+    local_time: datetime
+    timezone_known: bool = False
+
+
+@dataclass(frozen=True)
 class RuntimeChannel:
     """One validated NVR channel returned by the persistent runtime."""
 
@@ -523,6 +531,26 @@ class SyncRuntimeClient:
             port=port,
             timeout_ms=timeout_ms,
         )
+
+    def read_device_time(
+        self,
+        host: str,
+        username: str,
+        password: str,
+        *,
+        port: int = 6036,
+        timeout_ms: int | None = None,
+    ) -> RuntimeDeviceTime:
+        """Read the recorder-local wall clock without exposing the set operation."""
+        result = self._execute_device_operation(
+            "deviceTime",
+            host,
+            port,
+            username,
+            password,
+            timeout_ms=timeout_ms,
+        )
+        return _parse_device_time(result)
 
     def scan_channels(
         self,
@@ -1089,6 +1117,27 @@ def _parse_device_info(result: Any) -> RuntimeDeviceInfo:
     ):
         raise RuntimeClientError("runtime returned invalid device info")
     return RuntimeDeviceInfo(**{name: result[name] for name in (*string_fields, *integer_fields)})
+
+
+def _parse_device_time(result: Any) -> RuntimeDeviceTime:
+    try:
+        if (
+            not isinstance(result, dict)
+            or result.get("success") is not True
+            or result.get("action") != "get"
+            or result.get("timestamp") is not None
+            or result.get("error") is not None
+        ):
+            raise TypeError
+        raw_time = result["device_time"]
+        if not isinstance(raw_time, str) or not 1 <= len(raw_time) <= 64:
+            raise TypeError
+        local_time = datetime.fromisoformat(raw_time)
+        if local_time.utcoffset() is not None:
+            raise ValueError
+    except (KeyError, TypeError, ValueError):
+        raise RuntimeClientError("runtime returned an invalid device time") from None
+    return RuntimeDeviceTime(local_time=local_time)
 
 
 def _parse_channel_scan(result: Any, *, max_channels: int) -> RuntimeChannelScan:
