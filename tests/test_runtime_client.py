@@ -30,6 +30,17 @@ def test_request_envelope_carries_protocol_version() -> None:
     }
 
 
+def test_request_envelope_carries_explicit_operation_deadline() -> None:
+    payload = _request_payload(
+        "request-1",
+        "execute",
+        {"operation": "snapshot"},
+        timeout_ms=3_000,
+    )
+
+    assert json.loads(payload)["timeoutMilliseconds"] == 3_000
+
+
 def test_response_rejects_server_without_matching_protocol() -> None:
     response = b'{"id":"request-1","ok":true,"result":{}}\n'
 

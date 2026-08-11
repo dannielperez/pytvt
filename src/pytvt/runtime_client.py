@@ -682,8 +682,17 @@ class SyncRuntimeClient:
         timeout_ms: int | None = None,
     ) -> Any:
         request_id = uuid.uuid4().hex
-        payload = _request_payload(request_id, method, job)
-        deadline = time.monotonic() + _request_timeout_seconds(timeout_ms, self.timeout_seconds)
+        request_timeout_seconds = _request_timeout_seconds(
+            timeout_ms,
+            self.timeout_seconds,
+        )
+        payload = _request_payload(
+            request_id,
+            method,
+            job,
+            timeout_ms=timeout_ms,
+        )
+        deadline = time.monotonic() + request_timeout_seconds
 
         def remaining() -> float:
             seconds = deadline - time.monotonic()
@@ -721,6 +730,8 @@ def _request_payload(
     request_id: str,
     method: str,
     job: dict[str, Any] | None,
+    *,
+    timeout_ms: int | None = None,
 ) -> bytes:
     request: dict[str, Any] = {
         "protocol": RUNTIME_PROTOCOL_VERSION,
@@ -729,6 +740,9 @@ def _request_payload(
     }
     if job is not None:
         request["job"] = job
+    if timeout_ms is not None:
+        _request_timeout_seconds(timeout_ms, 0)
+        request["timeoutMilliseconds"] = timeout_ms
     payload = json.dumps(request, separators=(",", ":")).encode()
     if len(payload) > MAX_RUNTIME_REQUEST_BYTES:
         raise RuntimeClientError("runtime request exceeds configured byte limit")
