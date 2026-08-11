@@ -41,6 +41,7 @@ MAX_FACE_BATCH_ITEMS = 100
 MAX_FACE_BATCH_BYTES = 12 * 1024 * 1024
 MAX_RUNTIME_PLATE_CHANNELS = 32
 MAX_RUNTIME_PLATE_POLL_ITEMS = 16
+MAX_RUNTIME_DELIVERY_SEQUENCE = (1 << 63) - 1
 PLATFORM_FETCH_SECTIONS = frozenset(
     {"resources", "devices", "channels", "areas", "servers", "alarm_zones", "alarm_events"}
 )
@@ -177,12 +178,16 @@ class RuntimePlateEventStream:
         stream_id: str,
         subscriptions: tuple[PlateSubscriptionInfo, ...],
         stats: PlateStreamStats,
+        acknowledged_delivery: bool,
     ) -> None:
         self._client = client
         self._credentials = credentials
         self._stream_id = stream_id
         self._subscriptions = subscriptions
         self._stats = stats
+        self._acknowledged_delivery = acknowledged_delivery
+        self._pending_sequence: int | None = None
+        self._delivery_state_uncertain = False
         self._closed = False
 
     @property
@@ -192,6 +197,11 @@ class RuntimePlateEventStream:
     @property
     def subscriptions(self) -> tuple[PlateSubscriptionInfo, ...]:
         return self._subscriptions
+
+    @property
+    def acknowledged_delivery(self) -> bool:
+        """Whether the runtime retains each event until an explicit ack."""
+        return self._acknowledged_delivery
 
     def get(self, timeout: float | None = None) -> PlateEvent:
         events = self._poll(limit=1, timeout=timeout)
@@ -206,10 +216,38 @@ class RuntimePlateEventStream:
         limit = max(0, min(limit, MAX_RUNTIME_PLATE_POLL_ITEMS))
         if limit == 0:
             return []
+        if self._acknowledged_delivery:
+            limit = 1
         return self._poll(limit=limit, timeout=0)
 
     def stats(self) -> PlateStreamStats:
         return self._stats
+
+    def ack(self) -> None:
+        """Acknowledge the current event after the consumer persists it.
+
+        Acknowledgements are explicit rather than coupled to :meth:`get`, so a
+        database failure or client disconnect leaves the runtime delivery
+        available for replay.
+        """
+        if self._closed:
+            raise RuntimeError("plate-event stream is closed")
+        if not self._acknowledged_delivery:
+            raise RuntimeError("plate-event stream does not use acknowledged delivery")
+        sequence = self._pending_sequence
+        if sequence is None:
+            raise RuntimeError("plate-event stream has no delivery to acknowledge")
+        result = self._client.execute(
+            {
+                "operation": "plateStreamAck",
+                "credentials": dict(self._credentials),
+                "streamId": self._stream_id,
+                "ackSequence": sequence,
+            }
+        )
+        self._stats = _parse_plate_ack(result, expected_sequence=sequence)
+        self._pending_sequence = None
+        self._delivery_state_uncertain = False
 
     def _poll(self, *, limit: int, timeout: float | None) -> list[PlateEvent]:
         if self._closed:
@@ -220,6 +258,10 @@ class RuntimePlateEventStream:
             raise ValueError("plate stream timeout must be a non-negative number or None")
         else:
             wait_ms = min(10_000, int(timeout * 1000))
+        if self._acknowledged_delivery:
+            # Once the poll is sent, a disconnect or malformed response cannot
+            # prove whether the runtime retained a delivery. Fail toward detach.
+            self._delivery_state_uncertain = True
         result = self._client.execute(
             {
                 "operation": "plateStreamPoll",
@@ -230,11 +272,33 @@ class RuntimePlateEventStream:
             },
             timeout_ms=max(1_000, wait_ms + 1_000),
         )
-        events, self._stats = _parse_plate_poll(result, max_items=limit)
+        events, self._stats, delivery_sequence = _parse_plate_poll(
+            result,
+            max_items=limit,
+            acknowledged_delivery=self._acknowledged_delivery,
+        )
+        if self._acknowledged_delivery:
+            if self._pending_sequence is not None and delivery_sequence != self._pending_sequence:
+                raise RuntimeClientError("runtime replaced an unacknowledged plate delivery")
+            self._pending_sequence = delivery_sequence
+            self._delivery_state_uncertain = delivery_sequence is not None
         return list(events)
 
-    def close(self) -> None:
+    def close(self, *, discard_unacked: bool = False) -> None:
+        """Close the proxy, preserving an unacknowledged delivery by default.
+
+        An acknowledged stream with a pending event detaches locally so a
+        stable stream id can reattach and replay it. Callers must opt in to
+        ``discard_unacked=True`` when intentionally abandoning that evidence.
+        """
         if self._closed:
+            return
+        if (
+            self._acknowledged_delivery
+            and (self._pending_sequence is not None or self._delivery_state_uncertain)
+            and not discard_unacked
+        ):
+            self._closed = True
             return
         self._client.execute(
             {
@@ -435,44 +499,69 @@ class SyncRuntimeClient:
         max_image_bytes: int = 8 * 1024 * 1024,
         max_buffer_bytes: int = 64 * 1024 * 1024,
         stream_id: str | None = None,
+        acknowledged_delivery: bool = False,
     ) -> RuntimePlateEventStream:
         """Open one bounded plate stream in the persistent native runtime."""
         credentials = _device_credentials(host, port, username, password)
         normalized_channels = _plate_channels(channels)
         if source not in (PlateSource.NVR, PlateSource.IPC):
             raise ValueError("plate stream source is invalid")
+        if not isinstance(acknowledged_delivery, bool):
+            raise ValueError("acknowledged_delivery must be a boolean")
         _validate_plate_bounds(
             max_events=max_events,
             max_payload_bytes=max_payload_bytes,
             max_image_bytes=max_image_bytes,
             max_buffer_bytes=max_buffer_bytes,
         )
+        if acknowledged_delivery and max_events < 2:
+            raise ValueError("acknowledged delivery requires at least two event slots")
+        if acknowledged_delivery and max_buffer_bytes <= max_payload_bytes:
+            raise ValueError("acknowledged delivery requires buffer capacity above one payload")
+        if acknowledged_delivery and stream_id is None:
+            raise ValueError("acknowledged delivery requires an explicit stable stream_id")
         stream_id = stream_id or uuid.uuid4().hex
         if not isinstance(stream_id, str) or not stream_id or len(stream_id) > 128:
             raise ValueError("plate stream id must contain between 1 and 128 characters")
-        result = self.execute(
-            {
-                "operation": "plateStreamStart",
-                "credentials": credentials,
-                "channels": list(normalized_channels),
-                "source": source.value,
-                "streamId": stream_id,
-                "maxEvents": max_events,
-                "maxPayloadBytes": max_payload_bytes,
-                "maxImageBytes": max_image_bytes,
-                "maxBufferBytes": max_buffer_bytes,
-            }
-        )
-        stream_id, subscriptions, stats = _parse_plate_start(
-            result,
-            expected_stream_id=stream_id,
-        )
+        start_job = {
+            "operation": "plateStreamStart",
+            "credentials": credentials,
+            "channels": list(normalized_channels),
+            "source": source.value,
+            "streamId": stream_id,
+            "maxEvents": max_events,
+            "maxPayloadBytes": max_payload_bytes,
+            "maxImageBytes": max_image_bytes,
+            "maxBufferBytes": max_buffer_bytes,
+        }
+        if acknowledged_delivery:
+            start_job["deliveryMode"] = "acked"
+        result = self.execute(start_job)
+        try:
+            stream_id, subscriptions, stats = _parse_plate_start(
+                result,
+                expected_stream_id=stream_id,
+                expected_delivery_mode="acked" if acknowledged_delivery else None,
+            )
+        except RuntimeClientError:
+            # A legacy runtime may accept the start fields but omit negotiation
+            # support. Compensate the already-open stream before failing closed.
+            with suppress(RuntimeClientError):
+                self.execute(
+                    {
+                        "operation": "plateStreamStop",
+                        "credentials": credentials,
+                        "streamId": stream_id,
+                    }
+                )
+            raise
         return RuntimePlateEventStream(
             client=self,
             credentials=credentials,
             stream_id=stream_id,
             subscriptions=subscriptions,
             stats=stats,
+            acknowledged_delivery=acknowledged_delivery,
         )
 
     def _request(
@@ -597,12 +686,14 @@ def _parse_plate_start(
     result: Any,
     *,
     expected_stream_id: str,
+    expected_delivery_mode: str | None,
 ) -> tuple[str, tuple[PlateSubscriptionInfo, ...], PlateStreamStats]:
     try:
         if not isinstance(result, dict):
             raise TypeError
         stream_id = result["stream_id"]
         raw_subscriptions = result["subscriptions"]
+        delivery_mode = result.get("delivery_mode")
         if (
             not isinstance(stream_id, str)
             or not stream_id
@@ -610,6 +701,7 @@ def _parse_plate_start(
             or stream_id != expected_stream_id
             or not isinstance(raw_subscriptions, list)
             or not 1 <= len(raw_subscriptions) <= MAX_RUNTIME_PLATE_CHANNELS
+            or delivery_mode != expected_delivery_mode
         ):
             raise TypeError
         subscriptions = tuple(_parse_plate_subscription(item) for item in raw_subscriptions)
@@ -623,18 +715,44 @@ def _parse_plate_poll(
     result: Any,
     *,
     max_items: int,
-) -> tuple[tuple[PlateEvent, ...], PlateStreamStats]:
+    acknowledged_delivery: bool,
+) -> tuple[tuple[PlateEvent, ...], PlateStreamStats, int | None]:
     try:
         if not isinstance(result, dict):
             raise TypeError
         raw_events = result["events"]
-        if not isinstance(raw_events, list) or len(raw_events) > max_items:
+        delivery_sequence = result.get("delivery_sequence")
+        if (
+            not isinstance(raw_events, list)
+            or len(raw_events) > max_items
+            or (acknowledged_delivery and len(raw_events) > 1)
+            or (acknowledged_delivery and bool(raw_events) != (delivery_sequence is not None))
+            or (
+                delivery_sequence is not None
+                and (
+                    not acknowledged_delivery
+                    or isinstance(delivery_sequence, bool)
+                    or not isinstance(delivery_sequence, int)
+                    or delivery_sequence < 1
+                    or delivery_sequence > MAX_RUNTIME_DELIVERY_SEQUENCE
+                )
+            )
+        ):
             raise TypeError
         events = tuple(_parse_plate_event(item) for item in raw_events)
         stats = _parse_plate_stats(result["stats"])
     except (binascii.Error, KeyError, TypeError, ValueError):
         raise RuntimeClientError("runtime returned an invalid plate stream response") from None
-    return events, stats
+    return events, stats, delivery_sequence
+
+
+def _parse_plate_ack(result: Any, *, expected_sequence: int) -> PlateStreamStats:
+    try:
+        if not isinstance(result, dict) or result["acked_sequence"] != expected_sequence:
+            raise TypeError
+        return _parse_plate_stats(result["stats"])
+    except (KeyError, TypeError, ValueError):
+        raise RuntimeClientError("runtime returned an invalid plate stream response") from None
 
 
 def _parse_plate_subscription(raw: Any) -> PlateSubscriptionInfo:

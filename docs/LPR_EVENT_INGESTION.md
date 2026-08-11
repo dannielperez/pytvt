@@ -51,6 +51,18 @@ generic `subscribe_v2` callback is rejected until the first one closes.
 Registration is atomic across requested channels/commands; a partial failure rolls back
 successful subscriptions and clears the callback.
 
+When the callback stream is owned by `pytvt-runtime`, applications can request
+`acknowledged_delivery=True` with an explicit, stable `stream_id`. The runtime then
+returns one sequenced delivery at a time and retains it until the application calls
+`stream.ack()` after durable
+persistence. Repeated polls before the acknowledgement replay the same event. The
+ack is idempotent so a lost socket response can be retried safely. This protects a
+socket disconnect or application persistence failure; it does not make the event
+durable across a runtime process restart. Closing a proxy with an unacknowledged
+delivery detaches without stopping the remote stream, allowing the same stable stream
+id to reattach. Intentional evidence abandonment must be explicit with
+`stream.close(discard_unacked=True)`.
+
 ## Bounds and failure behavior
 
 - callback data is copied before the native callback returns;
