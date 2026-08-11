@@ -37,6 +37,7 @@ MAX_RUNTIME_REQUEST_BYTES = 64 * 1024
 # The runtime caps a PlatformSDK worker/server response at 32 MiB. Leave a
 # fixed envelope margin so a maximum-sized result still fits the framed reply.
 MAX_RUNTIME_RESPONSE_BYTES = 34 * 1024 * 1024
+MAX_RUNTIME_SNAPSHOT_BYTES = 25 * 1024 * 1024
 MAX_FACE_BATCH_ITEMS = 100
 MAX_FACE_BATCH_BYTES = 12 * 1024 * 1024
 MAX_RUNTIME_PLATE_CHANNELS = 32
@@ -90,6 +91,33 @@ class RuntimeFaceCapture:
     device_time_ticks: int
     snapshot_image_id: int
     target_image_id: int
+
+
+@dataclass(frozen=True)
+class RuntimeDeviceInfo:
+    """Validated recorder identity returned through a persistent login."""
+
+    device_name: str
+    device_model: str
+    serial_number: str
+    firmware: str
+    hardware_version: str
+    kernel_version: str
+    mcu_version: str
+    video_inputs: int
+    audio_inputs: int
+    sensor_inputs: int
+    sensor_outputs: int
+    device_type: int
+
+
+@dataclass(frozen=True)
+class RuntimeSnapshot:
+    """One bounded JPEG captured through the persistent native runtime."""
+
+    image: bytes
+    channel: int
+    method: str = "runtime"
 
 
 @dataclass(frozen=True)
@@ -421,6 +449,88 @@ class SyncRuntimeClient:
     def execute(self, job: dict[str, Any], *, timeout_ms: int | None = None) -> Any:
         return self._request("execute", job=job, timeout_ms=timeout_ms)
 
+    def get_device_info(
+        self,
+        host: str,
+        username: str,
+        password: str,
+        *,
+        port: int = 6036,
+        timeout_ms: int | None = None,
+    ) -> RuntimeDeviceInfo:
+        """Read recorder identity through its reusable authenticated session."""
+        result = self._execute_device_operation(
+            "deviceInfo",
+            host,
+            port,
+            username,
+            password,
+            timeout_ms=timeout_ms,
+        )
+        return _parse_device_info(result)
+
+    def probe_device_health(
+        self,
+        host: str,
+        username: str,
+        password: str,
+        *,
+        port: int = 6036,
+        timeout_ms: int | None = None,
+    ) -> RuntimeDeviceInfo:
+        """Prove the persistent recorder session with a lightweight info read."""
+        return self.get_device_info(
+            host,
+            username,
+            password,
+            port=port,
+            timeout_ms=timeout_ms,
+        )
+
+    def capture_snapshot(
+        self,
+        host: str,
+        username: str,
+        password: str,
+        *,
+        port: int = 6036,
+        channel: int = 0,
+        timeout_ms: int | None = None,
+    ) -> RuntimeSnapshot:
+        """Capture one bounded JPEG through the reusable recorder session."""
+        if isinstance(channel, bool) or not isinstance(channel, int) or not 0 <= channel <= 255:
+            raise ValueError("channel must be between 0 and 255")
+        result = self._execute_device_operation(
+            "snapshot",
+            host,
+            port,
+            username,
+            password,
+            timeout_ms=timeout_ms,
+            channel=channel,
+        )
+        return RuntimeSnapshot(image=_parse_snapshot(result), channel=channel)
+
+    def _execute_device_operation(
+        self,
+        operation: str,
+        host: str,
+        port: int,
+        username: str,
+        password: str,
+        *,
+        timeout_ms: int | None,
+        **options: Any,
+    ) -> Any:
+        job = {
+            "operation": operation,
+            "credentials": _device_credentials(host, port, username, password),
+            **options,
+        }
+        if timeout_ms is None:
+            return self.execute(job)
+        return self.execute(job, timeout_ms=timeout_ms)
+
     def get_platform_inventory(
         self,
         host: str,
@@ -572,8 +682,17 @@ class SyncRuntimeClient:
         timeout_ms: int | None = None,
     ) -> Any:
         request_id = uuid.uuid4().hex
-        payload = _request_payload(request_id, method, job)
-        deadline = time.monotonic() + _request_timeout_seconds(timeout_ms, self.timeout_seconds)
+        request_timeout_seconds = _request_timeout_seconds(
+            timeout_ms,
+            self.timeout_seconds,
+        )
+        payload = _request_payload(
+            request_id,
+            method,
+            job,
+            timeout_ms=timeout_ms,
+        )
+        deadline = time.monotonic() + request_timeout_seconds
 
         def remaining() -> float:
             seconds = deadline - time.monotonic()
@@ -611,6 +730,8 @@ def _request_payload(
     request_id: str,
     method: str,
     job: dict[str, Any] | None,
+    *,
+    timeout_ms: int | None = None,
 ) -> bytes:
     request: dict[str, Any] = {
         "protocol": RUNTIME_PROTOCOL_VERSION,
@@ -619,6 +740,9 @@ def _request_payload(
     }
     if job is not None:
         request["job"] = job
+    if timeout_ms is not None:
+        _request_timeout_seconds(timeout_ms, 0)
+        request["timeoutMilliseconds"] = timeout_ms
     payload = json.dumps(request, separators=(",", ":")).encode()
     if len(payload) > MAX_RUNTIME_REQUEST_BYTES:
         raise RuntimeClientError("runtime request exceeds configured byte limit")
@@ -845,6 +969,45 @@ def _required_nonnegative_int(value: Any) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         raise TypeError
     return value
+
+
+def _parse_device_info(result: Any) -> RuntimeDeviceInfo:
+    if not isinstance(result, dict) or result.get("success") is not True:
+        raise RuntimeClientError("runtime returned invalid device info")
+    string_fields = (
+        "device_name",
+        "device_model",
+        "serial_number",
+        "firmware",
+        "hardware_version",
+        "kernel_version",
+        "mcu_version",
+    )
+    integer_fields = (
+        "video_inputs",
+        "audio_inputs",
+        "sensor_inputs",
+        "sensor_outputs",
+        "device_type",
+    )
+    if any(not isinstance(result.get(name), str) for name in string_fields) or any(
+        isinstance(result.get(name), bool) or not isinstance(result.get(name), int) or result[name] < 0
+        for name in integer_fields
+    ):
+        raise RuntimeClientError("runtime returned invalid device info")
+    return RuntimeDeviceInfo(**{name: result[name] for name in (*string_fields, *integer_fields)})
+
+
+def _parse_snapshot(result: Any) -> bytes:
+    if not isinstance(result, str):
+        raise RuntimeClientError("runtime returned an invalid snapshot")
+    try:
+        image = base64.b64decode(result, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise RuntimeClientError("runtime returned an invalid snapshot") from exc
+    if not image.startswith(b"\xff\xd8") or not image.endswith(b"\xff\xd9") or len(image) > MAX_RUNTIME_SNAPSHOT_BYTES:
+        raise RuntimeClientError("runtime returned an invalid snapshot")
+    return image
 
 
 def _optional_nonnegative_int(value: Any) -> int | None:
