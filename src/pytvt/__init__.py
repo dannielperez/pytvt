@@ -95,6 +95,7 @@ from .runtime_client import (
     RUNTIME_PROTOCOL_VERSION,
     RuntimeClient,
     RuntimeClientError,
+    RuntimeDeviceInfo,
     RuntimeFaceBatchItem,
     RuntimeFaceBatchResult,
     RuntimeFaceCapture,
@@ -102,6 +103,7 @@ from .runtime_client import (
     RuntimePlatformAuthorityResult,
     RuntimePlatformInventoryResult,
     RuntimeRemoteError,
+    RuntimeSnapshot,
     SyncRuntimeClient,
 )
 from .scanner import filter_tvt_devices, load_devices, scan_single_nvr
@@ -185,6 +187,7 @@ __all__ = [
     "RUNTIME_PROTOCOL_VERSION",
     "RuntimeClient",
     "RuntimeClientError",
+    "RuntimeDeviceInfo",
     "RuntimeFaceBatchItem",
     "RuntimeFaceBatchResult",
     "RuntimeFaceCapture",
@@ -192,6 +195,7 @@ __all__ = [
     "RuntimePlatformInventoryResult",
     "RuntimePlatformAuthorityResult",
     "RuntimeRemoteError",
+    "RuntimeSnapshot",
     "SyncRuntimeClient",
     "CommandResult",
     "DeviceInfoResult",

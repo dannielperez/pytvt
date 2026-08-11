@@ -55,6 +55,94 @@ def test_remote_error_preserves_typed_cooldown() -> None:
     assert exc_info.value.retry_after_seconds == 900
 
 
+def test_typed_device_health_reuses_device_info_operation() -> None:
+    captured: dict = {}
+
+    class Client(SyncRuntimeClient):
+        def execute(self, job, *, timeout_ms=None):
+            captured.update(job)
+            captured["timeout_ms"] = timeout_ms
+            return {
+                "success": True,
+                "device_name": "Gate NVR",
+                "device_model": "TD-3332H2",
+                "serial_number": "serial-1",
+                "firmware": "1.2.3",
+                "hardware_version": "A1",
+                "kernel_version": "4.9",
+                "mcu_version": "",
+                "video_inputs": 16,
+                "audio_inputs": 1,
+                "sensor_inputs": 4,
+                "sensor_outputs": 2,
+                "device_type": 7,
+                "error": None,
+            }
+
+    result = Client().probe_device_health(
+        "192.0.2.10",
+        "operator",
+        "secret",
+        port=6036,
+        timeout_ms=1_500,
+    )
+
+    assert captured == {
+        "operation": "deviceInfo",
+        "credentials": {
+            "ip": "192.0.2.10",
+            "port": 6036,
+            "username": "operator",
+            "password": "secret",
+        },
+        "timeout_ms": 1_500,
+    }
+    assert result.device_name == "Gate NVR"
+    assert result.video_inputs == 16
+
+
+def test_typed_runtime_snapshot_validates_and_decodes_jpeg() -> None:
+    captured: dict = {}
+    image = b"\xff\xd8snapshot\xff\xd9"
+
+    class Client(SyncRuntimeClient):
+        def execute(self, job):
+            captured.update(job)
+            return base64.b64encode(image).decode()
+
+    result = Client().capture_snapshot(
+        "192.0.2.10",
+        "operator",
+        "secret",
+        port=6036,
+        channel=6,
+    )
+
+    assert captured["operation"] == "snapshot"
+    assert captured["channel"] == 6
+    assert result.image == image
+    assert result.channel == 6
+    assert result.method == "runtime"
+
+
+@pytest.mark.parametrize(
+    "result",
+    ["not-base64", base64.b64encode(b"not-jpeg").decode()],
+)
+def test_typed_runtime_snapshot_rejects_invalid_payload(result: str) -> None:
+    class Client(SyncRuntimeClient):
+        def execute(self, _job):
+            return result
+
+    with pytest.raises(RuntimeClientError, match="invalid snapshot"):
+        Client().capture_snapshot(
+            "192.0.2.10",
+            "operator",
+            "secret",
+            channel=0,
+        )
+
+
 def test_typed_face_batch_owns_job_schema_and_result_validation() -> None:
     captured: dict = {}
     image = b"\xff\xd8face\xff\xd9"
