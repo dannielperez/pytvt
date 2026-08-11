@@ -319,6 +319,84 @@ def test_typed_runtime_rtsp_url_rejects_invalid_stream_type(stream_type) -> None
         )
 
 
+def test_typed_runtime_device_time_owns_read_only_schema() -> None:
+    captured: dict = {}
+
+    class Client(SyncRuntimeClient):
+        def execute(self, job, *, timeout_ms=None):
+            captured.update(job)
+            captured["timeout_ms"] = timeout_ms
+            return {
+                "success": True,
+                "action": "get",
+                "device_time": "2026-08-11 10:15:30",
+                "timestamp": None,
+                "error": None,
+            }
+
+    result = Client().read_device_time(
+        "192.0.2.10",
+        "operator",
+        "secret",
+        port=6036,
+        timeout_ms=2_000,
+    )
+
+    assert captured == {
+        "operation": "deviceTime",
+        "credentials": {
+            "ip": "192.0.2.10",
+            "port": 6036,
+            "username": "operator",
+            "password": "secret",
+        },
+        "timeout_ms": 2_000,
+    }
+    assert result.local_time == datetime(2026, 8, 11, 10, 15, 30)
+    assert result.timezone_known is False
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        None,
+        {},
+        {
+            "success": True,
+            "action": "set",
+            "device_time": "2026-08-11 10:15:30",
+            "timestamp": 1_786_443_330,
+            "error": None,
+        },
+        {
+            "success": True,
+            "action": "get",
+            "device_time": "not-a-time",
+            "timestamp": None,
+            "error": None,
+        },
+        {
+            "success": True,
+            "action": "get",
+            "device_time": "2026-08-11T10:15:30+00:00",
+            "timestamp": None,
+            "error": None,
+        },
+    ],
+)
+def test_typed_runtime_device_time_rejects_invalid_payload(result) -> None:
+    class Client(SyncRuntimeClient):
+        def execute(self, _job):
+            return result
+
+    with pytest.raises(RuntimeClientError, match="invalid device time"):
+        Client().read_device_time(
+            "192.0.2.10",
+            "operator",
+            "secret",
+        )
+
+
 def test_typed_face_batch_owns_job_schema_and_result_validation() -> None:
     captured: dict = {}
     image = b"\xff\xd8face\xff\xd9"
