@@ -93,6 +93,8 @@ from .platform_sdk import ManagementClient, ManagementError
 from .registry import resolve_execution_plan
 from .runtime_client import (
     RUNTIME_PROTOCOL_VERSION,
+    RuntimeChannel,
+    RuntimeChannelScan,
     RuntimeClient,
     RuntimeClientError,
     RuntimeDeviceInfo,
@@ -188,6 +190,8 @@ __all__ = [
     "RuntimeClient",
     "RuntimeClientError",
     "RuntimeDeviceInfo",
+    "RuntimeChannel",
+    "RuntimeChannelScan",
     "RuntimeFaceBatchItem",
     "RuntimeFaceBatchResult",
     "RuntimeFaceCapture",
