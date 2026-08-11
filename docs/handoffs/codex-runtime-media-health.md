@@ -9,9 +9,15 @@
 - **Health:** the health probe uses the existing read-only `deviceInfo` worker
   operation, so repeated polls reuse the logged-in recorder session and retain
   runtime queue/deadline/login-cooldown protection.
+- **Deadlines:** each typed call sends its local deadline in the request envelope,
+  allowing pytvt-runtime to clamp queue wait and native execution to the same
+  caller budget instead of leaving orphaned work after a socket timeout.
 - **Boundary:** callers provide recorder identity and typed options; raw runtime
   job schemas and response validation remain inside pytvt.
-- **Validation:** focused runtime-client tests pass (`23 passed`); full pytest
-  passes (`1284 passed`). Targeted Ruff check and format check pass.
+- **Validation:** focused runtime-client tests pass (`24 passed`); the full code
+  suite passes (`1283 passed`) and Ruff check/format pass. The two isolated
+  wheel/sdist guardrails are currently blocked installing `hatchling` in their
+  temporary build environments; the full suite passed (`1284 passed`) before
+  the deadline-only follow-up commit.
 - **Dependency:** pin this commit into pytvt-runtime before UniqueOS enables
   runtime-backed Access Control snapshots or device-health polling.
