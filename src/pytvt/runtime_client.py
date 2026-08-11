@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from .device_sdk import (
     EdgePlateMatch,
@@ -38,6 +39,7 @@ MAX_RUNTIME_REQUEST_BYTES = 64 * 1024
 # fixed envelope margin so a maximum-sized result still fits the framed reply.
 MAX_RUNTIME_RESPONSE_BYTES = 34 * 1024 * 1024
 MAX_RUNTIME_SNAPSHOT_BYTES = 25 * 1024 * 1024
+MAX_RUNTIME_RTSP_URL_BYTES = 4096
 MAX_FACE_BATCH_ITEMS = 100
 MAX_FACE_BATCH_BYTES = 12 * 1024 * 1024
 MAX_RUNTIME_PLATE_CHANNELS = 32
@@ -142,6 +144,16 @@ class RuntimeSnapshot:
 
     image: bytes
     channel: int
+    method: str = "runtime"
+
+
+@dataclass(frozen=True)
+class RuntimeRtspUrl:
+    """One validated credential-bearing RTSP URL from the native runtime."""
+
+    url: str
+    channel: int
+    stream_type: int
     method: str = "runtime"
 
 
@@ -559,6 +571,38 @@ class SyncRuntimeClient:
             channel=channel,
         )
         return RuntimeSnapshot(image=_parse_snapshot(result), channel=channel)
+
+    def resolve_rtsp_url(
+        self,
+        host: str,
+        username: str,
+        password: str,
+        *,
+        port: int = 6036,
+        channel: int = 0,
+        stream_type: int = 0,
+        timeout_ms: int | None = None,
+    ) -> RuntimeRtspUrl:
+        """Resolve one bounded RTSP URL through the reusable recorder session."""
+        if isinstance(channel, bool) or not isinstance(channel, int) or not 0 <= channel <= 255:
+            raise ValueError("channel must be between 0 and 255")
+        if isinstance(stream_type, bool) or not isinstance(stream_type, int) or not 0 <= stream_type <= 2:
+            raise ValueError("stream_type must be between 0 and 2")
+        result = self._execute_device_operation(
+            "rtspUrl",
+            host,
+            port,
+            username,
+            password,
+            timeout_ms=timeout_ms,
+            channel=channel,
+            streamType=stream_type,
+        )
+        return RuntimeRtspUrl(
+            url=_parse_rtsp_url(result),
+            channel=channel,
+            stream_type=stream_type,
+        )
 
     def _execute_device_operation(
         self,
@@ -1110,6 +1154,24 @@ def _parse_snapshot(result: Any) -> bytes:
     if not image.startswith(b"\xff\xd8") or not image.endswith(b"\xff\xd9") or len(image) > MAX_RUNTIME_SNAPSHOT_BYTES:
         raise RuntimeClientError("runtime returned an invalid snapshot")
     return image
+
+
+def _parse_rtsp_url(result: Any) -> str:
+    try:
+        if (
+            not isinstance(result, str)
+            or not result
+            or len(result.encode("utf-8")) > MAX_RUNTIME_RTSP_URL_BYTES
+            or any(ord(char) < 32 or ord(char) == 127 for char in result)
+        ):
+            raise ValueError
+        parsed = urlsplit(result)
+        if parsed.scheme not in {"rtsp", "rtsps"} or not parsed.hostname:
+            raise ValueError
+        _ = parsed.port
+    except (UnicodeError, ValueError):
+        raise RuntimeClientError("runtime returned an invalid RTSP URL") from None
+    return result
 
 
 def _optional_nonnegative_int(value: Any) -> int | None:
