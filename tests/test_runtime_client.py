@@ -112,6 +112,87 @@ def test_typed_device_health_reuses_device_info_operation() -> None:
     assert result.video_inputs == 16
 
 
+def test_typed_channel_scan_maps_bounded_status() -> None:
+    captured: dict = {}
+
+    class Client(SyncRuntimeClient):
+        def execute(self, job, *, timeout_ms=None):
+            captured.update(job)
+            captured["timeout_ms"] = timeout_ms
+            return {
+                "success": True,
+                "device_name": "Gate NVR",
+                "device_model": "TD-3332H2",
+                "serial_number": "serial-1",
+                "firmware": "1.2.3",
+                "total_channels": 2,
+                "cameras": [
+                    {
+                        "channel": 0,
+                        "name": "Gate 1",
+                        "address": "192.0.2.20",
+                        "port": 6036,
+                        "httpPort": 80,
+                        "status": "Online",
+                        "protocol": "TVT",
+                        "model": "TD-9422S4",
+                        "deviceId": 0,
+                    },
+                    {
+                        "channel": 1,
+                        "name": "Gate 2",
+                        "address": "192.0.2.21",
+                        "port": 6036,
+                        "httpPort": 80,
+                        "status": "Offline",
+                        "protocol": "TVT",
+                        "model": "TD-9422S4",
+                        "deviceId": 0,
+                    },
+                ],
+                "error": None,
+            }
+
+    result = Client().scan_channels(
+        "192.0.2.10",
+        "operator",
+        "secret",
+        max_channels=16,
+        timeout_ms=2_000,
+    )
+
+    assert captured["operation"] == "scan"
+    assert captured["maxCameras"] == 16
+    assert captured["timeout_ms"] == 2_000
+    assert [channel.online for channel in result.channels] == [True, False]
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        {"total_channels": 2},
+        {"cameras": [{"channel": 0}]},
+    ],
+)
+def test_typed_channel_scan_rejects_malformed_results(mutation) -> None:
+    class Client(SyncRuntimeClient):
+        def execute(self, _job):
+            result = {
+                "success": True,
+                "device_name": "Gate NVR",
+                "device_model": "TD-3332H2",
+                "serial_number": "serial-1",
+                "firmware": "1.2.3",
+                "total_channels": 0,
+                "cameras": [],
+            }
+            result.update(mutation)
+            return result
+
+    with pytest.raises(RuntimeClientError, match="invalid channel scan"):
+        Client().scan_channels("192.0.2.10", "operator", "secret")
+
+
 def test_typed_runtime_snapshot_validates_and_decodes_jpeg() -> None:
     captured: dict = {}
     image = b"\xff\xd8snapshot\xff\xd9"

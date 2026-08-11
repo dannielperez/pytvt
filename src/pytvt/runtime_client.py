@@ -112,6 +112,31 @@ class RuntimeDeviceInfo:
 
 
 @dataclass(frozen=True)
+class RuntimeChannel:
+    """One validated NVR channel returned by the persistent runtime."""
+
+    channel: int
+    name: str
+    address: str
+    port: int
+    http_port: int
+    online: bool
+    protocol: str
+    model: str
+
+
+@dataclass(frozen=True)
+class RuntimeChannelScan:
+    """One bounded channel-status snapshot from a logged-in recorder."""
+
+    device_name: str
+    device_model: str
+    serial_number: str
+    firmware: str
+    channels: tuple[RuntimeChannel, ...]
+
+
+@dataclass(frozen=True)
 class RuntimeSnapshot:
     """One bounded JPEG captured through the persistent native runtime."""
 
@@ -486,6 +511,30 @@ class SyncRuntimeClient:
             port=port,
             timeout_ms=timeout_ms,
         )
+
+    def scan_channels(
+        self,
+        host: str,
+        username: str,
+        password: str,
+        *,
+        port: int = 6036,
+        max_channels: int = 64,
+        timeout_ms: int | None = None,
+    ) -> RuntimeChannelScan:
+        """Read bounded per-channel status through the reusable session."""
+        if isinstance(max_channels, bool) or not isinstance(max_channels, int) or not 1 <= max_channels <= 128:
+            raise ValueError("max_channels must be between 1 and 128")
+        result = self._execute_device_operation(
+            "scan",
+            host,
+            port,
+            username,
+            password,
+            timeout_ms=timeout_ms,
+            maxCameras=max_channels,
+        )
+        return _parse_channel_scan(result, max_channels=max_channels)
 
     def capture_snapshot(
         self,
@@ -996,6 +1045,59 @@ def _parse_device_info(result: Any) -> RuntimeDeviceInfo:
     ):
         raise RuntimeClientError("runtime returned invalid device info")
     return RuntimeDeviceInfo(**{name: result[name] for name in (*string_fields, *integer_fields)})
+
+
+def _parse_channel_scan(result: Any, *, max_channels: int) -> RuntimeChannelScan:
+    if not isinstance(result, dict) or result.get("success") is not True:
+        raise RuntimeClientError("runtime returned an invalid channel scan")
+    identity_fields = ("device_name", "device_model", "serial_number", "firmware")
+    cameras = result.get("cameras")
+    if (
+        any(not isinstance(result.get(name), str) for name in identity_fields)
+        or not isinstance(cameras, list)
+        or len(cameras) > max_channels
+        or result.get("total_channels") != len(cameras)
+    ):
+        raise RuntimeClientError("runtime returned an invalid channel scan")
+    channels: list[RuntimeChannel] = []
+    seen: set[int] = set()
+    for camera in cameras:
+        if not isinstance(camera, dict):
+            raise RuntimeClientError("runtime returned an invalid channel scan")
+        channel = camera.get("channel")
+        status = camera.get("status")
+        if (
+            isinstance(channel, bool)
+            or not isinstance(channel, int)
+            or not 0 <= channel <= 255
+            or channel in seen
+            or status not in {"Online", "Offline"}
+            or any(not isinstance(camera.get(name), str) for name in ("name", "address", "protocol", "model"))
+            or any(
+                isinstance(camera.get(name), bool)
+                or not isinstance(camera.get(name), int)
+                or not 0 <= camera[name] <= 65_535
+                for name in ("port", "httpPort")
+            )
+        ):
+            raise RuntimeClientError("runtime returned an invalid channel scan")
+        seen.add(channel)
+        channels.append(
+            RuntimeChannel(
+                channel=channel,
+                name=camera["name"],
+                address=camera["address"],
+                port=camera["port"],
+                http_port=camera["httpPort"],
+                online=status == "Online",
+                protocol=camera["protocol"],
+                model=camera["model"],
+            )
+        )
+    return RuntimeChannelScan(
+        **{name: result[name] for name in identity_fields},
+        channels=tuple(channels),
+    )
 
 
 def _parse_snapshot(result: Any) -> bytes:
