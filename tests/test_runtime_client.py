@@ -30,6 +30,17 @@ def test_request_envelope_carries_protocol_version() -> None:
     }
 
 
+def test_request_envelope_carries_explicit_operation_deadline() -> None:
+    payload = _request_payload(
+        "request-1",
+        "execute",
+        {"operation": "snapshot"},
+        timeout_ms=3_000,
+    )
+
+    assert json.loads(payload)["timeoutMilliseconds"] == 3_000
+
+
 def test_response_rejects_server_without_matching_protocol() -> None:
     response = b'{"id":"request-1","ok":true,"result":{}}\n'
 
@@ -53,6 +64,94 @@ def test_remote_error_preserves_typed_cooldown() -> None:
 
     assert exc_info.value.kind == "login_credential"
     assert exc_info.value.retry_after_seconds == 900
+
+
+def test_typed_device_health_reuses_device_info_operation() -> None:
+    captured: dict = {}
+
+    class Client(SyncRuntimeClient):
+        def execute(self, job, *, timeout_ms=None):
+            captured.update(job)
+            captured["timeout_ms"] = timeout_ms
+            return {
+                "success": True,
+                "device_name": "Gate NVR",
+                "device_model": "TD-3332H2",
+                "serial_number": "serial-1",
+                "firmware": "1.2.3",
+                "hardware_version": "A1",
+                "kernel_version": "4.9",
+                "mcu_version": "",
+                "video_inputs": 16,
+                "audio_inputs": 1,
+                "sensor_inputs": 4,
+                "sensor_outputs": 2,
+                "device_type": 7,
+                "error": None,
+            }
+
+    result = Client().probe_device_health(
+        "192.0.2.10",
+        "operator",
+        "secret",
+        port=6036,
+        timeout_ms=1_500,
+    )
+
+    assert captured == {
+        "operation": "deviceInfo",
+        "credentials": {
+            "ip": "192.0.2.10",
+            "port": 6036,
+            "username": "operator",
+            "password": "secret",
+        },
+        "timeout_ms": 1_500,
+    }
+    assert result.device_name == "Gate NVR"
+    assert result.video_inputs == 16
+
+
+def test_typed_runtime_snapshot_validates_and_decodes_jpeg() -> None:
+    captured: dict = {}
+    image = b"\xff\xd8snapshot\xff\xd9"
+
+    class Client(SyncRuntimeClient):
+        def execute(self, job):
+            captured.update(job)
+            return base64.b64encode(image).decode()
+
+    result = Client().capture_snapshot(
+        "192.0.2.10",
+        "operator",
+        "secret",
+        port=6036,
+        channel=6,
+    )
+
+    assert captured["operation"] == "snapshot"
+    assert captured["channel"] == 6
+    assert result.image == image
+    assert result.channel == 6
+    assert result.method == "runtime"
+
+
+@pytest.mark.parametrize(
+    "result",
+    ["not-base64", base64.b64encode(b"not-jpeg").decode()],
+)
+def test_typed_runtime_snapshot_rejects_invalid_payload(result: str) -> None:
+    class Client(SyncRuntimeClient):
+        def execute(self, _job):
+            return result
+
+    with pytest.raises(RuntimeClientError, match="invalid snapshot"):
+        Client().capture_snapshot(
+            "192.0.2.10",
+            "operator",
+            "secret",
+            channel=0,
+        )
 
 
 def test_typed_face_batch_owns_job_schema_and_result_validation() -> None:
@@ -339,6 +438,226 @@ def test_typed_plate_stream_owns_lifecycle_and_returns_plate_events() -> None:
     assert jobs[0]["streamId"] == "stream-1"
     assert jobs[0]["channels"] == [6]
     assert jobs[1]["waitMilliseconds"] == 250
+
+
+def test_typed_plate_stream_acknowledges_only_after_explicit_consumer_ack() -> None:
+    jobs: list[dict] = []
+
+    class Client(SyncRuntimeClient):
+        def execute(self, job, **_kwargs):
+            jobs.append(job)
+            if job["operation"] == "plateStreamStart":
+                return {
+                    "stream_id": "stream-1",
+                    "delivery_mode": "acked",
+                    "subscriptions": [{"source": "nvr", "channel_id": 6}],
+                    "stats": _plate_event_result()["stats"],
+                }
+            if job["operation"] == "plateStreamPoll":
+                result = _plate_event_result()
+                result["delivery_sequence"] = 1
+                return result
+            if job["operation"] == "plateStreamAck":
+                return {
+                    "acked_sequence": job["ackSequence"],
+                    "stats": _plate_event_result()["stats"],
+                }
+            if job["operation"] == "plateStreamStop":
+                return {"stopped": True}
+            raise AssertionError("unexpected operation")
+
+    with Client().subscribe_plate_events(
+        "192.0.2.10",
+        "operator",
+        "secret",
+        port=6036,
+        channels=(6,),
+        source=PlateSource.NVR,
+        stream_id="stream-1",
+        acknowledged_delivery=True,
+    ) as stream:
+        first = stream.get(timeout=0)
+        replay = stream.get(timeout=0)
+        assert replay == first
+        stream.ack()
+        with pytest.raises(RuntimeError, match="no delivery"):
+            stream.ack()
+
+    assert jobs[0]["deliveryMode"] == "acked"
+    assert jobs[3]["operation"] == "plateStreamAck"
+    assert jobs[3]["ackSequence"] == 1
+
+
+def test_typed_plate_stream_rejects_replacement_before_ack() -> None:
+    poll_count = 0
+
+    class Client(SyncRuntimeClient):
+        def execute(self, job, **_kwargs):
+            nonlocal poll_count
+            if job["operation"] == "plateStreamStart":
+                return {
+                    "stream_id": "stream-1",
+                    "delivery_mode": "acked",
+                    "subscriptions": [{"source": "nvr", "channel_id": 6}],
+                    "stats": _plate_event_result()["stats"],
+                }
+            if job["operation"] == "plateStreamPoll":
+                poll_count += 1
+                result = _plate_event_result()
+                result["delivery_sequence"] = poll_count
+                return result
+            return {"stopped": True}
+
+    stream = Client().subscribe_plate_events(
+        "192.0.2.10",
+        "operator",
+        "secret",
+        port=6036,
+        channels=(6,),
+        stream_id="stream-1",
+        acknowledged_delivery=True,
+    )
+    try:
+        stream.get(timeout=0)
+        with pytest.raises(RuntimeClientError, match="replaced an unacknowledged"):
+            stream.get(timeout=0)
+    finally:
+        stream.close()
+
+
+def test_typed_plate_stream_requires_runtime_ack_mode_negotiation() -> None:
+    jobs: list[dict] = []
+
+    class Client(SyncRuntimeClient):
+        def execute(self, job, **_kwargs):
+            jobs.append(job)
+            if job["operation"] == "plateStreamStop":
+                return {"stopped": True}
+            assert job["deliveryMode"] == "acked"
+            return {
+                "stream_id": "stream-1",
+                "subscriptions": [{"source": "nvr", "channel_id": 6}],
+                "stats": _plate_event_result()["stats"],
+            }
+
+    with pytest.raises(RuntimeClientError, match="invalid plate stream response"):
+        Client().subscribe_plate_events(
+            "192.0.2.10",
+            "operator",
+            "secret",
+            port=6036,
+            channels=(6,),
+            stream_id="stream-1",
+            acknowledged_delivery=True,
+        )
+    assert [job["operation"] for job in jobs] == ["plateStreamStart", "plateStreamStop"]
+
+
+def test_acknowledged_stream_exception_detaches_and_can_reattach() -> None:
+    jobs: list[dict] = []
+
+    class Client(SyncRuntimeClient):
+        def execute(self, job, **_kwargs):
+            jobs.append(job)
+            if job["operation"] == "plateStreamStart":
+                return {
+                    "stream_id": "stream-1",
+                    "delivery_mode": "acked",
+                    "subscriptions": [{"source": "nvr", "channel_id": 6}],
+                    "stats": _plate_event_result()["stats"],
+                }
+            if job["operation"] == "plateStreamPoll":
+                result = _plate_event_result()
+                result["delivery_sequence"] = 1
+                return result
+            if job["operation"] == "plateStreamAck":
+                return {
+                    "acked_sequence": 1,
+                    "stats": _plate_event_result()["stats"],
+                }
+            return {"stopped": True}
+
+    client = Client()
+    with pytest.raises(ValueError, match="persistence failed"):
+        with client.subscribe_plate_events(
+            "192.0.2.10",
+            "operator",
+            "secret",
+            port=6036,
+            channels=(6,),
+            stream_id="stream-1",
+            acknowledged_delivery=True,
+        ) as stream:
+            stream.get(timeout=0)
+            raise ValueError("persistence failed")
+
+    assert "plateStreamStop" not in [job["operation"] for job in jobs]
+
+    with client.subscribe_plate_events(
+        "192.0.2.10",
+        "operator",
+        "secret",
+        port=6036,
+        channels=(6,),
+        stream_id="stream-1",
+        acknowledged_delivery=True,
+    ) as reattached:
+        assert reattached.get(timeout=0).plate == "ABC123"
+        reattached.ack()
+
+    assert [job["operation"] for job in jobs][-4:] == [
+        "plateStreamStart",
+        "plateStreamPoll",
+        "plateStreamAck",
+        "plateStreamStop",
+    ]
+
+
+def test_acknowledged_stream_malformed_poll_detaches_conservatively() -> None:
+    jobs: list[dict] = []
+
+    class Client(SyncRuntimeClient):
+        def execute(self, job, **_kwargs):
+            jobs.append(job)
+            if job["operation"] == "plateStreamStart":
+                return {
+                    "stream_id": "stream-1",
+                    "delivery_mode": "acked",
+                    "subscriptions": [{"source": "nvr", "channel_id": 6}],
+                    "stats": _plate_event_result()["stats"],
+                }
+            if job["operation"] == "plateStreamPoll":
+                return {"invalid": True}
+            return {"stopped": True}
+
+    with pytest.raises(RuntimeClientError, match="invalid plate stream response"):
+        with Client().subscribe_plate_events(
+            "192.0.2.10",
+            "operator",
+            "secret",
+            port=6036,
+            channels=(6,),
+            stream_id="stream-1",
+            acknowledged_delivery=True,
+        ) as stream:
+            stream.get(timeout=0)
+
+    assert [job["operation"] for job in jobs] == [
+        "plateStreamStart",
+        "plateStreamPoll",
+    ]
+
+
+def test_acknowledged_stream_requires_explicit_stable_id() -> None:
+    with pytest.raises(ValueError, match="explicit stable stream_id"):
+        SyncRuntimeClient().subscribe_plate_events(
+            "192.0.2.10",
+            "operator",
+            "secret",
+            port=6036,
+            channels=(6,),
+            acknowledged_delivery=True,
+        )
 
 
 def test_typed_plate_stream_empty_poll_raises_queue_empty() -> None:

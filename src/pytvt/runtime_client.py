@@ -37,10 +37,12 @@ MAX_RUNTIME_REQUEST_BYTES = 64 * 1024
 # The runtime caps a PlatformSDK worker/server response at 32 MiB. Leave a
 # fixed envelope margin so a maximum-sized result still fits the framed reply.
 MAX_RUNTIME_RESPONSE_BYTES = 34 * 1024 * 1024
+MAX_RUNTIME_SNAPSHOT_BYTES = 25 * 1024 * 1024
 MAX_FACE_BATCH_ITEMS = 100
 MAX_FACE_BATCH_BYTES = 12 * 1024 * 1024
 MAX_RUNTIME_PLATE_CHANNELS = 32
 MAX_RUNTIME_PLATE_POLL_ITEMS = 16
+MAX_RUNTIME_DELIVERY_SEQUENCE = (1 << 63) - 1
 PLATFORM_FETCH_SECTIONS = frozenset(
     {"resources", "devices", "channels", "areas", "servers", "alarm_zones", "alarm_events"}
 )
@@ -89,6 +91,33 @@ class RuntimeFaceCapture:
     device_time_ticks: int
     snapshot_image_id: int
     target_image_id: int
+
+
+@dataclass(frozen=True)
+class RuntimeDeviceInfo:
+    """Validated recorder identity returned through a persistent login."""
+
+    device_name: str
+    device_model: str
+    serial_number: str
+    firmware: str
+    hardware_version: str
+    kernel_version: str
+    mcu_version: str
+    video_inputs: int
+    audio_inputs: int
+    sensor_inputs: int
+    sensor_outputs: int
+    device_type: int
+
+
+@dataclass(frozen=True)
+class RuntimeSnapshot:
+    """One bounded JPEG captured through the persistent native runtime."""
+
+    image: bytes
+    channel: int
+    method: str = "runtime"
 
 
 @dataclass(frozen=True)
@@ -177,12 +206,16 @@ class RuntimePlateEventStream:
         stream_id: str,
         subscriptions: tuple[PlateSubscriptionInfo, ...],
         stats: PlateStreamStats,
+        acknowledged_delivery: bool,
     ) -> None:
         self._client = client
         self._credentials = credentials
         self._stream_id = stream_id
         self._subscriptions = subscriptions
         self._stats = stats
+        self._acknowledged_delivery = acknowledged_delivery
+        self._pending_sequence: int | None = None
+        self._delivery_state_uncertain = False
         self._closed = False
 
     @property
@@ -192,6 +225,11 @@ class RuntimePlateEventStream:
     @property
     def subscriptions(self) -> tuple[PlateSubscriptionInfo, ...]:
         return self._subscriptions
+
+    @property
+    def acknowledged_delivery(self) -> bool:
+        """Whether the runtime retains each event until an explicit ack."""
+        return self._acknowledged_delivery
 
     def get(self, timeout: float | None = None) -> PlateEvent:
         events = self._poll(limit=1, timeout=timeout)
@@ -206,10 +244,38 @@ class RuntimePlateEventStream:
         limit = max(0, min(limit, MAX_RUNTIME_PLATE_POLL_ITEMS))
         if limit == 0:
             return []
+        if self._acknowledged_delivery:
+            limit = 1
         return self._poll(limit=limit, timeout=0)
 
     def stats(self) -> PlateStreamStats:
         return self._stats
+
+    def ack(self) -> None:
+        """Acknowledge the current event after the consumer persists it.
+
+        Acknowledgements are explicit rather than coupled to :meth:`get`, so a
+        database failure or client disconnect leaves the runtime delivery
+        available for replay.
+        """
+        if self._closed:
+            raise RuntimeError("plate-event stream is closed")
+        if not self._acknowledged_delivery:
+            raise RuntimeError("plate-event stream does not use acknowledged delivery")
+        sequence = self._pending_sequence
+        if sequence is None:
+            raise RuntimeError("plate-event stream has no delivery to acknowledge")
+        result = self._client.execute(
+            {
+                "operation": "plateStreamAck",
+                "credentials": dict(self._credentials),
+                "streamId": self._stream_id,
+                "ackSequence": sequence,
+            }
+        )
+        self._stats = _parse_plate_ack(result, expected_sequence=sequence)
+        self._pending_sequence = None
+        self._delivery_state_uncertain = False
 
     def _poll(self, *, limit: int, timeout: float | None) -> list[PlateEvent]:
         if self._closed:
@@ -220,6 +286,10 @@ class RuntimePlateEventStream:
             raise ValueError("plate stream timeout must be a non-negative number or None")
         else:
             wait_ms = min(10_000, int(timeout * 1000))
+        if self._acknowledged_delivery:
+            # Once the poll is sent, a disconnect or malformed response cannot
+            # prove whether the runtime retained a delivery. Fail toward detach.
+            self._delivery_state_uncertain = True
         result = self._client.execute(
             {
                 "operation": "plateStreamPoll",
@@ -230,11 +300,33 @@ class RuntimePlateEventStream:
             },
             timeout_ms=max(1_000, wait_ms + 1_000),
         )
-        events, self._stats = _parse_plate_poll(result, max_items=limit)
+        events, self._stats, delivery_sequence = _parse_plate_poll(
+            result,
+            max_items=limit,
+            acknowledged_delivery=self._acknowledged_delivery,
+        )
+        if self._acknowledged_delivery:
+            if self._pending_sequence is not None and delivery_sequence != self._pending_sequence:
+                raise RuntimeClientError("runtime replaced an unacknowledged plate delivery")
+            self._pending_sequence = delivery_sequence
+            self._delivery_state_uncertain = delivery_sequence is not None
         return list(events)
 
-    def close(self) -> None:
+    def close(self, *, discard_unacked: bool = False) -> None:
+        """Close the proxy, preserving an unacknowledged delivery by default.
+
+        An acknowledged stream with a pending event detaches locally so a
+        stable stream id can reattach and replay it. Callers must opt in to
+        ``discard_unacked=True`` when intentionally abandoning that evidence.
+        """
         if self._closed:
+            return
+        if (
+            self._acknowledged_delivery
+            and (self._pending_sequence is not None or self._delivery_state_uncertain)
+            and not discard_unacked
+        ):
+            self._closed = True
             return
         self._client.execute(
             {
@@ -357,6 +449,88 @@ class SyncRuntimeClient:
     def execute(self, job: dict[str, Any], *, timeout_ms: int | None = None) -> Any:
         return self._request("execute", job=job, timeout_ms=timeout_ms)
 
+    def get_device_info(
+        self,
+        host: str,
+        username: str,
+        password: str,
+        *,
+        port: int = 6036,
+        timeout_ms: int | None = None,
+    ) -> RuntimeDeviceInfo:
+        """Read recorder identity through its reusable authenticated session."""
+        result = self._execute_device_operation(
+            "deviceInfo",
+            host,
+            port,
+            username,
+            password,
+            timeout_ms=timeout_ms,
+        )
+        return _parse_device_info(result)
+
+    def probe_device_health(
+        self,
+        host: str,
+        username: str,
+        password: str,
+        *,
+        port: int = 6036,
+        timeout_ms: int | None = None,
+    ) -> RuntimeDeviceInfo:
+        """Prove the persistent recorder session with a lightweight info read."""
+        return self.get_device_info(
+            host,
+            username,
+            password,
+            port=port,
+            timeout_ms=timeout_ms,
+        )
+
+    def capture_snapshot(
+        self,
+        host: str,
+        username: str,
+        password: str,
+        *,
+        port: int = 6036,
+        channel: int = 0,
+        timeout_ms: int | None = None,
+    ) -> RuntimeSnapshot:
+        """Capture one bounded JPEG through the reusable recorder session."""
+        if isinstance(channel, bool) or not isinstance(channel, int) or not 0 <= channel <= 255:
+            raise ValueError("channel must be between 0 and 255")
+        result = self._execute_device_operation(
+            "snapshot",
+            host,
+            port,
+            username,
+            password,
+            timeout_ms=timeout_ms,
+            channel=channel,
+        )
+        return RuntimeSnapshot(image=_parse_snapshot(result), channel=channel)
+
+    def _execute_device_operation(
+        self,
+        operation: str,
+        host: str,
+        port: int,
+        username: str,
+        password: str,
+        *,
+        timeout_ms: int | None,
+        **options: Any,
+    ) -> Any:
+        job = {
+            "operation": operation,
+            "credentials": _device_credentials(host, port, username, password),
+            **options,
+        }
+        if timeout_ms is None:
+            return self.execute(job)
+        return self.execute(job, timeout_ms=timeout_ms)
+
     def get_platform_inventory(
         self,
         host: str,
@@ -435,44 +609,69 @@ class SyncRuntimeClient:
         max_image_bytes: int = 8 * 1024 * 1024,
         max_buffer_bytes: int = 64 * 1024 * 1024,
         stream_id: str | None = None,
+        acknowledged_delivery: bool = False,
     ) -> RuntimePlateEventStream:
         """Open one bounded plate stream in the persistent native runtime."""
         credentials = _device_credentials(host, port, username, password)
         normalized_channels = _plate_channels(channels)
         if source not in (PlateSource.NVR, PlateSource.IPC):
             raise ValueError("plate stream source is invalid")
+        if not isinstance(acknowledged_delivery, bool):
+            raise ValueError("acknowledged_delivery must be a boolean")
         _validate_plate_bounds(
             max_events=max_events,
             max_payload_bytes=max_payload_bytes,
             max_image_bytes=max_image_bytes,
             max_buffer_bytes=max_buffer_bytes,
         )
+        if acknowledged_delivery and max_events < 2:
+            raise ValueError("acknowledged delivery requires at least two event slots")
+        if acknowledged_delivery and max_buffer_bytes <= max_payload_bytes:
+            raise ValueError("acknowledged delivery requires buffer capacity above one payload")
+        if acknowledged_delivery and stream_id is None:
+            raise ValueError("acknowledged delivery requires an explicit stable stream_id")
         stream_id = stream_id or uuid.uuid4().hex
         if not isinstance(stream_id, str) or not stream_id or len(stream_id) > 128:
             raise ValueError("plate stream id must contain between 1 and 128 characters")
-        result = self.execute(
-            {
-                "operation": "plateStreamStart",
-                "credentials": credentials,
-                "channels": list(normalized_channels),
-                "source": source.value,
-                "streamId": stream_id,
-                "maxEvents": max_events,
-                "maxPayloadBytes": max_payload_bytes,
-                "maxImageBytes": max_image_bytes,
-                "maxBufferBytes": max_buffer_bytes,
-            }
-        )
-        stream_id, subscriptions, stats = _parse_plate_start(
-            result,
-            expected_stream_id=stream_id,
-        )
+        start_job = {
+            "operation": "plateStreamStart",
+            "credentials": credentials,
+            "channels": list(normalized_channels),
+            "source": source.value,
+            "streamId": stream_id,
+            "maxEvents": max_events,
+            "maxPayloadBytes": max_payload_bytes,
+            "maxImageBytes": max_image_bytes,
+            "maxBufferBytes": max_buffer_bytes,
+        }
+        if acknowledged_delivery:
+            start_job["deliveryMode"] = "acked"
+        result = self.execute(start_job)
+        try:
+            stream_id, subscriptions, stats = _parse_plate_start(
+                result,
+                expected_stream_id=stream_id,
+                expected_delivery_mode="acked" if acknowledged_delivery else None,
+            )
+        except RuntimeClientError:
+            # A legacy runtime may accept the start fields but omit negotiation
+            # support. Compensate the already-open stream before failing closed.
+            with suppress(RuntimeClientError):
+                self.execute(
+                    {
+                        "operation": "plateStreamStop",
+                        "credentials": credentials,
+                        "streamId": stream_id,
+                    }
+                )
+            raise
         return RuntimePlateEventStream(
             client=self,
             credentials=credentials,
             stream_id=stream_id,
             subscriptions=subscriptions,
             stats=stats,
+            acknowledged_delivery=acknowledged_delivery,
         )
 
     def _request(
@@ -483,8 +682,17 @@ class SyncRuntimeClient:
         timeout_ms: int | None = None,
     ) -> Any:
         request_id = uuid.uuid4().hex
-        payload = _request_payload(request_id, method, job)
-        deadline = time.monotonic() + _request_timeout_seconds(timeout_ms, self.timeout_seconds)
+        request_timeout_seconds = _request_timeout_seconds(
+            timeout_ms,
+            self.timeout_seconds,
+        )
+        payload = _request_payload(
+            request_id,
+            method,
+            job,
+            timeout_ms=timeout_ms,
+        )
+        deadline = time.monotonic() + request_timeout_seconds
 
         def remaining() -> float:
             seconds = deadline - time.monotonic()
@@ -522,6 +730,8 @@ def _request_payload(
     request_id: str,
     method: str,
     job: dict[str, Any] | None,
+    *,
+    timeout_ms: int | None = None,
 ) -> bytes:
     request: dict[str, Any] = {
         "protocol": RUNTIME_PROTOCOL_VERSION,
@@ -530,6 +740,9 @@ def _request_payload(
     }
     if job is not None:
         request["job"] = job
+    if timeout_ms is not None:
+        _request_timeout_seconds(timeout_ms, 0)
+        request["timeoutMilliseconds"] = timeout_ms
     payload = json.dumps(request, separators=(",", ":")).encode()
     if len(payload) > MAX_RUNTIME_REQUEST_BYTES:
         raise RuntimeClientError("runtime request exceeds configured byte limit")
@@ -597,12 +810,14 @@ def _parse_plate_start(
     result: Any,
     *,
     expected_stream_id: str,
+    expected_delivery_mode: str | None,
 ) -> tuple[str, tuple[PlateSubscriptionInfo, ...], PlateStreamStats]:
     try:
         if not isinstance(result, dict):
             raise TypeError
         stream_id = result["stream_id"]
         raw_subscriptions = result["subscriptions"]
+        delivery_mode = result.get("delivery_mode")
         if (
             not isinstance(stream_id, str)
             or not stream_id
@@ -610,6 +825,7 @@ def _parse_plate_start(
             or stream_id != expected_stream_id
             or not isinstance(raw_subscriptions, list)
             or not 1 <= len(raw_subscriptions) <= MAX_RUNTIME_PLATE_CHANNELS
+            or delivery_mode != expected_delivery_mode
         ):
             raise TypeError
         subscriptions = tuple(_parse_plate_subscription(item) for item in raw_subscriptions)
@@ -623,18 +839,44 @@ def _parse_plate_poll(
     result: Any,
     *,
     max_items: int,
-) -> tuple[tuple[PlateEvent, ...], PlateStreamStats]:
+    acknowledged_delivery: bool,
+) -> tuple[tuple[PlateEvent, ...], PlateStreamStats, int | None]:
     try:
         if not isinstance(result, dict):
             raise TypeError
         raw_events = result["events"]
-        if not isinstance(raw_events, list) or len(raw_events) > max_items:
+        delivery_sequence = result.get("delivery_sequence")
+        if (
+            not isinstance(raw_events, list)
+            or len(raw_events) > max_items
+            or (acknowledged_delivery and len(raw_events) > 1)
+            or (acknowledged_delivery and bool(raw_events) != (delivery_sequence is not None))
+            or (
+                delivery_sequence is not None
+                and (
+                    not acknowledged_delivery
+                    or isinstance(delivery_sequence, bool)
+                    or not isinstance(delivery_sequence, int)
+                    or delivery_sequence < 1
+                    or delivery_sequence > MAX_RUNTIME_DELIVERY_SEQUENCE
+                )
+            )
+        ):
             raise TypeError
         events = tuple(_parse_plate_event(item) for item in raw_events)
         stats = _parse_plate_stats(result["stats"])
     except (binascii.Error, KeyError, TypeError, ValueError):
         raise RuntimeClientError("runtime returned an invalid plate stream response") from None
-    return events, stats
+    return events, stats, delivery_sequence
+
+
+def _parse_plate_ack(result: Any, *, expected_sequence: int) -> PlateStreamStats:
+    try:
+        if not isinstance(result, dict) or result["acked_sequence"] != expected_sequence:
+            raise TypeError
+        return _parse_plate_stats(result["stats"])
+    except (KeyError, TypeError, ValueError):
+        raise RuntimeClientError("runtime returned an invalid plate stream response") from None
 
 
 def _parse_plate_subscription(raw: Any) -> PlateSubscriptionInfo:
@@ -727,6 +969,45 @@ def _required_nonnegative_int(value: Any) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         raise TypeError
     return value
+
+
+def _parse_device_info(result: Any) -> RuntimeDeviceInfo:
+    if not isinstance(result, dict) or result.get("success") is not True:
+        raise RuntimeClientError("runtime returned invalid device info")
+    string_fields = (
+        "device_name",
+        "device_model",
+        "serial_number",
+        "firmware",
+        "hardware_version",
+        "kernel_version",
+        "mcu_version",
+    )
+    integer_fields = (
+        "video_inputs",
+        "audio_inputs",
+        "sensor_inputs",
+        "sensor_outputs",
+        "device_type",
+    )
+    if any(not isinstance(result.get(name), str) for name in string_fields) or any(
+        isinstance(result.get(name), bool) or not isinstance(result.get(name), int) or result[name] < 0
+        for name in integer_fields
+    ):
+        raise RuntimeClientError("runtime returned invalid device info")
+    return RuntimeDeviceInfo(**{name: result[name] for name in (*string_fields, *integer_fields)})
+
+
+def _parse_snapshot(result: Any) -> bytes:
+    if not isinstance(result, str):
+        raise RuntimeClientError("runtime returned an invalid snapshot")
+    try:
+        image = base64.b64decode(result, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise RuntimeClientError("runtime returned an invalid snapshot") from exc
+    if not image.startswith(b"\xff\xd8") or not image.endswith(b"\xff\xd9") or len(image) > MAX_RUNTIME_SNAPSHOT_BYTES:
+        raise RuntimeClientError("runtime returned an invalid snapshot")
+    return image
 
 
 def _optional_nonnegative_int(value: Any) -> int | None:
