@@ -235,6 +235,90 @@ def test_typed_runtime_snapshot_rejects_invalid_payload(result: str) -> None:
         )
 
 
+def test_typed_runtime_rtsp_url_owns_schema_and_validates_result() -> None:
+    captured: dict = {}
+
+    class Client(SyncRuntimeClient):
+        def execute(self, job, *, timeout_ms=None):
+            captured.update(job)
+            captured["timeout_ms"] = timeout_ms
+            return "rtsp://operator:secret@192.0.2.10:554/live/ch00_0"
+
+    result = Client().resolve_rtsp_url(
+        "192.0.2.10",
+        "operator",
+        "secret",
+        port=6036,
+        channel=6,
+        stream_type=1,
+        timeout_ms=2_000,
+    )
+
+    assert captured == {
+        "operation": "rtspUrl",
+        "credentials": {
+            "ip": "192.0.2.10",
+            "port": 6036,
+            "username": "operator",
+            "password": "secret",
+        },
+        "channel": 6,
+        "streamType": 1,
+        "timeout_ms": 2_000,
+    }
+    assert result.url == "rtsp://operator:secret@192.0.2.10:554/live/ch00_0"
+    assert result.channel == 6
+    assert result.stream_type == 1
+    assert result.method == "runtime"
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        None,
+        "",
+        "http://192.0.2.10/live",
+        "rtsp:///missing-host",
+        "rtsp://192.0.2.10/live\nforged",
+        "rtsp://192.0.2.10/" + "x" * 4096,
+    ],
+)
+def test_typed_runtime_rtsp_url_rejects_invalid_payload(result) -> None:
+    class Client(SyncRuntimeClient):
+        def execute(self, _job):
+            return result
+
+    with pytest.raises(RuntimeClientError, match="invalid RTSP URL"):
+        Client().resolve_rtsp_url(
+            "192.0.2.10",
+            "operator",
+            "secret",
+            channel=0,
+        )
+
+
+@pytest.mark.parametrize("channel", [-1, 256, True])
+def test_typed_runtime_rtsp_url_rejects_invalid_channel(channel) -> None:
+    with pytest.raises(ValueError, match="channel"):
+        SyncRuntimeClient().resolve_rtsp_url(
+            "192.0.2.10",
+            "operator",
+            "secret",
+            channel=channel,
+        )
+
+
+@pytest.mark.parametrize("stream_type", [-1, 3, True])
+def test_typed_runtime_rtsp_url_rejects_invalid_stream_type(stream_type) -> None:
+    with pytest.raises(ValueError, match="stream_type"):
+        SyncRuntimeClient().resolve_rtsp_url(
+            "192.0.2.10",
+            "operator",
+            "secret",
+            stream_type=stream_type,
+        )
+
+
 def test_typed_face_batch_owns_job_schema_and_result_validation() -> None:
     captured: dict = {}
     image = b"\xff\xd8face\xff\xd9"

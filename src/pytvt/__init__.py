@@ -105,6 +105,7 @@ from .runtime_client import (
     RuntimePlatformAuthorityResult,
     RuntimePlatformInventoryResult,
     RuntimeRemoteError,
+    RuntimeRtspUrl,
     RuntimeSnapshot,
     SyncRuntimeClient,
 )
@@ -199,6 +200,7 @@ __all__ = [
     "RuntimePlatformInventoryResult",
     "RuntimePlatformAuthorityResult",
     "RuntimeRemoteError",
+    "RuntimeRtspUrl",
     "RuntimeSnapshot",
     "SyncRuntimeClient",
     "CommandResult",
