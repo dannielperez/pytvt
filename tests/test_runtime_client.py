@@ -90,6 +90,25 @@ def test_response_rejects_server_without_matching_protocol() -> None:
         _parse_response(response, "request-1")
 
 
+def test_response_preserves_typed_mismatch_from_older_protocol_server() -> None:
+    response = json.dumps(
+        {
+            "protocol": 1,
+            "id": "request-1",
+            "ok": False,
+            "error": {
+                "kind": "protocol_mismatch",
+                "message": "runtime protocol version is unsupported",
+            },
+        }
+    ).encode()
+
+    with pytest.raises(RuntimeRemoteError) as exc_info:
+        _parse_response(response, "request-1")
+
+    assert exc_info.value.kind == "protocol_mismatch"
+
+
 def test_remote_error_preserves_typed_cooldown() -> None:
     response = json.dumps(
         {
