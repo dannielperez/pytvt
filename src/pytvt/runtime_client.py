@@ -407,8 +407,19 @@ class RuntimeClient:
             raise RuntimeClientError("runtime returned an invalid health result")
         return result
 
-    async def execute(self, job: dict[str, Any], *, timeout_ms: int | None = None) -> Any:
-        return await self._request("execute", job=job, timeout_ms=timeout_ms)
+    async def execute(
+        self,
+        job: dict[str, Any],
+        *,
+        timeout_ms: int | None = None,
+        require_immediate_admission: bool = False,
+    ) -> Any:
+        return await self._request(
+            "execute",
+            job=job,
+            timeout_ms=timeout_ms,
+            require_immediate_admission=require_immediate_admission,
+        )
 
     async def get_platform_inventory(
         self,
@@ -448,9 +459,16 @@ class RuntimeClient:
         *,
         job: dict[str, Any] | None = None,
         timeout_ms: int | None = None,
+        require_immediate_admission: bool = False,
     ) -> Any:
         request_id = uuid.uuid4().hex
-        payload = _request_payload(request_id, method, job)
+        payload = _request_payload(
+            request_id,
+            method,
+            job,
+            timeout_ms=timeout_ms,
+            require_immediate_admission=require_immediate_admission,
+        )
         writer: asyncio.StreamWriter | None = None
         try:
             async with asyncio.timeout(_request_timeout_seconds(timeout_ms, self.timeout_seconds)):
@@ -491,8 +509,19 @@ class SyncRuntimeClient:
             raise RuntimeClientError("runtime returned an invalid health result")
         return result
 
-    def execute(self, job: dict[str, Any], *, timeout_ms: int | None = None) -> Any:
-        return self._request("execute", job=job, timeout_ms=timeout_ms)
+    def execute(
+        self,
+        job: dict[str, Any],
+        *,
+        timeout_ms: int | None = None,
+        require_immediate_admission: bool = False,
+    ) -> Any:
+        return self._request(
+            "execute",
+            job=job,
+            timeout_ms=timeout_ms,
+            require_immediate_admission=require_immediate_admission,
+        )
 
     def get_device_info(
         self,
@@ -585,6 +614,7 @@ class SyncRuntimeClient:
         port: int = 6036,
         channel: int = 0,
         timeout_ms: int | None = None,
+        require_immediate_admission: bool = False,
     ) -> RuntimeSnapshot:
         """Capture one bounded JPEG through the reusable recorder session."""
         if isinstance(channel, bool) or not isinstance(channel, int) or not 0 <= channel <= 255:
@@ -596,6 +626,7 @@ class SyncRuntimeClient:
             username,
             password,
             timeout_ms=timeout_ms,
+            require_immediate_admission=require_immediate_admission,
             channel=channel,
         )
         return RuntimeSnapshot(image=_parse_snapshot(result), channel=channel)
@@ -641,6 +672,7 @@ class SyncRuntimeClient:
         password: str,
         *,
         timeout_ms: int | None,
+        require_immediate_admission: bool = False,
         **options: Any,
     ) -> Any:
         job = {
@@ -648,9 +680,12 @@ class SyncRuntimeClient:
             "credentials": _device_credentials(host, port, username, password),
             **options,
         }
-        if timeout_ms is None:
-            return self.execute(job)
-        return self.execute(job, timeout_ms=timeout_ms)
+        execute_options: dict[str, Any] = {}
+        if timeout_ms is not None:
+            execute_options["timeout_ms"] = timeout_ms
+        if require_immediate_admission:
+            execute_options["require_immediate_admission"] = True
+        return self.execute(job, **execute_options)
 
     def get_platform_inventory(
         self,
@@ -801,6 +836,7 @@ class SyncRuntimeClient:
         *,
         job: dict[str, Any] | None = None,
         timeout_ms: int | None = None,
+        require_immediate_admission: bool = False,
     ) -> Any:
         request_id = uuid.uuid4().hex
         request_timeout_seconds = _request_timeout_seconds(
@@ -812,6 +848,7 @@ class SyncRuntimeClient:
             method,
             job,
             timeout_ms=timeout_ms,
+            require_immediate_admission=require_immediate_admission,
         )
         deadline = time.monotonic() + request_timeout_seconds
 
@@ -853,6 +890,7 @@ def _request_payload(
     job: dict[str, Any] | None,
     *,
     timeout_ms: int | None = None,
+    require_immediate_admission: bool = False,
 ) -> bytes:
     request: dict[str, Any] = {
         "protocol": RUNTIME_PROTOCOL_VERSION,
@@ -864,6 +902,8 @@ def _request_payload(
     if timeout_ms is not None:
         _request_timeout_seconds(timeout_ms, 0)
         request["timeoutMilliseconds"] = timeout_ms
+    if require_immediate_admission:
+        request["admission"] = "immediate"
     payload = json.dumps(request, separators=(",", ":")).encode()
     if len(payload) > MAX_RUNTIME_REQUEST_BYTES:
         raise RuntimeClientError("runtime request exceeds configured byte limit")

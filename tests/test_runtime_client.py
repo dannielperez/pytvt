@@ -41,6 +41,48 @@ def test_request_envelope_carries_explicit_operation_deadline() -> None:
     assert json.loads(payload)["timeoutMilliseconds"] == 3_000
 
 
+def test_request_envelope_carries_immediate_admission_intent() -> None:
+    payload = _request_payload(
+        "request-1",
+        "execute",
+        {"operation": "snapshot"},
+        require_immediate_admission=True,
+    )
+
+    assert json.loads(payload)["admission"] == "immediate"
+
+
+def test_snapshot_forwards_immediate_admission_without_exposing_protocol_shape() -> None:
+    captured: dict = {}
+
+    class Client(SyncRuntimeClient):
+        def execute(
+            self,
+            job,
+            *,
+            timeout_ms=None,
+            require_immediate_admission=False,
+        ):
+            captured.update(job)
+            captured["timeout_ms"] = timeout_ms
+            captured["require_immediate_admission"] = require_immediate_admission
+            return base64.b64encode(b"\xff\xd8frame\xff\xd9").decode()
+
+    result = Client().capture_snapshot(
+        "192.0.2.10",
+        "operator",
+        "secret",
+        channel=6,
+        timeout_ms=3_000,
+        require_immediate_admission=True,
+    )
+
+    assert result.image == b"\xff\xd8frame\xff\xd9"
+    assert captured["channel"] == 6
+    assert captured["timeout_ms"] == 3_000
+    assert captured["require_immediate_admission"] is True
+
+
 def test_response_rejects_server_without_matching_protocol() -> None:
     response = b'{"id":"request-1","ok":true,"result":{}}\n'
 
