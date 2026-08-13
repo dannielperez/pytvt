@@ -1340,12 +1340,22 @@ def _parse_response(response_bytes: bytes, request_id: str) -> Any:
         response = json.loads(response_bytes)
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise RuntimeClientError("runtime returned invalid JSON") from exc
-    if (
-        not isinstance(response, dict)
-        or response.get("protocol") != RUNTIME_PROTOCOL_VERSION
-        or response.get("id") != request_id
-        or not isinstance(response.get("ok"), bool)
-    ):
+    if not isinstance(response, dict) or response.get("id") != request_id:
+        raise RuntimeClientError("runtime returned an invalid response envelope")
+    protocol = response.get("protocol")
+    if protocol != RUNTIME_PROTOCOL_VERSION:
+        error = response.get("error")
+        if (
+            isinstance(protocol, int)
+            and not isinstance(protocol, bool)
+            and response.get("ok") is False
+            and isinstance(error, dict)
+            and error.get("kind") == "protocol_mismatch"
+            and isinstance(error.get("message"), str)
+        ):
+            raise RuntimeRemoteError("protocol_mismatch", error["message"])
+        raise RuntimeClientError("runtime returned an invalid response envelope")
+    if not isinstance(response.get("ok"), bool):
         raise RuntimeClientError("runtime returned an invalid response envelope")
     if response["ok"]:
         return response.get("result")
