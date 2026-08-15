@@ -16,6 +16,12 @@ from enum import Enum
 
 # ── Exceptions ───────────────────────────────────────────────────────
 
+# Generic NVR "unsupported by this firmware" status, reused across several
+# API endpoints (login's nonce challenge, face search, and other queries).
+# See NvrXmlApiClient.login()/`_login_legacy()` for the one context where it
+# is *not* fatal — everywhere else it means the call is not supported.
+LEGACY_FIRMWARE_ERROR_CODES = frozenset({"536870934"})
+
 
 class NvrApiError(Exception):
     """Raised when the NVR web API returns an error."""
@@ -23,6 +29,15 @@ class NvrApiError(Exception):
     def __init__(self, message: str, error_code: str | None = None) -> None:
         super().__init__(message)
         self.error_code = error_code
+
+    @property
+    def legacy_firmware(self) -> bool:
+        """Whether this error indicates a legacy firmware/unsupported-API response.
+
+        Callers should treat this as a stable, typed signal instead of
+        comparing ``error_code`` against the vendor's raw numeric code.
+        """
+        return self.error_code in LEGACY_FIRMWARE_ERROR_CODES
 
     @property
     def retryable(self) -> bool:

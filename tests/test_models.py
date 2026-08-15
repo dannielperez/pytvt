@@ -201,3 +201,12 @@ class TestNvrApiError:
                 return True
 
         assert TransientNvrApiError("try again").retryable is True
+
+    def test_without_error_code_is_not_legacy_firmware(self):
+        assert NvrApiError("boom").legacy_firmware is False
+
+    def test_unrelated_error_code_is_not_legacy_firmware(self):
+        assert NvrApiError("boom", "536870962").legacy_firmware is False
+
+    def test_legacy_firmware_error_code_is_legacy_firmware(self):
+        assert NvrApiError("no nonce", "536870934").legacy_firmware is True
