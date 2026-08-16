@@ -34,6 +34,7 @@ RUNTIME_PROTOCOL_VERSION = 2
 DEFAULT_RUNTIME_SOCKET_PATH = Path("/run/pytvt-runtime/runtime.sock")
 DEFAULT_RUNTIME_TIMEOUT_MS = 30_000
 DEFAULT_PLATFORM_RUNTIME_TIMEOUT_MS = 60_000
+RUNTIME_RESPONSE_GRACE_MS = 1_000
 MAX_RUNTIME_REQUEST_BYTES = 64 * 1024
 # The runtime caps a PlatformSDK worker/server response at 32 MiB. Leave a
 # fixed envelope margin so a maximum-sized result still fits the framed reply.
@@ -83,6 +84,13 @@ class RuntimeRemoteError(RuntimeClientError):
         self.kind = kind
         self.retry_after_seconds = retry_after_seconds
         super().__init__(message)
+
+
+class RuntimeOperationTimeoutError(RuntimeRemoteError):
+    """The runtime stopped an admitted native operation at its deadline."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__("operation_timeout", message)
 
 
 @dataclass(frozen=True)
@@ -471,7 +479,7 @@ class RuntimeClient:
         )
         writer: asyncio.StreamWriter | None = None
         try:
-            async with asyncio.timeout(_request_timeout_seconds(timeout_ms, self.timeout_seconds)):
+            async with asyncio.timeout(_exchange_timeout_seconds(timeout_ms, self.timeout_seconds)):
                 reader, writer = await asyncio.open_unix_connection(
                     self.socket_path,
                     limit=MAX_RUNTIME_RESPONSE_BYTES,
@@ -839,7 +847,7 @@ class SyncRuntimeClient:
         require_immediate_admission: bool = False,
     ) -> Any:
         request_id = uuid.uuid4().hex
-        request_timeout_seconds = _request_timeout_seconds(
+        request_timeout_seconds = _exchange_timeout_seconds(
             timeout_ms,
             self.timeout_seconds,
         )
@@ -916,6 +924,21 @@ def _request_timeout_seconds(timeout_ms: int | None, fallback: float) -> float:
     if isinstance(timeout_ms, bool) or not isinstance(timeout_ms, int) or not 1_000 <= timeout_ms <= 60_000:
         raise ValueError("runtime request timeout must be between 1000 and 60000 milliseconds")
     return timeout_ms / 1000
+
+
+def _exchange_timeout_seconds(timeout_ms: int | None, fallback: float) -> float:
+    """Leave the local runtime time to serialize a typed deadline outcome.
+
+    ``timeoutMilliseconds`` bounds admission plus native execution.  The Unix
+    socket exchange needs a small, non-vendor grace after that deadline so the
+    runtime can abort/reap the affected worker and return ``operation_timeout``
+    instead of the client racing it and collapsing the outcome into a generic
+    socket timeout.
+    """
+    operation_seconds = _request_timeout_seconds(timeout_ms, fallback)
+    if timeout_ms is None:
+        return operation_seconds
+    return operation_seconds + RUNTIME_RESPONSE_GRACE_MS / 1000
 
 
 def _device_credentials(host: str, port: int, username: str, password: str) -> dict[str, Any]:
@@ -1367,6 +1390,8 @@ def _parse_response(response_bytes: bytes, request_id: str) -> Any:
     if not isinstance(kind, str) or not isinstance(message, str):
         raise RuntimeClientError("runtime returned an invalid error envelope")
     retry_after = response.get("retry_after_seconds")
+    if kind == "operation_timeout":
+        raise RuntimeOperationTimeoutError(message)
     raise RuntimeRemoteError(
         kind,
         message,
