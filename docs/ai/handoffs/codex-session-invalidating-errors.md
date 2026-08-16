@@ -12,7 +12,7 @@
 
 ## Validation
 
-- Full pytest: 1,327 passed.
+- Full pytest: 1,332 passed.
 - Ruff check and format check: passed.
 - Package guardrails: passed using public PyPI because the configured private
   package index rejected isolated-build authentication.
