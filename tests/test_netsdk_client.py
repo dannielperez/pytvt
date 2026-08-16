@@ -737,6 +737,37 @@ class TestNetSdkError:
         err = NetSdkError("unknown", 999)
         assert "999" in str(err)
 
+    @pytest.mark.parametrize(
+        "code",
+        [
+            SdkError.PASSWORD_ERROR,
+            SdkError.NETWORK_NOT_CONNECT,
+            SdkError.NETWORK_SEND_ERROR,
+            SdkError.NETWORK_RECV_TIMEOUT,
+        ],
+    )
+    def test_session_failures_require_a_fresh_handle(self, code):
+        assert NetSdkError("session failed", code).invalidates_session is True
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            SdkError.CHANNEL_ERROR,
+            SdkError.PARAMETER_ERROR,
+            SdkError.NOSUPPORT,
+            SdkError.BUSY,
+            SdkError.DVR_OPRATE_FAILED,
+        ],
+    )
+    def test_operation_failures_preserve_the_authenticated_handle(self, code):
+        assert NetSdkError("operation failed", code).invalidates_session is False
+
+    def test_local_failure_without_vendor_code_preserves_the_authenticated_handle(self):
+        assert NetSdkError("snapshot exceeds configured byte limit").invalidates_session is False
+
+    def test_unknown_vendor_code_fails_closed(self):
+        assert NetSdkError("unknown", 999).invalidates_session is True
+
 
 # ── Dataclass construction ──────────────────────────────────────────
 
