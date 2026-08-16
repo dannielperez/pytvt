@@ -16,9 +16,9 @@ import pytest
 from pytvt.platform_sdk import platform_constants as pc
 from pytvt.platform_sdk.exceptions import (
     CapabilityNotAvailable,
+    PlatformOperationError,
     ProtocolError,
     SessionExpired,
-    TransportError,
 )
 from pytvt.platform_sdk.platform_backend import (
     PlatformSDKClient,
@@ -260,8 +260,39 @@ class TestPlatformJpegCapture:
         assert function.calls == []
 
     def test_capture_surfaces_sdk_failure_without_credentials(self) -> None:
-        with pytest.raises(TransportError, match=r"node_offline \[12\]"):
+        with pytest.raises(PlatformOperationError, match=r"node_offline \[12\]") as excinfo:
             self._client(_FakeCaptureFunction(b"", succeeds=False), last_error=12).capture_jpeg(self.GUID)
+        assert excinfo.value.code == pc.PLAT_ERROR_NODE_NET_OFFLINE
+        assert excinfo.value.invalidates_session is False
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            pc.PLAT_ERROR_NODE_NET_DISCONNECT,
+            pc.PLAT_ERROR_NODE_NET_OFFLINE,
+            pc.PLAT_ERROR_INVALID_PARAM,
+            pc.PLAT_ERROR_NO_SUPPORT,
+            pc.PLAT_ERROR_DEVICE_BUSY,
+            pc.PLAT_ERROR_BUFFER_TOO_SMALL,
+        ],
+    )
+    def test_reviewed_operation_failures_preserve_platform_login(self, code: int) -> None:
+        assert PlatformOperationError("capture failed", code).invalidates_session is False
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            None,
+            999,
+            pc.PLAT_ERROR_NOINIT,
+            pc.PLAT_ERROR_NO_LOGIN,
+            pc.PLAT_ERROR_PASSWORD,
+            pc.PLAT_ERROR_FAIL_CONNECT,
+            pc.PLAT_ERROR_TIMEOUT,
+        ],
+    )
+    def test_session_or_ambiguous_failures_invalidate_platform_login(self, code: int | None) -> None:
+        assert PlatformOperationError("capture failed", code).invalidates_session is True
 
     @pytest.mark.parametrize(
         ("image", "returned"),

@@ -45,6 +45,7 @@ from .exceptions import (
     CapabilityNotAvailable,
     ManagementAuthError,
     ManagementNotAuthenticatedError,
+    PlatformOperationError,
     ProtocolError,
     SessionExpired,
     TransportError,
@@ -860,7 +861,10 @@ class PlatformSDKClient:
             ct.byref(returned),
         ):
             error_code = self._last_error()
-            raise TransportError(f"Plat_CaptureJpgPictureDataEx returned failure{self._reason_suffix(error_code)}")
+            raise PlatformOperationError(
+                f"Plat_CaptureJpgPictureDataEx returned failure{self._reason_suffix(error_code)}",
+                error_code,
+            )
 
         byte_count = returned.value
         if not 0 < byte_count <= max_image_bytes:

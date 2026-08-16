@@ -30,8 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Persistent PlatformSDK JPEG capture.** `ManagementClient.capture_jpeg()`
   binds `Plat_CaptureJpgPictureDataEx`, addresses a channel by its platform
   GUID, and reuses the active management-server login. Buffer size and JPEG
-  framing are validated; callers must retain process isolation because the
-  synchronous vendor call has no cancellation primitive.
+  framing are validated, and typed operation failures distinguish channel-local
+  errors that preserve the shared login from session-invalidating failures.
+  Callers must retain process isolation because the synchronous vendor call has
+  no cancellation primitive.
 
 - **Typed direct-login credential rejection** (`device_sdk`).
   `NetSdkClient.login()` now raises `NetSdkCredentialRejectedError` when the

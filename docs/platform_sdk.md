@@ -57,6 +57,12 @@ GUID already returned by resource inventory. It does not open a per-device
 session. The returned byte buffer is bounded (8 MiB by default, 16 MiB maximum)
 and must contain a complete JPEG.
 
+Native failures carry an `invalidates_session` classification. Reviewed
+channel-local errors (offline/disconnected channel, invalid parameter,
+unsupported operation, busy device, or small output buffer) preserve the shared
+login; authentication, initialization, connection, timeout, missing, and unknown
+errors fail closed so the runtime can recycle the worker.
+
 The vendor call is synchronous and has no cancellation API. Production callers
 must invoke it through a recyclable process boundary with an absolute deadline;
 calling it from a Django request or long-lived Celery process is unsupported.

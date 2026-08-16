@@ -4,6 +4,15 @@ from __future__ import annotations
 
 from pytvt.exceptions import PytvtError
 
+from .platform_constants import (
+    PLAT_ERROR_BUFFER_TOO_SMALL,
+    PLAT_ERROR_DEVICE_BUSY,
+    PLAT_ERROR_INVALID_PARAM,
+    PLAT_ERROR_NO_SUPPORT,
+    PLAT_ERROR_NODE_NET_DISCONNECT,
+    PLAT_ERROR_NODE_NET_OFFLINE,
+)
+
 
 class ManagementError(PytvtError):
     """Base class for management-server related failures."""
@@ -34,6 +43,37 @@ class ManagementNotAuthenticatedError(ManagementError):
 
 class TransportError(ManagementError):
     """Raised when a network-level send/receive operation fails."""
+
+
+_SESSION_PRESERVING_PLATFORM_ERRORS = frozenset(
+    {
+        PLAT_ERROR_NODE_NET_DISCONNECT,
+        PLAT_ERROR_NODE_NET_OFFLINE,
+        PLAT_ERROR_INVALID_PARAM,
+        PLAT_ERROR_NO_SUPPORT,
+        PLAT_ERROR_DEVICE_BUSY,
+        PLAT_ERROR_BUFFER_TOO_SMALL,
+    }
+)
+
+
+class PlatformOperationError(TransportError):
+    """A PlatformSDK operation failure with explicit session validity."""
+
+    def __init__(self, message: str, code: int | None = None) -> None:
+        self.code = code
+        super().__init__(message)
+
+    @property
+    def invalidates_session(self) -> bool:
+        """Whether a pooled PlatformSDK login must be discarded.
+
+        Only reviewed channel/operation-local errors preserve the shared
+        platform login. Missing, unknown, auth, init, connection, and timeout
+        failures remain fail-closed.
+        """
+
+        return self.code not in _SESSION_PRESERVING_PLATFORM_ERRORS
 
 
 class ProtocolError(ManagementError):
