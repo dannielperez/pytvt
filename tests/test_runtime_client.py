@@ -13,8 +13,10 @@ from pytvt.device_sdk import PlateSource
 from pytvt.runtime_client import (
     RUNTIME_PROTOCOL_VERSION,
     RuntimeClientError,
+    RuntimeOperationTimeoutError,
     RuntimeRemoteError,
     SyncRuntimeClient,
+    _exchange_timeout_seconds,
     _parse_response,
     _request_payload,
 )
@@ -39,6 +41,11 @@ def test_request_envelope_carries_explicit_operation_deadline() -> None:
     )
 
     assert json.loads(payload)["timeoutMilliseconds"] == 3_000
+
+
+def test_explicit_operation_deadline_leaves_bounded_response_grace() -> None:
+    assert _exchange_timeout_seconds(3_000, 30.0) == 4.0
+    assert _exchange_timeout_seconds(None, 30.0) == 30.0
 
 
 def test_request_envelope_carries_immediate_admission_intent() -> None:
@@ -125,6 +132,25 @@ def test_remote_error_preserves_typed_cooldown() -> None:
 
     assert exc_info.value.kind == "login_credential"
     assert exc_info.value.retry_after_seconds == 900
+
+
+def test_operation_timeout_uses_dedicated_typed_error() -> None:
+    response = json.dumps(
+        {
+            "protocol": RUNTIME_PROTOCOL_VERSION,
+            "id": "request-1",
+            "ok": False,
+            "error": {
+                "kind": "operation_timeout",
+                "message": "native operation exceeded its deadline",
+            },
+        }
+    ).encode()
+
+    with pytest.raises(RuntimeOperationTimeoutError) as exc_info:
+        _parse_response(response, "request-1")
+
+    assert exc_info.value.kind == "operation_timeout"
 
 
 def test_typed_device_health_reuses_device_info_operation() -> None:
