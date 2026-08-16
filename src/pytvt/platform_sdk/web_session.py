@@ -227,12 +227,23 @@ class WebSession:
             "token": "",
             "sessionId": session_id,
         }
-        do_env = self._exchange(DO_LOGIN_PATH, form=form)
+        # The shipped jQuery client stores the reqLogin token before issuing
+        # doLogin, and its global ajaxSetup sends that value in the ``token``
+        # header. Tomcat rejects doLogin with HTTP 400 when the header is
+        # absent, before credentials are evaluated. Stage the token for this
+        # second handshake request, but clear all partial session state on any
+        # transport, protocol, or authentication failure.
+        self._token = token
+        try:
+            do_env = self._exchange(DO_LOGIN_PATH, form=form)
+        except BaseException:
+            self._reset()
+            raise
         if not do_env.ok:
+            self._reset()
             hint = _LOGIN_ERROR_HINTS.get(do_env.error_code or "", "login rejected")
             raise ManagementAuthError(f"doLogin failed: {hint} (errorCode={do_env.error_code!r})")
 
-        self._token = token
         encrypted_auth_id = do_env.content.get("authId", "")
         self._auth_id = (
             web_crypto.decrypt_auth_id_from_md5(encrypted_auth_id, self._password_md5) if encrypted_auth_id else None

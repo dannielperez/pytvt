@@ -210,6 +210,7 @@ class TestLogin:
         # sessionId braces are stripped; token form field is empty by protocol
         assert do_login["sessionId"] == "SESS-1"
         assert do_login["token"] == ""
+        assert transport.requests[1].headers["token"] == "tok-1"
         assert session.authenticated
 
     def test_login_decrypts_auth_id_and_stores_user_id(self):
@@ -229,6 +230,21 @@ class TestLogin:
         session = WebSession("nvms.example", USERNAME, PASSWORD, transport=transport)
         with pytest.raises(ManagementAuthError, match="account locked"):
             session.login()
+        assert not session.authenticated
+
+    def test_do_login_transport_failure_clears_staged_token(self):
+        transport = FakeTransport(
+            script=[
+                ok_response(req_login_xml()),
+                TransportError("doLogin failed"),
+            ]
+        )
+        session = WebSession("nvms.example", USERNAME, PASSWORD, transport=transport)
+
+        with pytest.raises(TransportError, match="doLogin failed"):
+            session.login()
+
+        assert not session.authenticated
 
     def test_req_login_missing_nonce_is_protocol_error(self):
         xml = "<response><status>success</status><content><token>tok-1</token></content></response>"
