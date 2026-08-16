@@ -762,11 +762,24 @@ class TestNetSdkError:
     def test_operation_failures_preserve_the_authenticated_handle(self, code):
         assert NetSdkError("operation failed", code).invalidates_session is False
 
-    def test_local_failure_without_vendor_code_preserves_the_authenticated_handle(self):
-        assert NetSdkError("snapshot exceeds configured byte limit").invalidates_session is False
+    def test_uncoded_failure_fails_closed(self):
+        assert NetSdkError("NET_SDK_Init failed").invalidates_session is True
 
     def test_unknown_vendor_code_fails_closed(self):
         assert NetSdkError("unknown", 999).invalidates_session is True
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            SdkError.COMMAND_TIMEOUT,
+            SdkError.CREATESOCKET_ERROR,
+            SdkError.SOCKETCLOSE_ERROR,
+            SdkError.PROGRAM_EXCEPTION,
+            SdkError.DEVICE_OFFLINE,
+        ],
+    )
+    def test_unreviewed_recognized_failures_fail_closed(self, code):
+        assert NetSdkError("unreviewed failure", code).invalidates_session is True
 
 
 # ── Dataclass construction ──────────────────────────────────────────

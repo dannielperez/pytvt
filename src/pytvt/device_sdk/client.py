@@ -623,34 +623,25 @@ class NetSdkError(Exception):
         through ``NET_SDK_GetLastError``.  Consumers that pool authenticated
         handles must not turn a bad channel, unsupported operation, or local
         file/size failure into an unnecessary logout and four-second relogin.
-        Unknown numeric codes remain fail-closed until their scope is proven.
+        Uncoded, unknown, and recognized-but-unreviewed failures remain
+        fail-closed until their scope is proven.
         """
         if self.code is None:
-            return False
+            return True
         try:
             code = SdkError(self.code)
         except ValueError:
             return True
-        return code in _SESSION_INVALIDATING_SDK_ERRORS
+        return code not in _SESSION_PRESERVING_SDK_ERRORS
 
 
-_SESSION_INVALIDATING_SDK_ERRORS = frozenset(
+_SESSION_PRESERVING_SDK_ERRORS = frozenset(
     {
-        SdkError.PASSWORD_ERROR,
-        SdkError.NOENOUGH_AUTH,
-        SdkError.NOINIT,
-        SdkError.OVER_MAXLINK,
-        SdkError.LOGIN_REFUSED,
-        SdkError.VERSION_NOMATCH,
-        SdkError.NETWORK_FAIL_CONNECT,
-        SdkError.NETWORK_NOT_CONNECT,
-        SdkError.NETWORK_SEND_ERROR,
-        SdkError.NETWORK_RECV_ERROR,
-        SdkError.NETWORK_RECV_TIMEOUT,
-        SdkError.NETWORK_ERRORDATA,
-        SdkError.USERNOTEXIST,
-        SdkError.USER_ERROR_NO_USER,
-        SdkError.USER_ERROR_USER_OR_PASSWORD_IS_NULL,
+        SdkError.CHANNEL_ERROR,
+        SdkError.PARAMETER_ERROR,
+        SdkError.NOSUPPORT,
+        SdkError.BUSY,
+        SdkError.DVR_OPRATE_FAILED,
     }
 )
 

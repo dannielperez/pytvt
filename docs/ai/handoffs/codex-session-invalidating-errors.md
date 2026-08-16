@@ -7,8 +7,8 @@
 - Authentication, initialization, link-limit, version, and network failures
   invalidate the login handle. Channel, parameter, unsupported-operation, busy,
   and recorder-operation failures preserve it.
-- Errors without a native code are local and preserve the handle. Unknown native
-  codes fail closed and invalidate it.
+- Errors without a native code, unknown codes, and recognized-but-unreviewed codes
+  fail closed and invalidate the handle.
 
 ## Validation
 
