@@ -714,6 +714,88 @@ def test_typed_platform_authority_rejects_partial_result() -> None:
         Client().get_platform_authority("nvms.example", "operator", "secret")
 
 
+def test_typed_platform_snapshot_owns_job_schema_and_validates_result() -> None:
+    captured: dict = {}
+    jpeg = b"\xff\xd8platform\xff\xd9"
+
+    class Client(SyncRuntimeClient):
+        def execute(self, job, **kwargs):
+            captured.update(job)
+            captured.update(kwargs)
+            return base64.b64encode(jpeg).decode("ascii")
+
+    result = Client().capture_platform_snapshot(
+        "nvms.example",
+        "operator",
+        "secret",
+        "{5C6B7612-011B-0008-AAFD-8D694053D89B}",
+        max_image_bytes=4096,
+        require_immediate_admission=True,
+    )
+
+    assert captured == {
+        "sdkFamily": "platform",
+        "operation": "captureJpeg",
+        "credentials": {
+            "host": "nvms.example",
+            "port": 6003,
+            "username": "operator",
+            "password": "secret",
+        },
+        "channelGuid": "5c6b7612-011b-0008-aafd-8d694053d89b",
+        "maxImageBytes": 4096,
+        "timeout_ms": 60_000,
+        "require_immediate_admission": True,
+    }
+    assert result.image == jpeg
+    assert result.channel_guid == "5c6b7612-011b-0008-aafd-8d694053d89b"
+    assert result.method == "platform_runtime"
+
+
+@pytest.mark.parametrize(
+    ("channel_guid", "max_image_bytes"),
+    [
+        ("not-a-guid", 4096),
+        ("5c6b7612-011b-0008-aafd-8d694053d89b", 0),
+        ("5c6b7612-011b-0008-aafd-8d694053d89b", 16 * 1024 * 1024 + 1),
+    ],
+)
+def test_typed_platform_snapshot_rejects_invalid_request(channel_guid: str, max_image_bytes: int) -> None:
+    with pytest.raises(ValueError):
+        SyncRuntimeClient().capture_platform_snapshot(
+            "nvms.example",
+            "operator",
+            "secret",
+            channel_guid,
+            max_image_bytes=max_image_bytes,
+        )
+
+
+def test_typed_platform_snapshot_rejects_invalid_or_oversized_jpeg() -> None:
+    class Client(SyncRuntimeClient):
+        def __init__(self, result: str) -> None:
+            self.result = result
+
+        def execute(self, _job, **_kwargs):
+            return self.result
+
+    with pytest.raises(RuntimeClientError, match="invalid snapshot"):
+        Client(base64.b64encode(b"not-jpeg").decode("ascii")).capture_platform_snapshot(
+            "nvms.example",
+            "operator",
+            "secret",
+            "5c6b7612-011b-0008-aafd-8d694053d89b",
+        )
+    with pytest.raises(RuntimeClientError, match="invalid snapshot"):
+        Client(base64.b64encode(b"\xff\xd8" + b"x" * 16 + b"\xff\xd9").decode("ascii")).capture_platform_snapshot(
+            "nvms.example",
+            "operator",
+            "secret",
+            "5c6b7612-011b-0008-aafd-8d694053d89b",
+            max_image_bytes=8,
+        )
+
+
 def test_runtime_request_rejects_out_of_range_timeout_before_socket_io() -> None:
     with pytest.raises(ValueError, match="between 1000 and 60000"):
         SyncRuntimeClient().execute({}, timeout_ms=999)

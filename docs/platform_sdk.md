@@ -69,6 +69,11 @@ calling it from a Django request or long-lived Celery process is unsupported.
 The binding and ABI shape are unit-tested but remain marked `🧪 bound` until a
 reference-server capture canary succeeds.
 
+The public async and sync Unix-runtime clients expose the corresponding
+`capture_platform_snapshot(...)` method. They emit only the typed `captureJpeg`
+job schema, validate the returned base64/JPEG against the caller's byte limit,
+and optionally require immediate runtime admission for burst-sensitive work.
+
 ## Not yet reachable
 
 These methods raise `CapabilityNotAvailable` with an explanation.
