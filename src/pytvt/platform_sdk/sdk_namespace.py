@@ -94,6 +94,11 @@ CAPABILITY_SYMBOLS: dict[str, dict[SdkNamespace, str]] = {
     "set_message_callback": {
         SdkNamespace.PLAT: "Plat_SetMessageCBEx",
     },
+    # Platform media operations reuse the authenticated management-server
+    # session and address channels by GUID.
+    "capture_jpeg_data": {
+        SdkNamespace.PLAT: "Plat_CaptureJpgPictureDataEx",
+    },
     # NAT helpers (NET_SDK only)
     "set_nat2_addr": {
         SdkNamespace.NET_SDK: "NET_SDK_SetNat2Addr",

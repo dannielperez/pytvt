@@ -23,7 +23,8 @@ using a threading.Event with a configurable timeout.
 
 Symbol source: nm -D libPlatClientSDK.so | grep " T "
 Confirmed exports: Plat_InitializeEx, Plat_LoginEx, Plat_LogOutEx,
-                   Plat_UnInitializeEx, Plat_SetMessageCBEx (via PlatSDK_Guid)
+                   Plat_UnInitializeEx, Plat_SetMessageCBEx,
+                   Plat_CaptureJpgPictureDataEx (via PlatSDK_Guid)
 """
 
 from __future__ import annotations
@@ -33,6 +34,7 @@ import ctypes as ct
 import logging
 import platform
 import threading
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -43,6 +45,7 @@ from .exceptions import (
     CapabilityNotAvailable,
     ManagementAuthError,
     ManagementNotAuthenticatedError,
+    ProtocolError,
     SessionExpired,
     TransportError,
     UnsupportedOnPlatformError,
@@ -98,6 +101,8 @@ NODETYPE_CHANNEL = 3
 
 # Login timeout (seconds) while waiting for async PLAT_LOGIN_SUCCESS/FAIL
 _LOGIN_TIMEOUT = 15.0
+_DEFAULT_CAPTURE_BUFFER_BYTES = 8 * 1024 * 1024
+_MAX_CAPTURE_BUFFER_BYTES = 16 * 1024 * 1024
 
 # ---------------------------------------------------------------------------
 # ctypes struct definitions (from SDKDefs.h)
@@ -375,6 +380,23 @@ def _guid_to_hex(guid: _GUID_ST) -> str:
 
     data4 = "".join(f"{x:02x}" for x in guid.Data4)
     return f"{guid.Data1:08x}-{guid.Data2:04x}-{guid.Data3:04x}-{data4}"
+
+
+def _guid_from_text(value: str) -> _GUID_ST:
+    """Parse canonical/braced GUID text into the PlatformSDK value struct."""
+
+    if not isinstance(value, str):
+        raise TypeError("channel_guid must be a string")
+    try:
+        parsed = uuid.UUID(value.strip().strip("{}"))
+    except (AttributeError, ValueError) as exc:
+        raise ValueError("channel_guid must be a valid GUID") from exc
+    return _GUID_ST(
+        Data1=parsed.time_low,
+        Data2=parsed.time_mid,
+        Data3=parsed.time_hi_version,
+        Data4=(ct.c_ubyte * 8)(*parsed.bytes[8:]),
+    )
 
 
 def _decode_cstr(raw: bytes, *, encoding: str = "utf-8") -> str:
@@ -793,6 +815,60 @@ class PlatformSDKClient:
                 )
             )
         return statuses
+
+    def capture_jpeg(
+        self,
+        channel_guid: str,
+        *,
+        max_image_bytes: int = _DEFAULT_CAPTURE_BUFFER_BYTES,
+    ) -> bytes:
+        """Capture one channel JPEG through the current PlatformSDK login.
+
+        ``Plat_CaptureJpgPictureDataEx`` is synchronous. Callers that need a
+        hard deadline must execute this method behind a recyclable process
+        boundary; the SDK does not expose a cancellation primitive.
+        """
+
+        if not self._authenticated or self._login_id is None:
+            raise SessionExpired("PlatformSDK session not authenticated.")
+        if (
+            isinstance(max_image_bytes, bool)
+            or not isinstance(max_image_bytes, int)
+            or not 1 <= max_image_bytes <= _MAX_CAPTURE_BUFFER_BYTES
+        ):
+            raise ValueError(f"max_image_bytes must be between 1 and {_MAX_CAPTURE_BUFFER_BYTES}")
+
+        guid = _guid_from_text(channel_guid)
+        capture_fn = self._ns.bind_function(
+            "capture_jpeg_data",
+            argtypes=(
+                ct.c_int,
+                _GUID_ST,
+                ct.c_void_p,
+                ct.c_int,
+                ct.POINTER(ct.c_int),
+            ),
+            restype=ct.c_bool,
+        )
+        buffer = ct.create_string_buffer(max_image_bytes)
+        returned = ct.c_int(0)
+        if not capture_fn(
+            self._login_id,
+            guid,
+            buffer,
+            max_image_bytes,
+            ct.byref(returned),
+        ):
+            error_code = self._last_error()
+            raise TransportError(f"Plat_CaptureJpgPictureDataEx returned failure{self._reason_suffix(error_code)}")
+
+        byte_count = returned.value
+        if not 0 < byte_count <= max_image_bytes:
+            raise ProtocolError(f"Plat_CaptureJpgPictureDataEx returned an invalid image length ({byte_count} bytes)")
+        image = buffer.raw[:byte_count]
+        if not image.startswith(b"\xff\xd8") or not image.endswith(b"\xff\xd9"):
+            raise ProtocolError("Plat_CaptureJpgPictureDataEx returned invalid JPEG data")
+        return image
 
     def list_resources(self) -> list[dict[str, Any]]:
         """Return raw resource nodes accumulated from MSGTYPE_RESLIST_NTF."""
@@ -1385,6 +1461,9 @@ class PlatformSdkManagementBackend(BaseManagementBackend):
 
     def get_device_statuses(self) -> list[DeviceStatus]:
         return self._require_session().get_device_statuses()
+
+    def capture_jpeg(self, channel_guid: str, *, max_image_bytes: int = _DEFAULT_CAPTURE_BUFFER_BYTES) -> bytes:
+        return self._require_session().capture_jpeg(channel_guid, max_image_bytes=max_image_bytes)
 
     def subscribe_alarms(self) -> AlarmSubscription:
         return self._require_session().subscribe_alarms()

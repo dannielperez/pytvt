@@ -8,6 +8,7 @@ They exercise only the pure-Python parsing / normalization code paths in
 
 from __future__ import annotations
 
+import ctypes as ct
 from unittest.mock import MagicMock
 
 import pytest
@@ -15,11 +16,14 @@ import pytest
 from pytvt.platform_sdk import platform_constants as pc
 from pytvt.platform_sdk.exceptions import (
     CapabilityNotAvailable,
+    ProtocolError,
     SessionExpired,
+    TransportError,
 )
 from pytvt.platform_sdk.platform_backend import (
     PlatformSDKClient,
     PlatformSdkManagementBackend,
+    _guid_from_text,
     _PlatSessionState,
     _resource_to_model,
 )
@@ -176,6 +180,103 @@ class TestResourceNormalization:
         model = _resource_to_model(self._raw(nNodeType=99, nDevType=55))
         assert model.node_type_name == "unknown"
         assert model.device_type_name == "unknown"
+
+
+class _FakeCaptureFunction:
+    def __init__(self, image: bytes, *, succeeds: bool = True, returned: int | None = None) -> None:
+        self.image = image
+        self.succeeds = succeeds
+        self.returned = len(image) if returned is None else returned
+        self.argtypes = None
+        self.restype = None
+        self.calls: list[tuple[object, ...]] = []
+
+    def __call__(self, *args: object) -> bool:
+        self.calls.append(args)
+        if self.succeeds:
+            _login_id, _guid, buffer, buffer_size, returned_ptr = args
+            ct.memmove(buffer, self.image, min(len(self.image), int(buffer_size)))
+            ct.cast(returned_ptr, ct.POINTER(ct.c_int))[0] = self.returned
+        return self.succeeds
+
+
+class _FakeCaptureNs:
+    def __init__(self, function: _FakeCaptureFunction, *, last_error: int | None = 0) -> None:
+        self.function = function
+        self.last_error = last_error
+        self.bind_calls: list[tuple[str, dict[str, object]]] = []
+
+    def bind_function(self, capability: str, **kwargs: object) -> _FakeCaptureFunction:
+        self.bind_calls.append((capability, kwargs))
+        self.function.argtypes = kwargs.get("argtypes")
+        self.function.restype = kwargs.get("restype")
+        return self.function
+
+    def call_get_last_error(self) -> int | None:
+        return self.last_error
+
+
+class TestPlatformJpegCapture:
+    JPEG = b"\xff\xd8platform-jpeg\xff\xd9"
+    GUID = "5c6b7612-011b-0008-aafd-8d694053d89b"
+
+    def _client(self, function: _FakeCaptureFunction, *, last_error: int | None = 0) -> PlatformSDKClient:
+        client = PlatformSDKClient(_FakeCaptureNs(function, last_error=last_error), "1.2.3.4", 6003)
+        client._login_id = 73
+        client._authenticated = True
+        return client
+
+    def test_guid_parser_matches_sdk_field_layout(self) -> None:
+        guid = _guid_from_text("{5C6B7612-011B-0008-AAFD-8D694053D89B}")
+        assert guid.Data1 == 0x5C6B7612
+        assert guid.Data2 == 0x011B
+        assert guid.Data3 == 0x0008
+        assert bytes(guid.Data4) == bytes.fromhex("aafd8d694053d89b")
+
+    def test_capture_reuses_authenticated_login_and_returns_bounded_jpeg(self) -> None:
+        function = _FakeCaptureFunction(self.JPEG)
+        client = self._client(function)
+
+        assert client.capture_jpeg(self.GUID, max_image_bytes=1024) == self.JPEG
+
+        login_id, guid, _buffer, buffer_size, _returned = function.calls[0]
+        assert login_id == 73
+        assert guid.Data1 == 0x5C6B7612
+        assert buffer_size == 1024
+        assert client._ns.bind_calls[0][0] == "capture_jpeg_data"
+
+    @pytest.mark.parametrize("value", [0, -1, True, 16 * 1024 * 1024 + 1])
+    def test_capture_rejects_unsafe_buffer_sizes(self, value: object) -> None:
+        with pytest.raises(ValueError, match="max_image_bytes"):
+            self._client(_FakeCaptureFunction(self.JPEG)).capture_jpeg(
+                self.GUID,
+                max_image_bytes=value,  # type: ignore[arg-type]
+            )
+
+    def test_capture_rejects_invalid_guid_before_sdk_call(self) -> None:
+        function = _FakeCaptureFunction(self.JPEG)
+        with pytest.raises(ValueError, match="channel_guid"):
+            self._client(function).capture_jpeg("not-a-guid")
+        assert function.calls == []
+
+    def test_capture_surfaces_sdk_failure_without_credentials(self) -> None:
+        with pytest.raises(TransportError, match=r"node_offline \[12\]"):
+            self._client(_FakeCaptureFunction(b"", succeeds=False), last_error=12).capture_jpeg(self.GUID)
+
+    @pytest.mark.parametrize(
+        ("image", "returned"),
+        [
+            (b"not-jpeg", None),
+            (JPEG, 0),
+            (JPEG, 1025),
+        ],
+    )
+    def test_capture_rejects_invalid_sdk_output(self, image: bytes, returned: int | None) -> None:
+        with pytest.raises(ProtocolError):
+            self._client(_FakeCaptureFunction(image, returned=returned)).capture_jpeg(
+                self.GUID,
+                max_image_bytes=1024,
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -618,3 +719,8 @@ class TestLastErrorSymbolWiring:
         from pytvt.platform_sdk.sdk_namespace import CAPABILITY_SYMBOLS, SdkNamespace
 
         assert CAPABILITY_SYMBOLS["get_last_error"][SdkNamespace.NET_SDK] == "NET_SDK_GetLastError"
+
+    def test_platform_capture_maps_the_exported_symbol(self) -> None:
+        from pytvt.platform_sdk.sdk_namespace import CAPABILITY_SYMBOLS, SdkNamespace
+
+        assert CAPABILITY_SYMBOLS["capture_jpeg_data"][SdkNamespace.PLAT] == "Plat_CaptureJpgPictureDataEx"
