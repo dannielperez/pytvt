@@ -43,6 +43,7 @@ MAX_RUNTIME_REQUEST_BYTES = 64 * 1024
 # fixed envelope margin so a maximum-sized result still fits the framed reply.
 MAX_RUNTIME_RESPONSE_BYTES = 34 * 1024 * 1024
 MAX_RUNTIME_SNAPSHOT_BYTES = 25 * 1024 * 1024
+MAX_PLATFORM_RUNTIME_SNAPSHOT_BYTES = 16 * 1024 * 1024
 MAX_RUNTIME_RTSP_URL_BYTES = 4096
 MAX_FACE_BATCH_ITEMS = 100
 MAX_FACE_BATCH_BYTES = 12 * 1024 * 1024
@@ -164,6 +165,15 @@ class RuntimeSnapshot:
     image: bytes
     channel: int
     method: str = "runtime"
+
+
+@dataclass(frozen=True)
+class RuntimePlatformSnapshot:
+    """One bounded JPEG captured through the persistent PlatformSDK login."""
+
+    image: bytes
+    channel_guid: str
+    method: str = "platform_runtime"
 
 
 @dataclass(frozen=True)
@@ -466,6 +476,38 @@ class RuntimeClient:
         )
         return _parse_platform_authority(result)
 
+    async def capture_platform_snapshot(
+        self,
+        host: str,
+        username: str,
+        password: str,
+        channel_guid: str,
+        *,
+        port: int = 6003,
+        max_image_bytes: int = 8 * 1024 * 1024,
+        timeout_ms: int = DEFAULT_PLATFORM_RUNTIME_TIMEOUT_MS,
+        require_immediate_admission: bool = False,
+    ) -> RuntimePlatformSnapshot:
+        """Capture one channel JPEG through the persistent PlatformSDK worker."""
+
+        job, normalized_guid = _platform_snapshot_job(
+            host,
+            port,
+            username,
+            password,
+            channel_guid,
+            max_image_bytes=max_image_bytes,
+        )
+        result = await self.execute(
+            job,
+            timeout_ms=timeout_ms,
+            require_immediate_admission=require_immediate_admission,
+        )
+        return RuntimePlatformSnapshot(
+            image=_parse_snapshot(result, max_bytes=max_image_bytes),
+            channel_guid=normalized_guid,
+        )
+
     async def _request(
         self,
         method: str,
@@ -746,6 +788,38 @@ class SyncRuntimeClient:
             timeout_ms=timeout_ms,
         )
         return _parse_platform_authority(result)
+
+    def capture_platform_snapshot(
+        self,
+        host: str,
+        username: str,
+        password: str,
+        channel_guid: str,
+        *,
+        port: int = 6003,
+        max_image_bytes: int = 8 * 1024 * 1024,
+        timeout_ms: int = DEFAULT_PLATFORM_RUNTIME_TIMEOUT_MS,
+        require_immediate_admission: bool = False,
+    ) -> RuntimePlatformSnapshot:
+        """Capture one channel JPEG through the persistent PlatformSDK worker."""
+
+        job, normalized_guid = _platform_snapshot_job(
+            host,
+            port,
+            username,
+            password,
+            channel_guid,
+            max_image_bytes=max_image_bytes,
+        )
+        result = self.execute(
+            job,
+            timeout_ms=timeout_ms,
+            require_immediate_admission=require_immediate_admission,
+        )
+        return RuntimePlatformSnapshot(
+            image=_parse_snapshot(result, max_bytes=max_image_bytes),
+            channel_guid=normalized_guid,
+        )
 
     def search_face_capture_images(
         self,
@@ -1298,14 +1372,14 @@ def _parse_channel_scan(result: Any, *, max_channels: int) -> RuntimeChannelScan
     )
 
 
-def _parse_snapshot(result: Any) -> bytes:
+def _parse_snapshot(result: Any, *, max_bytes: int = MAX_RUNTIME_SNAPSHOT_BYTES) -> bytes:
     if not isinstance(result, str):
         raise RuntimeClientError("runtime returned an invalid snapshot")
     try:
         image = base64.b64decode(result, validate=True)
     except (binascii.Error, ValueError) as exc:
         raise RuntimeClientError("runtime returned an invalid snapshot") from exc
-    if not image.startswith(b"\xff\xd8") or not image.endswith(b"\xff\xd9") or len(image) > MAX_RUNTIME_SNAPSHOT_BYTES:
+    if not image.startswith(b"\xff\xd8") or not image.endswith(b"\xff\xd9") or len(image) > max_bytes:
         raise RuntimeClientError("runtime returned an invalid snapshot")
     return image
 
@@ -1371,6 +1445,37 @@ def _raise_type_error() -> Any:
 
 def _platform_inventory_job(host: str, port: int, username: str, password: str) -> dict[str, Any]:
     return _platform_job("inventorySnapshot", host, port, username, password)
+
+
+def _platform_snapshot_job(
+    host: str,
+    port: int,
+    username: str,
+    password: str,
+    channel_guid: str,
+    *,
+    max_image_bytes: int,
+) -> tuple[dict[str, Any], str]:
+    if not isinstance(channel_guid, str):
+        raise TypeError("channel_guid must be a string")
+    try:
+        normalized_guid = str(uuid.UUID(channel_guid.strip().strip("{}")))
+    except (AttributeError, ValueError) as exc:
+        raise ValueError("channel_guid must be a valid GUID") from exc
+    if (
+        isinstance(max_image_bytes, bool)
+        or not isinstance(max_image_bytes, int)
+        or not 1 <= max_image_bytes <= MAX_PLATFORM_RUNTIME_SNAPSHOT_BYTES
+    ):
+        raise ValueError(f"max_image_bytes must be between 1 and {MAX_PLATFORM_RUNTIME_SNAPSHOT_BYTES}")
+    return (
+        {
+            **_platform_job("captureJpeg", host, port, username, password),
+            "channelGuid": normalized_guid,
+            "maxImageBytes": max_image_bytes,
+        },
+        normalized_guid,
+    )
 
 
 def _platform_job(

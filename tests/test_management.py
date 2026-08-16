@@ -1077,6 +1077,20 @@ class TestClientRequiresLogin:
         with pytest.raises(ManagementNotAuthenticatedError):
             client.get_server_info()
 
+    def test_platform_capture_delegates_to_active_backend(self):
+        client = ManagementClient("192.168.1.1", backend_mode="platform_sdk")
+        backend = MagicMock()
+        backend.capture_jpeg.return_value = b"\xff\xd8image\xff\xd9"
+        client._backend = backend
+
+        assert client.capture_jpeg("5c6b7612-011b-0008-aafd-8d694053d89b", max_image_bytes=4096) == (
+            b"\xff\xd8image\xff\xd9"
+        )
+        backend.capture_jpeg.assert_called_once_with(
+            "5c6b7612-011b-0008-aafd-8d694053d89b",
+            max_image_bytes=4096,
+        )
+
 
 class TestContextManager:
     def test_context_manager_closes_on_exit(self):

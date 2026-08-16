@@ -39,6 +39,7 @@ guaranteed contract.
 | Resource tree | `list_resources_tree()` | ✅ live | parent/child hierarchy |
 | Find resource by GUID | `find_resource_by_guid()` | ✅ live | |
 | Find resource by name | `find_resource_by_name()` | ✅ live | substring match |
+| Channel JPEG capture | `capture_jpeg(channel_guid)` | 🧪 bound | `Plat_CaptureJpgPictureDataEx`; requires runtime-isolated live validation |
 | All servers (merged) | `list_servers()` | ✅ live | 2 on ref server (1 AI, 1 alarm-host) |
 | Transfer servers | `list_transfer_servers()` | ✅ live | heuristic: connect_events w/o typed callback |
 | Storage servers | `list_storage_servers()` | ✅ live | none deployed on ref server |
@@ -48,6 +49,30 @@ guaranteed contract.
 | Server connect events (raw) | `list_server_connection_events()` | ✅ live | 21 events |
 | Access servers | `list_access_servers()` | ⏸ placeholder | no callback/MSGTYPE exposed in 20250115 |
 | TV-wall servers | `list_tv_wall_servers()` | ⏸ placeholder | goes through XML RPC |
+
+## Native media operations
+
+`capture_jpeg(channel_guid)` uses the active PlatformSDK login and the channel
+GUID already returned by resource inventory. It does not open a per-device
+session. The returned byte buffer is bounded (8 MiB by default, 16 MiB maximum)
+and must contain a complete JPEG.
+
+Native failures carry an `invalidates_session` classification. Reviewed
+channel-local errors (offline/disconnected channel, invalid parameter,
+unsupported operation, busy device, or small output buffer) preserve the shared
+login; authentication, initialization, connection, timeout, missing, and unknown
+errors fail closed so the runtime can recycle the worker.
+
+The vendor call is synchronous and has no cancellation API. Production callers
+must invoke it through a recyclable process boundary with an absolute deadline;
+calling it from a Django request or long-lived Celery process is unsupported.
+The binding and ABI shape are unit-tested but remain marked `🧪 bound` until a
+reference-server capture canary succeeds.
+
+The public async and sync Unix-runtime clients expose the corresponding
+`capture_platform_snapshot(...)` method. They emit only the typed `captureJpeg`
+job schema, validate the returned base64/JPEG against the caller's byte limit,
+and optionally require immediate runtime admission for burst-sensitive work.
 
 ## Not yet reachable
 

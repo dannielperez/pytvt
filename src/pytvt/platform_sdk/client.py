@@ -321,6 +321,15 @@ class ManagementClient:
     def list_channels_normalized(self) -> list[PlatformResource]:
         return self._platform_call("list_channels_normalized")  # type: ignore[return-value]
 
+    def capture_jpeg(self, channel_guid: str, *, max_image_bytes: int = 8 * 1024 * 1024) -> bytes:
+        """Capture one bounded JPEG using the active PlatformSDK session."""
+
+        return self._platform_call(  # type: ignore[return-value]
+            "capture_jpeg",
+            channel_guid,
+            max_image_bytes=max_image_bytes,
+        )
+
     def list_resources_tree(self) -> list[dict[str, object]]:
         return self._platform_call("list_resources_tree")  # type: ignore[return-value]
 
