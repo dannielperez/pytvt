@@ -34,7 +34,10 @@ RUNTIME_PROTOCOL_VERSION = 2
 DEFAULT_RUNTIME_SOCKET_PATH = Path("/run/pytvt-runtime/runtime.sock")
 DEFAULT_RUNTIME_TIMEOUT_MS = 30_000
 DEFAULT_PLATFORM_RUNTIME_TIMEOUT_MS = 60_000
-RUNTIME_RESPONSE_GRACE_MS = 1_000
+# The isolated runtime may spend up to five seconds terminating and reaping a
+# timed-out worker before it can serialize the typed outcome. Keep one second
+# of framing/scheduling margin beyond that runtime-owned cleanup ceiling.
+RUNTIME_RESPONSE_GRACE_MS = 6_000
 MAX_RUNTIME_REQUEST_BYTES = 64 * 1024
 # The runtime caps a PlatformSDK worker/server response at 32 MiB. Leave a
 # fixed envelope margin so a maximum-sized result still fits the framed reply.
@@ -420,12 +423,14 @@ class RuntimeClient:
         job: dict[str, Any],
         *,
         timeout_ms: int | None = None,
+        total_timeout_ms: int | None = None,
         require_immediate_admission: bool = False,
     ) -> Any:
         return await self._request(
             "execute",
             job=job,
             timeout_ms=timeout_ms,
+            total_timeout_ms=total_timeout_ms,
             require_immediate_admission=require_immediate_admission,
         )
 
@@ -467,9 +472,11 @@ class RuntimeClient:
         *,
         job: dict[str, Any] | None = None,
         timeout_ms: int | None = None,
+        total_timeout_ms: int | None = None,
         require_immediate_admission: bool = False,
     ) -> Any:
         request_id = uuid.uuid4().hex
+        timeout_ms = _operation_timeout_ms(timeout_ms, total_timeout_ms)
         payload = _request_payload(
             request_id,
             method,
@@ -479,7 +486,13 @@ class RuntimeClient:
         )
         writer: asyncio.StreamWriter | None = None
         try:
-            async with asyncio.timeout(_exchange_timeout_seconds(timeout_ms, self.timeout_seconds)):
+            async with asyncio.timeout(
+                _exchange_timeout_seconds(
+                    timeout_ms,
+                    self.timeout_seconds,
+                    total_timeout_ms=total_timeout_ms,
+                )
+            ):
                 reader, writer = await asyncio.open_unix_connection(
                     self.socket_path,
                     limit=MAX_RUNTIME_RESPONSE_BYTES,
@@ -522,12 +535,14 @@ class SyncRuntimeClient:
         job: dict[str, Any],
         *,
         timeout_ms: int | None = None,
+        total_timeout_ms: int | None = None,
         require_immediate_admission: bool = False,
     ) -> Any:
         return self._request(
             "execute",
             job=job,
             timeout_ms=timeout_ms,
+            total_timeout_ms=total_timeout_ms,
             require_immediate_admission=require_immediate_admission,
         )
 
@@ -622,6 +637,7 @@ class SyncRuntimeClient:
         port: int = 6036,
         channel: int = 0,
         timeout_ms: int | None = None,
+        total_timeout_ms: int | None = None,
         require_immediate_admission: bool = False,
     ) -> RuntimeSnapshot:
         """Capture one bounded JPEG through the reusable recorder session."""
@@ -634,6 +650,7 @@ class SyncRuntimeClient:
             username,
             password,
             timeout_ms=timeout_ms,
+            total_timeout_ms=total_timeout_ms,
             require_immediate_admission=require_immediate_admission,
             channel=channel,
         )
@@ -680,6 +697,7 @@ class SyncRuntimeClient:
         password: str,
         *,
         timeout_ms: int | None,
+        total_timeout_ms: int | None = None,
         require_immediate_admission: bool = False,
         **options: Any,
     ) -> Any:
@@ -691,6 +709,8 @@ class SyncRuntimeClient:
         execute_options: dict[str, Any] = {}
         if timeout_ms is not None:
             execute_options["timeout_ms"] = timeout_ms
+        if total_timeout_ms is not None:
+            execute_options["total_timeout_ms"] = total_timeout_ms
         if require_immediate_admission:
             execute_options["require_immediate_admission"] = True
         return self.execute(job, **execute_options)
@@ -844,12 +864,15 @@ class SyncRuntimeClient:
         *,
         job: dict[str, Any] | None = None,
         timeout_ms: int | None = None,
+        total_timeout_ms: int | None = None,
         require_immediate_admission: bool = False,
     ) -> Any:
         request_id = uuid.uuid4().hex
+        timeout_ms = _operation_timeout_ms(timeout_ms, total_timeout_ms)
         request_timeout_seconds = _exchange_timeout_seconds(
             timeout_ms,
             self.timeout_seconds,
+            total_timeout_ms=total_timeout_ms,
         )
         payload = _request_payload(
             request_id,
@@ -926,15 +949,34 @@ def _request_timeout_seconds(timeout_ms: int | None, fallback: float) -> float:
     return timeout_ms / 1000
 
 
-def _exchange_timeout_seconds(timeout_ms: int | None, fallback: float) -> float:
+def _operation_timeout_ms(timeout_ms: int | None, total_timeout_ms: int | None) -> int | None:
+    if total_timeout_ms is None:
+        return timeout_ms
+    total_seconds = _request_timeout_seconds(total_timeout_ms, 0)
+    if timeout_ms is None:
+        timeout_ms = int(total_seconds * 1000)
+    else:
+        _request_timeout_seconds(timeout_ms, 0)
+    cleanup_reserved_ms = max(0, total_timeout_ms - RUNTIME_RESPONSE_GRACE_MS)
+    return max(1_000, min(timeout_ms, cleanup_reserved_ms))
+
+
+def _exchange_timeout_seconds(
+    timeout_ms: int | None,
+    fallback: float,
+    *,
+    total_timeout_ms: int | None = None,
+) -> float:
     """Leave the local runtime time to serialize a typed deadline outcome.
 
     ``timeoutMilliseconds`` bounds admission plus native execution.  The Unix
-    socket exchange needs a small, non-vendor grace after that deadline so the
+    socket exchange needs a bounded, non-vendor grace after that deadline so the
     runtime can abort/reap the affected worker and return ``operation_timeout``
     instead of the client racing it and collapsing the outcome into a generic
     socket timeout.
     """
+    if total_timeout_ms is not None:
+        return _request_timeout_seconds(total_timeout_ms, fallback)
     operation_seconds = _request_timeout_seconds(timeout_ms, fallback)
     if timeout_ms is None:
         return operation_seconds

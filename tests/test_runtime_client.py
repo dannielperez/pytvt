@@ -5,7 +5,12 @@ from __future__ import annotations
 import base64
 import json
 import queue
+import socket
+import threading
+import time
+import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 
@@ -17,6 +22,7 @@ from pytvt.runtime_client import (
     RuntimeRemoteError,
     SyncRuntimeClient,
     _exchange_timeout_seconds,
+    _operation_timeout_ms,
     _parse_response,
     _request_payload,
 )
@@ -44,8 +50,56 @@ def test_request_envelope_carries_explicit_operation_deadline() -> None:
 
 
 def test_explicit_operation_deadline_leaves_bounded_response_grace() -> None:
-    assert _exchange_timeout_seconds(3_000, 30.0) == 4.0
+    assert _exchange_timeout_seconds(3_000, 30.0) == 9.0
     assert _exchange_timeout_seconds(None, 30.0) == 30.0
+    assert _operation_timeout_ms(14_000, 14_000) == 8_000
+    assert _operation_timeout_ms(2_000, 2_000) == 1_000
+
+
+def test_typed_timeout_can_arrive_after_worker_reap_delay() -> None:
+    socket_path = Path("/tmp") / f"pytvt-runtime-{uuid.uuid4().hex}.sock"
+    listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    listener.bind(str(socket_path))
+    listener.listen(1)
+    captured_request: dict = {}
+
+    def serve_delayed_timeout() -> None:
+        connection, _ = listener.accept()
+        with connection:
+            request = json.loads(connection.makefile("rb").readline())
+            captured_request.update(request)
+            time.sleep(1.1)
+            connection.sendall(
+                json.dumps(
+                    {
+                        "protocol": RUNTIME_PROTOCOL_VERSION,
+                        "id": request["id"],
+                        "ok": False,
+                        "error": {
+                            "kind": "operation_timeout",
+                            "message": "native operation exceeded its deadline",
+                        },
+                    }
+                ).encode()
+                + b"\n"
+            )
+
+    server = threading.Thread(target=serve_delayed_timeout)
+    server.start()
+    try:
+        with pytest.raises(RuntimeOperationTimeoutError):
+            SyncRuntimeClient(socket_path=socket_path).execute(
+                {},
+                timeout_ms=14_000,
+                total_timeout_ms=14_000,
+            )
+    finally:
+        server.join(timeout=3)
+        listener.close()
+        socket_path.unlink(missing_ok=True)
+
+    assert not server.is_alive()
+    assert captured_request["timeoutMilliseconds"] == 8_000
 
 
 def test_request_envelope_carries_immediate_admission_intent() -> None:
