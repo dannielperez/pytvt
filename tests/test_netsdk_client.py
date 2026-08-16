@@ -737,6 +737,50 @@ class TestNetSdkError:
         err = NetSdkError("unknown", 999)
         assert "999" in str(err)
 
+    @pytest.mark.parametrize(
+        "code",
+        [
+            SdkError.PASSWORD_ERROR,
+            SdkError.NETWORK_NOT_CONNECT,
+            SdkError.NETWORK_SEND_ERROR,
+            SdkError.NETWORK_RECV_TIMEOUT,
+        ],
+    )
+    def test_session_failures_require_a_fresh_handle(self, code):
+        assert NetSdkError("session failed", code).invalidates_session is True
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            SdkError.CHANNEL_ERROR,
+            SdkError.PARAMETER_ERROR,
+            SdkError.NOSUPPORT,
+            SdkError.BUSY,
+            SdkError.DVR_OPRATE_FAILED,
+        ],
+    )
+    def test_operation_failures_preserve_the_authenticated_handle(self, code):
+        assert NetSdkError("operation failed", code).invalidates_session is False
+
+    def test_uncoded_failure_fails_closed(self):
+        assert NetSdkError("NET_SDK_Init failed").invalidates_session is True
+
+    def test_unknown_vendor_code_fails_closed(self):
+        assert NetSdkError("unknown", 999).invalidates_session is True
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            SdkError.COMMAND_TIMEOUT,
+            SdkError.CREATESOCKET_ERROR,
+            SdkError.SOCKETCLOSE_ERROR,
+            SdkError.PROGRAM_EXCEPTION,
+            SdkError.DEVICE_OFFLINE,
+        ],
+    )
+    def test_unreviewed_recognized_failures_fail_closed(self, code):
+        assert NetSdkError("unreviewed failure", code).invalidates_session is True
+
 
 # ── Dataclass construction ──────────────────────────────────────────
 

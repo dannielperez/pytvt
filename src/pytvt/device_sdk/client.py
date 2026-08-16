@@ -615,6 +615,36 @@ class NetSdkError(Exception):
         self.code = code
         super().__init__(f"{message} (error={code})" if code else message)
 
+    @property
+    def invalidates_session(self) -> bool:
+        """Whether this failure makes an authenticated handle unsafe to reuse.
+
+        TVT reports both connection failures and operation-local rejections
+        through ``NET_SDK_GetLastError``.  Consumers that pool authenticated
+        handles must not turn a bad channel, unsupported operation, or local
+        file/size failure into an unnecessary logout and four-second relogin.
+        Uncoded, unknown, and recognized-but-unreviewed failures remain
+        fail-closed until their scope is proven.
+        """
+        if self.code is None:
+            return True
+        try:
+            code = SdkError(self.code)
+        except ValueError:
+            return True
+        return code not in _SESSION_PRESERVING_SDK_ERRORS
+
+
+_SESSION_PRESERVING_SDK_ERRORS = frozenset(
+    {
+        SdkError.CHANNEL_ERROR,
+        SdkError.PARAMETER_ERROR,
+        SdkError.NOSUPPORT,
+        SdkError.BUSY,
+        SdkError.DVR_OPRATE_FAILED,
+    }
+)
+
 
 class NetSdkCredentialRejectedError(NetSdkError):
     """Raised when a recorder explicitly rejects login credentials."""
