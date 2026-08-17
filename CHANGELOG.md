@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Normalize PlatformSDK in-memory JPEG captures that contain only NUL padding
+  after the first JPEG end marker. Non-JPEG, truncated, or non-NUL-tailed
+  buffers still fail closed with payload-free framing diagnostics.
 - Preserve each PlatformSDK resource's canonical `guid` and `parent_guid` in
   normalized inventory snapshots. Consumers can now address channels for
   persistent JPEG capture without inspecting vendor `raw_data` or mistaking a

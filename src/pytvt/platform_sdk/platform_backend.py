@@ -67,6 +67,38 @@ from .sdk_namespace import NamespacedLibrary, SdkNamespace, make_namespaced_libr
 
 logger = logging.getLogger(__name__)
 
+_JPEG_SOI = b"\xff\xd8"
+_JPEG_EOI = b"\xff\xd9"
+
+
+def _normalize_captured_jpeg(image: bytes) -> bytes:
+    """Return one strictly framed JPEG, tolerating only C-buffer NUL padding."""
+
+    if not image.startswith(_JPEG_SOI):
+        raise ProtocolError(
+            f"Plat_CaptureJpgPictureDataEx returned data without a JPEG SOI marker ({len(image)} bytes)",
+        )
+    normalized = image.rstrip(b"\x00")
+    if normalized.endswith(_JPEG_EOI):
+        return normalized
+    eoi_offset = image.rfind(_JPEG_EOI, len(_JPEG_SOI))
+    if eoi_offset < 0:
+        raise ProtocolError(
+            f"Plat_CaptureJpgPictureDataEx returned data without a JPEG EOI marker ({len(image)} bytes)",
+        )
+    jpeg_end = eoi_offset + len(_JPEG_EOI)
+    trailing = image[jpeg_end:]
+    non_nul_trailing = len(trailing) - trailing.count(0)
+    if non_nul_trailing:
+        raise ProtocolError(
+            "Plat_CaptureJpgPictureDataEx returned "
+            f"{non_nul_trailing} non-NUL trailing bytes after the JPEG EOI marker",
+        )
+    raise ProtocolError(
+        "Plat_CaptureJpgPictureDataEx returned invalid JPEG framing after NUL normalization",
+    )
+
+
 # ---------------------------------------------------------------------------
 # SDK-defined constants (from SDKDefs.h)
 # ---------------------------------------------------------------------------
@@ -870,9 +902,7 @@ class PlatformSDKClient:
         if not 0 < byte_count <= max_image_bytes:
             raise ProtocolError(f"Plat_CaptureJpgPictureDataEx returned an invalid image length ({byte_count} bytes)")
         image = buffer.raw[:byte_count]
-        if not image.startswith(b"\xff\xd8") or not image.endswith(b"\xff\xd9"):
-            raise ProtocolError("Plat_CaptureJpgPictureDataEx returned invalid JPEG data")
-        return image
+        return _normalize_captured_jpeg(image)
 
     def list_resources(self) -> list[dict[str, Any]]:
         """Return raw resource nodes accumulated from MSGTYPE_RESLIST_NTF."""

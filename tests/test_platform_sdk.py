@@ -245,6 +245,50 @@ class TestPlatformJpegCapture:
         assert buffer_size == 1024
         assert client._ns.bind_calls[0][0] == "capture_jpeg_data"
 
+    def test_capture_trims_only_trailing_nul_padding_after_jpeg(self) -> None:
+        padded = self.JPEG + (b"\x00" * 32)
+
+        assert (
+            self._client(_FakeCaptureFunction(padded)).capture_jpeg(
+                self.GUID,
+                max_image_bytes=1024,
+            )
+            == self.JPEG
+        )
+
+    def test_capture_preserves_embedded_eoi_before_final_jpeg_marker(self) -> None:
+        image = b"\xff\xd8metadata\xff\xd9outer-image\xff\xd9"
+
+        assert (
+            self._client(_FakeCaptureFunction(image + b"\x00\x00")).capture_jpeg(
+                self.GUID,
+                max_image_bytes=1024,
+            )
+            == image
+        )
+
+    @pytest.mark.parametrize(
+        ("image", "message"),
+        [
+            (b"not-jpeg\xff\xd9", "SOI marker"),
+            (b"\xff\xd8truncated", "EOI marker"),
+            (JPEG + b"non-nul", "non-NUL trailing bytes"),
+        ],
+    )
+    def test_capture_reports_invalid_jpeg_framing_without_payload(
+        self,
+        image: bytes,
+        message: str,
+    ) -> None:
+        with pytest.raises(ProtocolError, match=message) as excinfo:
+            self._client(_FakeCaptureFunction(image)).capture_jpeg(
+                self.GUID,
+                max_image_bytes=1024,
+            )
+
+        assert "platform-jpeg" not in str(excinfo.value)
+        assert "non-nul" not in str(excinfo.value)
+
     @pytest.mark.parametrize("value", [0, -1, True, 16 * 1024 * 1024 + 1])
     def test_capture_rejects_unsafe_buffer_sizes(self, value: object) -> None:
         with pytest.raises(ValueError, match="max_image_bytes"):
