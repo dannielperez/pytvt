@@ -22,6 +22,13 @@ derive from it). This lets a consumer distinguish a *confirmed-fetched empty*
 section from a *fetch failure* — e.g. so a downstream sync sweeps a genuinely empty
 section stale but never sweeps on a failed fetch.
 
+Normalized device and channel rows expose `guid` and `parent_guid` as stable,
+top-level fields. These values come from the PlatformSDK `guidNodeID` and
+`guidParentID` structures; callers do not need access to the vendor
+`raw_data` payload. Numeric `node_id` and `parent_id` remain available for
+inventory correlation, but they are not valid inputs to GUID-addressed media
+operations.
+
 ## Live-validated against a reference management server (2026-04-23)
 
 Capability matrix reflects behavior observed end-to-end on a reference TVT

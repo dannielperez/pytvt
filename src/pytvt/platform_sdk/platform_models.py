@@ -29,10 +29,26 @@ class PlatformResource:
     supports_face_match: bool
     raw_data: dict[str, Any] = field(default_factory=dict)
 
+    @property
+    def guid(self) -> str:
+        """Return the canonical SDK resource GUID without exposing ``raw_data``."""
+
+        value = self.raw_data.get("guidNodeID")
+        return str(value).strip() if value is not None else ""
+
+    @property
+    def parent_guid(self) -> str:
+        """Return the canonical SDK parent GUID without exposing ``raw_data``."""
+
+        value = self.raw_data.get("guidParentID")
+        return str(value).strip() if value is not None else ""
+
     def as_dict(self) -> dict[str, Any]:
         return {
             "node_id": self.node_id,
             "parent_id": self.parent_id,
+            "guid": self.guid,
+            "parent_guid": self.parent_guid,
             "name": self.name,
             "node_type": self.node_type,
             "node_type_name": self.node_type_name,
