@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Preserve each PlatformSDK resource's canonical `guid` and `parent_guid` in
+  normalized inventory snapshots. Consumers can now address channels for
+  persistent JPEG capture without inspecting vendor `raw_data` or mistaking a
+  process-local numeric node ID for a platform GUID.
 - Treat recorder error `536870942` from `searchImageByImageV2` as an empty
   face-event window. Field validation proved the same command returns events
   and JPEGs for populated windows, so capability probes no longer depend on an

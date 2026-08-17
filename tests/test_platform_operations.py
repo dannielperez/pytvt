@@ -99,7 +99,10 @@ def _channel(
         channel_count=0,
         channel_number=node_id % 10,
         supports_face_match=False,
-        raw_data={"guidNodeID": f"chan-{node_id:08x}"},
+        raw_data={
+            "guidNodeID": f"chan-{node_id:08x}",
+            "guidParentID": f"dev-{parent_id:08x}",
+        },
     )
 
 
@@ -428,6 +431,22 @@ def test_inventory_snapshot_structure(small_tree: list[PlatformResource]) -> Non
     # intrusion event mapped to device and has site_id
     intrusion = [e for e in snap["alarm_events"] if e["type"] == "intrusion"]
     assert intrusion and intrusion[0]["site_id"] != "orphans"
+
+
+def test_inventory_snapshot_exposes_typed_resource_guids_without_raw_payload(
+    small_tree: list[PlatformResource],
+) -> None:
+    client = _SnapshotClient(small_tree)
+
+    snap = get_platform_inventory_snapshot(client)
+
+    device = next(row for row in snap["devices"] if row["node_id"] == 10)
+    channel = next(row for row in snap["channels"] if row["node_id"] == 100)
+    assert device["guid"] == "dev-0000000a"
+    assert channel["guid"] == "chan-00000064"
+    assert channel["parent_guid"] == "dev-0000000a"
+    assert "raw_data" not in device
+    assert "raw_data" not in channel
 
 
 def test_inventory_snapshot_handles_missing_capabilities() -> None:
