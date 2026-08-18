@@ -272,6 +272,26 @@ def _direction(value: int) -> VehicleDirection:
     return VehicleDirection.UNKNOWN
 
 
+def _picture_format(code: int | None, image: bytes | None) -> ImageFormat | None:
+    """Map a smart-event picture format, trusting JPEG magic over the code.
+
+    Recorders were observed tagging real JPEG buffers with ``iPicFormat=1``
+    (documented as YUV); the bytes are authoritative for the typed format.
+    """
+    if code is None:
+        return None
+    if image is not None and image.startswith(b"\xff\xd8"):
+        return ImageFormat.JPEG
+    return _image_format(code)
+
+
+def _has_trailing_payload_bytes(payload: bytes, offset: int) -> bool:
+    """Report trailing bytes only when they are not recorder NUL padding."""
+    if offset >= len(payload):
+        return False
+    return any(payload[offset:])
+
+
 def _image_format(value: int) -> ImageFormat:
     if value == 0:
         return ImageFormat.JPEG
@@ -390,10 +410,19 @@ def _percent_confidence(
     value: int,
     *,
     warnings: list[str],
+    allow_basis_points: bool = False,
 ) -> int | None:
-    """Normalize TVT's unsigned confidence field to its percentage contract."""
+    """Normalize TVT's unsigned confidence field to its percentage contract.
+
+    NVR recorder firmware was observed reporting event-29 ``plateConfidence``
+    in basis points (``9900`` for a 99 % read); with ``allow_basis_points``
+    values in 101-10000 fold onto the 0-100 contract. Anything else outside
+    0-100 is the unsigned sentinel/garbage and stays typed as missing.
+    """
     if 0 <= value <= 100:
         return value
+    if allow_basis_points and 100 < value <= 10_000:
+        return round(value / 100)
     warnings.append("plate_confidence_out_of_range")
     return None
 
@@ -582,7 +611,7 @@ def parse_nvr_plate_payload(
         max_image_bytes=max_image_bytes,
     )
     warnings = [warning for warning in (full_warning, plate_warning) if warning]
-    if offset != len(payload):
+    if _has_trailing_payload_bytes(payload, offset):
         warnings.append("trailing_payload_bytes")
     plate = _decode_plate(bytes(info.plate), int(info.plateCharCount))  # type: ignore[attr-defined]
     if not plate:
@@ -600,6 +629,7 @@ def parse_nvr_plate_payload(
         confidence=_percent_confidence(
             int(info.plateConfidence),  # type: ignore[attr-defined]
             warnings=warnings,
+            allow_basis_points=True,
         ),
         plate_rect=(
             int(info.Rect16.left),  # type: ignore[attr-defined]
@@ -622,8 +652,8 @@ def parse_nvr_plate_payload(
         source_end_at=_occurred_at_from_epoch_seconds(int(info.dwEndTime)),  # type: ignore[attr-defined]
         full_image=full_image,
         plate_image=plate_image,
-        full_image_format=_image_format(full_format) if full_format is not None else None,
-        plate_image_format=_image_format(plate_format) if plate_format is not None else None,
+        full_image_format=_picture_format(full_format, full_image),
+        plate_image_format=_picture_format(plate_format, plate_image),
         full_image_size=full_size,
         plate_size=plate_size,
         is_partial=bool(warnings),

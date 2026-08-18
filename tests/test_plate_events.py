@@ -302,6 +302,74 @@ def test_parse_nvr_plate_payload_marks_unsigned_confidence_sentinel_partial():
     assert event.is_partial is True
 
 
+def _picture_with_format(image: bytes, *, fmt: int, width: int = 0, height: int = 0) -> bytes:
+    info = NET_SDK_IVE_PICTURE_INFO()
+    info.iWidth = width
+    info.iHeight = height
+    info.iPicFormat = fmt
+    info.iPicSize = len(image)
+    return _bytes_of(info) + image
+
+
+_JPEG_STUB = b"\xff\xd8\xff\xe0" + b"j" * 8 + b"\xff\xd9"
+
+
+def _uat_nvr_payload(*, confidence: int = 9900, trailing: bytes = b"\x00" * 288) -> bytes:
+    """Shape observed live on UAT recorders (2026-08-18, NVR 10.40.20.250)."""
+    info = VEHICE_PLATE_INFO()
+    info.dwPlateID = 7350
+    info.dwEncryptVer = 1
+    info.plateCharCount = 6
+    info.plate = b"IWX354"
+    info.Rect16.left = 1985
+    info.Rect16.top = 470
+    info.Rect16.right = 2113
+    info.Rect16.bottom = 574
+    info.plateConfidence = confidence
+    info.plateColor = 3
+    info.plateStyle = 1
+    info.chlId.Data1 = 2
+    return (
+        _bytes_of(info) + _picture_with_format(_JPEG_STUB, fmt=1) + _picture_with_format(_JPEG_STUB, fmt=1) + trailing
+    )
+
+
+def test_parse_nvr_plate_payload_normalizes_basis_point_confidence():
+    # UAT recorders report plateConfidence in basis points (9900 == 99.00 %).
+    event = parse_nvr_plate_payload(_uat_nvr_payload(confidence=9900), user_id=1, channel_id=2)
+    assert event.confidence == 99
+    assert "plate_confidence_out_of_range" not in event.warnings
+
+
+def test_parse_nvr_plate_payload_keeps_percent_confidence_and_rejects_sentinel():
+    assert parse_nvr_plate_payload(_uat_nvr_payload(confidence=87), user_id=1, channel_id=2).confidence == 87
+    assert parse_nvr_plate_payload(_uat_nvr_payload(confidence=10_000), user_id=1, channel_id=2).confidence == 100
+    event = parse_nvr_plate_payload(_uat_nvr_payload(confidence=10_001), user_id=1, channel_id=2)
+    assert event.confidence is None
+    assert "plate_confidence_out_of_range" in event.warnings
+
+
+def test_parse_nvr_plate_payload_sniffs_jpeg_despite_yuv_format_code():
+    # The recorder tags iPicFormat=1 (documented YUV) on real JPEG bytes.
+    event = parse_nvr_plate_payload(_uat_nvr_payload(), user_id=1, channel_id=2)
+    assert event.full_image == _JPEG_STUB
+    assert event.plate_image == _JPEG_STUB
+    assert event.full_image_format is ImageFormat.JPEG
+    assert event.plate_image_format is ImageFormat.JPEG
+
+
+def test_parse_nvr_plate_payload_ignores_trailing_nul_padding():
+    event = parse_nvr_plate_payload(_uat_nvr_payload(trailing=b"\x00" * 288), user_id=1, channel_id=2)
+    assert event.warnings == ()
+    assert event.is_partial is False
+
+
+def test_parse_nvr_plate_payload_still_flags_non_nul_trailing_bytes():
+    event = parse_nvr_plate_payload(_uat_nvr_payload(trailing=b"\x00" * 10 + b"\x01"), user_id=1, channel_id=2)
+    assert "trailing_payload_bytes" in event.warnings
+    assert event.is_partial is True
+
+
 def test_parse_vsd_vehicle_payload_copies_readable_vehicle_attributes_and_images():
     received_at = datetime(2026, 8, 4, tzinfo=timezone.utc)
     events = parse_vsd_vehicle_payload(
