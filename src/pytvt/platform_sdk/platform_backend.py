@@ -441,6 +441,8 @@ def _resource_to_model(node: dict[str, Any]) -> PlatformResource:
     """Normalize a raw MSGTYPE_RESLIST_NTF node dict into a PlatformResource."""
     node_type = int(node.get("nNodeType", 0))
     dev_type = int(node.get("nDevType", 0))
+    channel_number_value = node.get("nChlNO", -1)
+    channel_number = -1 if channel_number_value is None else int(channel_number_value)
     online_val = node.get("nOnline")
     if node_type in (pc.NODETYPE_DEVICE, pc.NODETYPE_CHANNEL) and online_val is not None:
         online: bool | None = int(online_val) == 1
@@ -457,7 +459,7 @@ def _resource_to_model(node: dict[str, Any]) -> PlatformResource:
         online=online,
         ip=str(node.get("szIp", "") or ""),
         channel_count=int(node.get("nChlCount", 0) or 0),
-        channel_number=int(node.get("nChlNO", -1) or -1),
+        channel_number=channel_number,
         supports_face_match=bool(node.get("bisSupportFaceMatch", False)),
         raw_data=dict(node),
     )

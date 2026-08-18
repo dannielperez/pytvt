@@ -166,7 +166,22 @@ class TestResourceNormalization:
         assert model.device_type_name == "ipc"
         assert model.online is True
         assert model.ip == "10.0.0.5"
+        assert model.channel_number == 3
         assert model.supports_face_match is True
+
+    def test_zero_based_channel_number_is_preserved(self) -> None:
+        model = _resource_to_model(self._raw(nChlNO=0))
+
+        assert model.channel_number == 0
+
+    def test_missing_channel_number_uses_unknown_sentinel(self) -> None:
+        raw = self._raw()
+        raw.pop("nChlNO")
+
+        assert _resource_to_model(raw).channel_number == -1
+
+    def test_null_channel_number_uses_unknown_sentinel(self) -> None:
+        assert _resource_to_model(self._raw(nChlNO=None)).channel_number == -1
 
     def test_area_has_no_online(self) -> None:
         model = _resource_to_model(self._raw(nNodeType=pc.NODETYPE_AREA, nOnline=0))
