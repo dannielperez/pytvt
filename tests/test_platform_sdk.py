@@ -13,6 +13,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from pytvt.platform_sdk import PlatformCaptureError
 from pytvt.platform_sdk import platform_constants as pc
 from pytvt.platform_sdk.exceptions import (
     CapabilityNotAvailable,
@@ -280,7 +281,7 @@ class TestPlatformJpegCapture:
         image: bytes,
         message: str,
     ) -> None:
-        with pytest.raises(ProtocolError, match=message) as excinfo:
+        with pytest.raises(PlatformCaptureError, match=message) as excinfo:
             self._client(_FakeCaptureFunction(image)).capture_jpeg(
                 self.GUID,
                 max_image_bytes=1024,
@@ -288,6 +289,18 @@ class TestPlatformJpegCapture:
 
         assert "platform-jpeg" not in str(excinfo.value)
         assert "non-nul" not in str(excinfo.value)
+        assert isinstance(excinfo.value, ProtocolError)
+        assert excinfo.value.invalidates_session is False
+
+    @pytest.mark.parametrize("returned", [0, -1, 1025])
+    def test_capture_invalid_length_preserves_platform_login(self, returned: int) -> None:
+        with pytest.raises(PlatformCaptureError, match="invalid image length") as excinfo:
+            self._client(_FakeCaptureFunction(self.JPEG, returned=returned)).capture_jpeg(
+                self.GUID,
+                max_image_bytes=1024,
+            )
+
+        assert excinfo.value.invalidates_session is False
 
     @pytest.mark.parametrize("value", [0, -1, True, 16 * 1024 * 1024 + 1])
     def test_capture_rejects_unsafe_buffer_sizes(self, value: object) -> None:

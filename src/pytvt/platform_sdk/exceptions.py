@@ -80,6 +80,12 @@ class ProtocolError(ManagementError):
     """Raised when a response cannot be parsed according to the expected framing."""
 
 
+class PlatformCaptureError(ProtocolError):
+    """A channel capture returned unusable bytes without invalidating login."""
+
+    invalidates_session = False
+
+
 class UnsupportedOnSDKFamilyError(ManagementError):
     """Raised when an operation is invalid for the active SDK family."""
 

@@ -70,6 +70,12 @@ unsupported operation, busy device, or small output buffer) preserve the shared
 login; authentication, initialization, connection, timeout, missing, and unknown
 errors fail closed so the runtime can recycle the worker.
 
+If the native function reports success but returns an empty, oversized, or
+malformed JPEG buffer, `capture_jpeg()` raises `PlatformCaptureError`. It remains
+a `ProtocolError` for compatibility, but its explicit
+`invalidates_session=False` classification tells a persistent runtime to fail
+only that channel capture and keep the authenticated management session.
+
 The vendor call is synchronous and has no cancellation API. Production callers
 must invoke it through a recyclable process boundary with an absolute deadline;
 calling it from a Django request or long-lived Celery process is unsupported.
