@@ -27,5 +27,7 @@
   not install `hatchling` from this host, and local `--no-isolation` builds
   likewise confirmed that the backend is not installed.
 - `ruff check` and `ruff format --check` on all changed Python files — passed.
+- Review fanout: SDK-boundary reviewer — **OK**; stability reviewer — **OK**;
+  migration-safety reviewer — n/a (no schema/data changes).
 - A pytvt-runtime follow-up must consume `PlatformCaptureError` and preserve the
   persistent worker session before UAT rollout.
