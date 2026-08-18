@@ -28,6 +28,8 @@
 
 ## Review fanout
 
-- SDK-boundary reviewer: pending.
-- Stability reviewer: pending.
+- SDK-boundary reviewer: **OK** at exact implementation head `de3c6556`;
+  vendor interpretation remains inside the typed pytvt projection.
+- Stability reviewer: **OK** at exact implementation head `de3c6556`; the
+  scalar normalization adds no I/O, retry, fan-out, or session behavior.
 - Migration-safety reviewer: n/a (no schema or data changes).
