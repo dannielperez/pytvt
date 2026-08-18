@@ -358,6 +358,24 @@ def test_typed_runtime_snapshot_validates_and_decodes_jpeg() -> None:
     assert result.method == "runtime"
 
 
+def test_typed_runtime_snapshot_tolerates_nul_padding_after_eoi() -> None:
+    # A runtime built on an older pytvt can still deliver <jpeg>\x00; the
+    # client must accept the complete image instead of failing client-side.
+    jpeg = b"\xff\xd8" + b"x" * 16 + b"\xff\xd9"
+
+    class Client(SyncRuntimeClient):
+        def execute(self, _job, **_kwargs):
+            return base64.b64encode(jpeg + b"\x00").decode("ascii")
+
+    snapshot = Client().capture_snapshot(
+        "192.0.2.10",
+        "operator",
+        "secret",
+        channel=0,
+    )
+    assert snapshot.image == jpeg
+
+
 @pytest.mark.parametrize(
     "result",
     ["not-base64", base64.b64encode(b"not-jpeg").decode()],

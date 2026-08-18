@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Strip C-buffer NUL padding that follows a complete JPEG in NetSDK
+  `capture_jpeg()` results (both the in-memory and file capture variants), and
+  tolerate the same padding in the runtime client's typed snapshot parser.
+  UAT recorders returned `<jpeg>\x00`, which strict consumers rejected as an
+  invalid snapshot fleet-wide. Payloads without a JPEG EOI marker are unchanged.
 - Preserve zero-based PlatformSDK channel numbers in normalized inventory.
   Channel zero is now distinct from the `-1` unknown sentinel, allowing typed
   consumers to correlate a platform channel without inspecting vendor data.
