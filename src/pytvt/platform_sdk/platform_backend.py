@@ -45,8 +45,8 @@ from .exceptions import (
     CapabilityNotAvailable,
     ManagementAuthError,
     ManagementNotAuthenticatedError,
+    PlatformCaptureError,
     PlatformOperationError,
-    ProtocolError,
     SessionExpired,
     TransportError,
     UnsupportedOnPlatformError,
@@ -75,7 +75,7 @@ def _normalize_captured_jpeg(image: bytes) -> bytes:
     """Return one strictly framed JPEG, tolerating only C-buffer NUL padding."""
 
     if not image.startswith(_JPEG_SOI):
-        raise ProtocolError(
+        raise PlatformCaptureError(
             f"Plat_CaptureJpgPictureDataEx returned data without a JPEG SOI marker ({len(image)} bytes)",
         )
     normalized = image.rstrip(b"\x00")
@@ -83,18 +83,18 @@ def _normalize_captured_jpeg(image: bytes) -> bytes:
         return normalized
     eoi_offset = image.rfind(_JPEG_EOI, len(_JPEG_SOI))
     if eoi_offset < 0:
-        raise ProtocolError(
+        raise PlatformCaptureError(
             f"Plat_CaptureJpgPictureDataEx returned data without a JPEG EOI marker ({len(image)} bytes)",
         )
     jpeg_end = eoi_offset + len(_JPEG_EOI)
     trailing = image[jpeg_end:]
     non_nul_trailing = len(trailing) - trailing.count(0)
     if non_nul_trailing:
-        raise ProtocolError(
+        raise PlatformCaptureError(
             "Plat_CaptureJpgPictureDataEx returned "
             f"{non_nul_trailing} non-NUL trailing bytes after the JPEG EOI marker",
         )
-    raise ProtocolError(
+    raise PlatformCaptureError(
         "Plat_CaptureJpgPictureDataEx returned invalid JPEG framing after NUL normalization",
     )
 
@@ -900,7 +900,9 @@ class PlatformSDKClient:
 
         byte_count = returned.value
         if not 0 < byte_count <= max_image_bytes:
-            raise ProtocolError(f"Plat_CaptureJpgPictureDataEx returned an invalid image length ({byte_count} bytes)")
+            raise PlatformCaptureError(
+                f"Plat_CaptureJpgPictureDataEx returned an invalid image length ({byte_count} bytes)",
+            )
         image = buffer.raw[:byte_count]
         return _normalize_captured_jpeg(image)
 

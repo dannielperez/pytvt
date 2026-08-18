@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Classify empty, oversized, and malformed PlatformSDK capture buffers as typed
+  `PlatformCaptureError` results that preserve the authenticated management
+  session. A channel-specific media failure no longer forces an unrelated
+  inventory or capture request to log in again.
 - Normalize PlatformSDK in-memory JPEG captures that contain only NUL padding
   after the first JPEG end marker. Non-JPEG, truncated, or non-NUL-tailed
   buffers still fail closed with payload-free framing diagnostics.
