@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Project NVR plate events (smart event 29) as observed on live recorders:
+  fold basis-point `plateConfidence` (0-10000) onto the 0-100 contract, trust
+  JPEG magic over a mis-tagged `iPicFormat=1` picture descriptor, and treat
+  trailing NUL padding after the plate picture as benign instead of marking
+  every event partial. Non-NUL trailing bytes are still reported.
 - Strip C-buffer NUL padding that follows a complete JPEG in NetSDK
   `capture_jpeg()` results (both the in-memory and file capture variants), and
   tolerate the same padding in the runtime client's typed snapshot parser.
