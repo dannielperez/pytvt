@@ -34,6 +34,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Literal
 
+from .._jpeg import strip_jpeg_nul_padding
 from . import bindings as sdk
 from .constants import (
     ConnectType,
@@ -964,6 +965,29 @@ class DeviceSession:
         Returns:
             Raw JPEG bytes.
         """
+        # Recorder firmware can report a capture length that includes NUL
+        # padding after the JPEG EOI marker (observed fleet-wide on UAT,
+        # 2026-08-18). Normalize that vendor quirk here so every consumer —
+        # runtime, bridge, or direct — receives one strictly framed image.
+        return strip_jpeg_nul_padding(
+            self._capture_jpeg_raw(
+                channel,
+                pic_size=pic_size,
+                pic_quality=pic_quality,
+                buf_size=buf_size,
+                prefer_file=prefer_file,
+            ),
+        )
+
+    def _capture_jpeg_raw(
+        self,
+        channel: int,
+        *,
+        pic_size: int,
+        pic_quality: int,
+        buf_size: int,
+        prefer_file: bool,
+    ) -> bytes:
         if prefer_file:
             try:
                 return self._capture_jpeg_file(channel, buf_size=buf_size)

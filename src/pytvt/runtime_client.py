@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+from ._jpeg import strip_jpeg_nul_padding
 from .device_sdk import (
     EdgePlateMatch,
     ImageFormat,
@@ -1379,6 +1380,8 @@ def _parse_snapshot(result: Any, *, max_bytes: int = MAX_RUNTIME_SNAPSHOT_BYTES)
         image = base64.b64decode(result, validate=True)
     except (binascii.Error, ValueError) as exc:
         raise RuntimeClientError("runtime returned an invalid snapshot") from exc
+    # Tolerate C-buffer NUL padding after a complete JPEG from an older runtime.
+    image = strip_jpeg_nul_padding(image)
     if not image.startswith(b"\xff\xd8") or not image.endswith(b"\xff\xd9") or len(image) > max_bytes:
         raise RuntimeClientError("runtime returned an invalid snapshot")
     return image
