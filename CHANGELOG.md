@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Preserve zero-based PlatformSDK channel numbers in normalized inventory.
+  Channel zero is now distinct from the `-1` unknown sentinel, allowing typed
+  consumers to correlate a platform channel without inspecting vendor data.
 - Classify empty, oversized, and malformed PlatformSDK capture buffers as typed
   `PlatformCaptureError` results that preserve the authenticated management
   session. A channel-specific media failure no longer forces an unrelated
