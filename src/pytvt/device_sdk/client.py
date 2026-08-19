@@ -35,6 +35,8 @@ from tempfile import TemporaryDirectory
 from typing import Literal
 
 from .._jpeg import strip_jpeg_nul_padding
+from ..models import PlatformAccessConfig
+from ..platform_access import parse_platform_access_config, response_status
 from . import bindings as sdk
 from .constants import (
     ConnectType,
@@ -809,6 +811,22 @@ class DeviceSession:
         )
         self._check(bool(ok), f"ApiInterface({url})")
         return buf.raw[: ret.value].decode("utf-8", "replace")
+
+    def query_platform_access(self) -> PlatformAccessConfig:
+        """Read Platform Access (auto-report) settings over the SDK session.
+
+        Same ``queryPlatformCfg`` CGI as :meth:`pytvt.NvrClient.query_platform_access`
+        but tunnelled through ``NET_SDK_ApiInterface`` on the authenticated
+        handle, so it works LAN-direct **and** NAT-tunnelled (recorders reached
+        by serial only).  Raises :class:`NetSdkError` when the device reports a
+        non-success status.
+        """
+        data = self.api_call("queryPlatformCfg")
+        status, code = response_status(data)
+        if status is not None and status != "success":
+            detail = f" errorCode={code}" if code else ""
+            raise NetSdkError(f"queryPlatformCfg failed: status={status}{detail}")
+        return parse_platform_access_config(data)
 
     def device_time(self) -> datetime:
         """Query current device clock."""

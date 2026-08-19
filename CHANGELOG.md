@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `DeviceSession.query_platform_access()` — read the recorder's Platform Access
+  (auto-report) settings over the NetSDK session via `NET_SDK_ApiInterface`
+  (`queryPlatformCfg`), so it works LAN-direct and NAT-tunnelled (serial-only
+  recorders). Returns the same `PlatformAccessConfig` as
+  `NvrClient.query_platform_access()`; a non-success device status raises
+  `NetSdkError`.
+- `pytvt.platform_access.parse_platform_access_config()` / `response_status()`
+  — the shared lenient XML parser both transports now use.
+
 ### Fixed
 
 - Project NVR plate events (smart event 29) as observed on live recorders:
