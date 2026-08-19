@@ -244,6 +244,11 @@ class TestHttpDispatch:
         assert result.success is True
         assert result.device_name == "NVR-01"
 
+    def test_query_platform_access_not_available_on_http(self, mgr: DeviceManager) -> None:
+        result = mgr.query_platform_access()
+        assert result.success is False
+        assert "sdk_http" in (result.error or "")
+
     def test_device_time_get(self, mgr: DeviceManager) -> None:
         expected = DeviceTimeResult(success=True, action="get", device_time="2025-01-01T00:00:00")
         with patch.object(mgr, "_get_http") as mock_http:
@@ -325,6 +330,33 @@ class TestNetsdkDispatch:
         assert result.success is True
         assert result.device_name == "NVR-02"
         assert result.serial_number == "SN2"
+
+    def test_query_platform_access_via_session(self, mgr: DeviceManager) -> None:
+        from pytvt.models import PlatformAccessConfig
+
+        mock_session = MagicMock()
+        mock_session.query_platform_access.return_value = PlatformAccessConfig(
+            enabled=True, server_address="nvms.example.net", port=2009, report_id="100234"
+        )
+        mgr._netsdk_session = mock_session
+
+        result = mgr.query_platform_access()
+
+        assert result.success is True
+        assert result.report_id == "100234"
+        assert result.server_address == "nvms.example.net"
+        assert result.enabled is True
+
+    def test_query_platform_access_session_failure_is_result(self, mgr: DeviceManager) -> None:
+        mock_session = MagicMock()
+        mock_session.query_platform_access.side_effect = RuntimeError("no such CGI")
+        mgr._netsdk_session = mock_session
+
+        result = mgr.query_platform_access()
+
+        assert result.success is False
+        assert "no such CGI" in (result.error or "")
+        assert result.report_id == ""
 
     def test_nat_session_uses_connect(self) -> None:
         mgr = DeviceManager("10.0.0.1", "admin", "pass123", identifier="ABC123456", backend=Backend.NETSDK)

@@ -146,6 +146,7 @@ from .models import (
     User,
     parse_face_event_timestamp,
 )
+from .platform_access import parse_platform_access_config
 
 XML_HEADER = '<?xml version="1.0" encoding="utf-8" ?>'
 SYSTEM_TYPE = "NVMS-9000"
@@ -435,15 +436,7 @@ class NvrClient:
         self._require_login()
         data = self._post("queryPlatformCfg", self._build_request())
         self._check_response(data, "queryPlatformCfg")
-        # Extract the NVMS5000 item from the list content
-        item = re.search(r'<item\s+id="NVMS5000">(.*?)</item>', data, re.DOTALL)
-        block = item.group(1) if item else data
-        return PlatformAccessConfig(
-            enabled=self._parse_xml_field(block, "switch") == "true",
-            server_address=self._parse_xml_field(block, "serverAddr") or "",
-            port=int(self._parse_xml_field(block, "port") or 2009),
-            report_id=self._parse_xml_field(block, "reportId") or "",
-        )
+        return parse_platform_access_config(data)
 
     def set_platform_access(
         self,

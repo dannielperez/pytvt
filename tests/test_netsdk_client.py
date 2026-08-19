@@ -929,6 +929,39 @@ class TestSessionApiCall:
             session.api_call("queryPlatformCfg")
 
 
+# ── DeviceSession.query_platform_access (queryPlatformCfg over ApiInterface) ──
+
+_PLATFORM_ACCESS_XML = b"""<response><status>success</status>
+<content type="list" current="NVMS5000"><item id="NVMS5000"><switch>true</switch>
+<serverAddr>nvms.example.net</serverAddr><port>2009</port><reportId>100234</reportId>
+</item></content></response>"""
+
+
+class TestNetSdkQueryPlatformAccess:
+    def _fill_with(self, mock_lib, body: bytes):
+        def fill(handle, req, url, buf, size, ret_ptr):
+            ct.memmove(buf, body, len(body))
+            ret_ptr._obj.value = len(body)
+            return True
+
+        mock_lib.NET_SDK_ApiInterface.side_effect = fill
+
+    def test_query_platform_access_over_sdk_session(self, session, mock_lib):
+        self._fill_with(mock_lib, _PLATFORM_ACCESS_XML)
+
+        cfg = session.query_platform_access()
+
+        assert cfg.report_id == "100234"
+        assert cfg.server_address == "nvms.example.net"
+        assert cfg.enabled is True
+        assert mock_lib.NET_SDK_ApiInterface.call_args[0][2] == b"queryPlatformCfg"
+
+    def test_query_platform_access_raises_on_device_failure(self, session, mock_lib):
+        self._fill_with(mock_lib, b"<response><status>fail</status><errorCode>7</errorCode></response>")
+        with pytest.raises(NetSdkError, match="errorCode=7"):
+            session.query_platform_access()
+
+
 # ── Encode / record config (queryNodeEncodeInfo / editNodeEncodeInfo) ───────
 
 # Real device shape; note the '&' in a camera name — device XML is NOT well-formed,
