@@ -84,7 +84,6 @@ from .types import (
     NET_SDK_FACE_IMG_INFO_CH,
     NET_SDK_FACE_INFO_IMG_DATA,
     NET_SDK_IPC_DEVICE_INFO,
-    NET_SDK_JPEGPARA,
     NET_SDK_LOG,
     NET_SDK_NVR_DISKREC_DATE_ITEM,
     NET_SDK_REC_FILE,
@@ -971,8 +970,14 @@ class DeviceSession:
 
         Args:
             channel: Video channel index (0-based).
-            pic_size: Image size mode (0xFF = current resolution).
-            pic_quality: Quality level (0 = best).
+            pic_size: Retained for call compatibility only. NetSDK 1.3.2's
+                stream-less capture APIs take no size or resolution
+                parameter — the recorder/IPC returns its configured snapshot
+                stream (verified live 2026-08-19: ``CaptureJPEGData_V2``,
+                ``CaptureJPEGFile_V2`` and ``CaptureJpeg`` all return the same
+                frame). Callers that need a larger still change the camera's
+                snapshot/sub-stream setting or grab a main-stream frame.
+            pic_quality: Retained for call compatibility only (see ``pic_size``).
             buf_size: Maximum buffer size in bytes (default 2 MB).
             prefer_file: Try the SDK's file-based capture before the in-memory
                 API. This is useful for legacy recorder firmware where
@@ -1039,14 +1044,15 @@ class DeviceSession:
         pic_quality: int,
         buf_size: int,
     ) -> bytes:
-        para = NET_SDK_JPEGPARA(wPicSize=pic_size, wPicQuality=pic_quality)
+        # ``pic_size``/``pic_quality`` are accepted for compatibility; the
+        # NetSDK 1.3.2 data API has no such parameters (see bindings.py).
+        del pic_size, pic_quality
         buf = ct.create_string_buffer(buf_size)
         returned = ct.c_uint(0)
         self._check(
             sdk._lib.NET_SDK_CaptureJPEGData_V2(  # type: ignore[union-attr]
                 self._handle,
                 channel,
-                ct.byref(para),
                 buf,
                 buf_size,
                 ct.byref(returned),

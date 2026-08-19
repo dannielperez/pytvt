@@ -490,7 +490,7 @@ class TestSessionCapture:
     def test_capture_jpeg(self, session, mock_lib):
         jpeg_data = b"\xff\xd8\xff\xe0" + b"\x00" * 100
 
-        def fill_jpeg(handle, channel, para_ptr, buf, buf_size, returned_ptr):
+        def fill_jpeg(handle, channel, buf, buf_size, returned_ptr):
             ct.memmove(buf, jpeg_data, len(jpeg_data))
             returned_ptr._obj.value = len(jpeg_data)
             return True
@@ -506,7 +506,7 @@ class TestSessionCapture:
         # terminator); strict runtime clients rejected every frame fleet-wide.
         jpeg_data = b"\xff\xd8data\xff\xd9"
 
-        def fill_jpeg(_handle, _channel, _para_ptr, buf, _buf_size, returned_ptr):
+        def fill_jpeg(_handle, _channel, buf, _buf_size, returned_ptr):
             padded = jpeg_data + b"\x00"
             ct.memmove(buf, padded, len(padded))
             returned_ptr._obj.value = len(padded)
@@ -530,7 +530,7 @@ class TestSessionCapture:
         # their own validation behavior.
         jpeg_data = b"\xff\xd8\xff\xe0" + b"\x00" * 8
 
-        def fill_jpeg(_handle, _channel, _para_ptr, buf, _buf_size, returned_ptr):
+        def fill_jpeg(_handle, _channel, buf, _buf_size, returned_ptr):
             ct.memmove(buf, jpeg_data, len(jpeg_data))
             returned_ptr._obj.value = len(jpeg_data)
             return True
@@ -573,7 +573,7 @@ class TestSessionCapture:
         mock_lib.NET_SDK_CaptureJPEGFile_V2.return_value = False
         mock_lib.NET_SDK_GetLastError.return_value = 26
 
-        def fill_jpeg(_handle, _channel, _para_ptr, buf, _buf_size, returned_ptr):
+        def fill_jpeg(_handle, _channel, buf, _buf_size, returned_ptr):
             ct.memmove(buf, jpeg_data, len(jpeg_data))
             returned_ptr._obj.value = len(jpeg_data)
             return True
