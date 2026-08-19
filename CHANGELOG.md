@@ -22,6 +22,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `NET_SDK_CaptureJPEGData_V2` was bound with a phantom `LPNET_SDK_JPEGPARA`
+  argument (six parameters). NetSDK 1.3.2 declares five —
+  `(lUserID, lChannel, sJpegPicBuffer, dwPicSize, lpSizeReturned)` — so every
+  parameter after the channel was shifted: the 4-byte JPEGPARA struct became
+  the SDK's output buffer, the buffer address its length and the buffer length
+  the `lpSizeReturned` pointer (a heap-corrupting write; the likely source of
+  the historical "data API blocks/crashes, file API works" behaviour). The
+  binding and `DeviceSession._capture_jpeg_data` now use the real five-argument
+  contract, verified live against an N9000 recorder (valid frame in ~540 ms).
+  `capture_jpeg(pic_size=…, pic_quality=…)` are retained as compatibility
+  no-ops: the stream-less capture APIs take no size/resolution parameter and
+  return the recorder/IPC's configured snapshot stream.
 - Project NVR plate events (smart event 29) as observed on live recorders:
   fold basis-point `plateConfidence` (0-10000) onto the 0-100 contract, trust
   JPEG magic over a mis-tagged `iPicFormat=1` picture descriptor, and treat

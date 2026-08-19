@@ -179,11 +179,20 @@ def bind(lib: ct.CDLL) -> None:
     ]
 
     # ── JPEG capture ────────────────────────────────────────────
+    # NetSDK 1.3.2 DVR_NET_SDK.h:
+    #   BOOL NET_SDK_CaptureJPEGData_V2(LONG lUserID, LONG lChannel,
+    #       char* sJpegPicBuffer, DWORD dwPicSize, LPDWORD lpSizeReturned);
+    # There is NO LPNET_SDK_JPEGPARA argument (that belongs to the Windows-only
+    # NET_SDK_CaptureJPEGPicture, where the header marks it unused). The earlier
+    # six-argument prototype shifted every parameter by one: the SDK received the
+    # 4-byte JPEGPARA struct as its output buffer, the buffer address as the
+    # buffer length and the buffer length as the lpSizeReturned pointer — a
+    # heap-corrupting write. Verified live against an N9000 recorder
+    # (2026-08-19): the five-argument call returns a valid frame in ~540 ms.
     lib.NET_SDK_CaptureJPEGData_V2.restype = ct.c_bool
     lib.NET_SDK_CaptureJPEGData_V2.argtypes = [
         ct.c_long,  # lUserID
         ct.c_long,  # lChannel
-        ct.POINTER(t.NET_SDK_JPEGPARA),  # lpJpegPara
         ct.c_char_p,  # sJpegPicBuffer
         ct.c_uint,  # dwPicSize (buf len)
         ct.POINTER(ct.c_uint),  # lpSizeReturned
