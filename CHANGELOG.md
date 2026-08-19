@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   recorders). Returns the same `PlatformAccessConfig` as
   `NvrClient.query_platform_access()`; a non-success device status raises
   `NetSdkError`.
+- `DeviceManager.query_platform_access()` → `PlatformAccessResult` (NetSDK
+  backend; the HTTP bridge backend returns `success=False` rather than raising).
 - `pytvt.platform_access.parse_platform_access_config()` / `response_status()`
   — the shared lenient XML parser both transports now use.
 

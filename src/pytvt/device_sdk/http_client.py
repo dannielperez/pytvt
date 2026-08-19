@@ -57,6 +57,22 @@ class DeviceInfoResult:
 
 
 @dataclass(frozen=True)
+class PlatformAccessResult:
+    """Platform Access (auto-report) settings read through the DeviceManager.
+
+    Attribute names mirror :class:`pytvt.models.PlatformAccessConfig` so
+    consumers can treat both the same; ``success=False`` carries ``error``.
+    """
+
+    success: bool
+    enabled: bool = False
+    server_address: str = ""
+    port: int | None = None
+    report_id: str = ""
+    error: str | None = None
+
+
+@dataclass(frozen=True)
 class DeviceTimeResult:
     success: bool
     action: str = ""

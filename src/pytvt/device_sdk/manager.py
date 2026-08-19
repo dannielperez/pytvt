@@ -47,6 +47,7 @@ from .http_client import (
     CommandResult,
     DeviceInfoResult,
     DeviceTimeResult,
+    PlatformAccessResult,
     RtspUrlResult,
     SdkHttpClient,
     SnapshotAttempt,
@@ -424,6 +425,31 @@ class DeviceManager:
             self._username,
             self._password,
             port=self._port,
+        )
+
+    def query_platform_access(self) -> PlatformAccessResult:
+        """Read Platform Access (auto-report) settings — NetSDK backend only.
+
+        Works LAN-direct or NAT-tunnelled through the SDK session. The HTTP
+        bridge backend does not expose the CGI, so it returns ``success=False``
+        instead of raising; consumers treat that as "no evidence".
+        """
+        if self._backend != Backend.NETSDK:
+            return PlatformAccessResult(
+                success=False,
+                error=f"platform access query not available on backend {self._backend.value}",
+            )
+        try:
+            session = self._get_netsdk_session()
+            config = session.query_platform_access()
+        except Exception as e:
+            return PlatformAccessResult(success=False, error=str(e))
+        return PlatformAccessResult(
+            success=True,
+            enabled=config.enabled,
+            server_address=config.server_address,
+            port=config.port,
+            report_id=config.report_id,
         )
 
     def device_time(self, *, set_timestamp: int | None = None) -> DeviceTimeResult:
