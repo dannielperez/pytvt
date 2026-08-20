@@ -119,10 +119,15 @@ def _first_failure(attempts: list[SnapshotAttempt]) -> SnapshotAttempt:
 
     A leg that never had a stream URL says less than one whose capture call
     actually failed, so the latter is preferred; the first attempt is the
-    fallback so a reason is always returned.
+    fallback so a reason is always returned. A Web API failure is likewise
+    usually just "API Server disabled on this recorder" — common and
+    uninformative — so it never masks a more specific leg's error.
     """
     for attempt in attempts:
-        if attempt.error_kind not in ("", "no_stream_url"):
+        if attempt.error_kind not in ("", "no_stream_url", "webapi_error"):
+            return attempt
+    for attempt in attempts:
+        if attempt.error_kind != "webapi_error":
             return attempt
     return (
         attempts[0]
@@ -505,10 +510,12 @@ class DeviceManager:
     ) -> SnapshotAttempt:
         """Capture a JPEG snapshot, reporting WHY when it produces no image.
 
-        Same transport preference as :meth:`snapshot` — RTSP first, then the
-        SDK or HTTP path — but the reason each leg produced nothing survives
-        into the result instead of collapsing to ``None``. A caller showing an
-        operator "capture failed" can say what actually failed.
+        Legs, in order: the device's own Web API (LAPI ``GetSnapshot`` — one
+        HTTP GET, tried first because it needs no ffmpeg subprocess and no
+        SDK login), then RTSP (if ``prefer_rtsp``), then the SDK or bridge
+        path. The reason each leg produced nothing survives into the result
+        instead of collapsing to ``None``, so a caller showing an operator
+        "capture failed" can say what actually failed.
         """
         stream_type = _snapshot_stream_type(
             stream=stream,
@@ -516,6 +523,18 @@ class DeviceManager:
         )
         deadline = None if total_timeout is None else time.monotonic() + max(0.0, total_timeout)
         attempts: list[SnapshotAttempt] = []
+        if self._connection_method != "nat" and (deadline is None or deadline > time.monotonic()):
+            remaining = None if deadline is None else max(0.001, deadline - time.monotonic())
+            # Probe timeout is capped: an API-disabled recorder answers with a
+            # fast 4xx on the shared web port, but a silently-dropping network
+            # must not delay the legs that were going to work anyway.
+            webapi = self._webapi_snapshot_attempt(
+                channel=channel,
+                timeout=min(timeout, 5) if remaining is None else min(timeout, 5, remaining),
+            )
+            if webapi.image:
+                return webapi
+            attempts.append(webapi)
         if prefer_rtsp:
             rtsp = self._rtsp_snapshot_attempt(
                 channel=channel,
@@ -545,6 +564,52 @@ class DeviceManager:
             return http
         attempts.append(http)
         return _first_failure(attempts)
+
+    def _webapi_snapshot_attempt(
+        self,
+        *,
+        channel: int = 0,
+        timeout: float = 10,
+    ) -> SnapshotAttempt:
+        """Device-native LAPI ``GetSnapshot`` — one authenticated HTTP GET, no
+        ffmpeg subprocess and no NetSDK login. Cheapest possible leg when the
+        recorder's "API Server" service is enabled; fails closed into the
+        existing legs when it isn't.
+        """
+        # Lazy import keeps web_api off the device_sdk load path.
+        from ..web_api.client import WebApiClient
+        from ..web_api.errors import WebApiError
+
+        try:
+            client = WebApiClient(
+                self._ip,
+                self._username,
+                self._password,
+                port=self._http_port,
+                timeout=max(1, int(timeout)),
+            )
+            # The web API numbers channels from 1; device_sdk from 0.
+            result = client.get_snapshot_webapi(channel_id=channel + 1)
+        except WebApiError as exc:
+            logger.info(
+                "WebApi snapshot unavailable ip=%s channel=%s: %s: %s",
+                self._ip,
+                channel,
+                type(exc).__name__,
+                exc,
+            )
+            return SnapshotAttempt(
+                method="webapi",
+                error=f"{type(exc).__name__}: {exc}",
+                error_kind="webapi_error",
+            )
+        if not result.success or not result.image_data:
+            return SnapshotAttempt(
+                method="webapi",
+                error=result.error or "Device returned an empty Web API snapshot.",
+                error_kind="webapi_error",
+            )
+        return SnapshotAttempt(image=result.image_data, method="webapi")
 
     def _http_snapshot_attempt(
         self,

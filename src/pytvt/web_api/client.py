@@ -19,10 +19,13 @@ Key design choices
 
 from __future__ import annotations
 
+import hashlib
 import http.client
 import logging
+import re
 import ssl
 from base64 import b64encode
+from itertools import count
 from typing import Any
 
 from . import xml as xml
@@ -55,6 +58,68 @@ logger = logging.getLogger(__name__)
 # Base path for all LAPI endpoints (Section 1.3.1)
 LAPI_BASE = "/LAPI/V1.0"
 
+_DIGEST_PARAM_RE = re.compile(r'(\w+)=(?:"([^"]*)"|([^\s,]+))')
+
+
+def _parse_digest_challenge(header: str) -> dict[str, str]:
+    """Parse a ``WWW-Authenticate: Digest ...`` header into its parameters."""
+    params: dict[str, str] = {}
+    for match in _DIGEST_PARAM_RE.finditer(header):
+        key = match.group(1)
+        value = match.group(2) if match.group(2) is not None else match.group(3)
+        params[key] = value
+    return params
+
+
+class _DigestAuth:
+    """RFC 2617 digest response builder (single, sequential client — nc increments)."""
+
+    def __init__(self, username: str, password: str) -> None:
+        self._username = username
+        self._password = password
+        self._nc_counter = count(1)
+
+    @staticmethod
+    def _h(data: str) -> str:
+        return hashlib.md5(data.encode("utf-8")).hexdigest()
+
+    def build_header(self, *, method: str, uri: str, challenge: dict[str, str]) -> str:
+        realm = challenge.get("realm", "")
+        nonce = challenge.get("nonce", "")
+        qop = challenge.get("qop", "")
+        opaque = challenge.get("opaque")
+        algorithm = challenge.get("algorithm", "MD5")
+
+        ha1 = self._h(f"{self._username}:{realm}:{self._password}")
+        ha2 = self._h(f"{method}:{uri}")
+
+        nc = f"{next(self._nc_counter):08x}"
+        cnonce = self._h(f"{nonce}{nc}")[:16]
+
+        if qop:
+            qop_value = "auth" if "auth" in qop.split(",") else qop.split(",")[0].strip()
+            response = self._h(f"{ha1}:{nonce}:{nc}:{cnonce}:{qop_value}:{ha2}")
+        else:
+            qop_value = ""
+            response = self._h(f"{ha1}:{nonce}:{ha2}")
+
+        parts = [
+            f'username="{self._username}"',
+            f'realm="{realm}"',
+            f'nonce="{nonce}"',
+            f'uri="{uri}"',
+            f'response="{response}"',
+            f'algorithm="{algorithm}"',
+        ]
+        if qop_value:
+            parts.append(f"qop={qop_value}")
+            parts.append(f"nc={nc}")
+            parts.append(f'cnonce="{cnonce}"')
+        if opaque is not None:
+            parts.append(f'opaque="{opaque}"')
+
+        return "Digest " + ", ".join(parts)
+
 
 class WebApiClient:
     """Client for the TVT HTTP API (LAPI protocol).
@@ -85,58 +150,81 @@ class WebApiClient:
         port: int = 80,
         timeout: int = 10,
         use_https: bool = False,
+        auth_type: str = "auto",
     ) -> None:
+        """Args (in addition to the above):
+
+        auth_type: ``"basic"``, ``"digest"``, or ``"auto"`` (default).
+            ``"auto"`` sends Basic first and transparently switches to
+            Digest if the device challenges with
+            ``WWW-Authenticate: Digest`` (the NVR's own "API Server"
+            setting decides which one it expects; this makes the client
+            work either way without the caller needing to know).
+        """
+        if auth_type not in ("basic", "digest", "auto"):
+            raise ValueError(f"auth_type must be 'basic', 'digest', or 'auto', got {auth_type!r}")
         self.host = host
         self.username = username
         self.password = password
         self.port = port
         self.timeout = timeout
         self.use_https = use_https
+        self.auth_type = auth_type
 
         # Precompute Basic auth header
         creds = b64encode(f"{username}:{password}".encode()).decode()
         self._auth_header = f"Basic {creds}"
+        self._digest = _DigestAuth(username, password)
+        # Cached challenge from the last 401, reused for subsequent requests
+        # in "auto"/"digest" mode so we don't eat a round trip every call.
+        self._digest_challenge: dict[str, str] | None = None
 
         # Cache for supported APIs (populated by get_supported_apis)
         self._supported_apis: set[str] | None = None
 
     # ── Low-level HTTP ───────────────────────────────────────────
 
-    def _request(
-        self,
-        method: str,
-        path: str,
-        body: str = "",
-        *,
-        accept: str = "application/xml",
-        extra_headers: dict[str, str] | None = None,
-    ) -> tuple[int, bytes, str]:
-        """Send an HTTP request with Basic auth.
+    def _auth_header_for(self, method: str, path: str) -> str | None:
+        """Build the Authorization header for this request, or None (basic-first probe)."""
+        if self.auth_type == "digest" or (self.auth_type == "auto" and self._digest_challenge is not None):
+            if self._digest_challenge is not None:
+                return self._digest.build_header(method=method, uri=path, challenge=self._digest_challenge)
+            if self.auth_type == "digest":
+                # No challenge seen yet: send unauthenticated to elicit one.
+                return None
+        return self._auth_header
 
-        Returns:
-            (http_status, response_body_bytes, content_type)
-        """
+    def _open_connection(self) -> http.client.HTTPConnection:
         if self.use_https:
             ctx = ssl.create_default_context()
             ctx.check_hostname = False
             ctx.verify_mode = ssl.CERT_NONE
-            conn = http.client.HTTPSConnection(
+            return http.client.HTTPSConnection(
                 self.host,
                 self.port,
                 timeout=self.timeout,
                 context=ctx,
             )
-        else:
-            conn = http.client.HTTPConnection(
-                self.host,
-                self.port,
-                timeout=self.timeout,
-            )
+        return http.client.HTTPConnection(
+            self.host,
+            self.port,
+            timeout=self.timeout,
+        )
 
-        headers: dict[str, str] = {
-            "Authorization": self._auth_header,
-            "Accept": accept,
-        }
+    def _send(
+        self,
+        method: str,
+        path: str,
+        body: str,
+        accept: str,
+        extra_headers: dict[str, str] | None,
+    ) -> tuple[int, bytes, str, str]:
+        """One HTTP round trip. Returns (status, body, content_type, www_authenticate)."""
+        conn = self._open_connection()
+        headers: dict[str, str] = {"Accept": accept}
+        auth_header = self._auth_header_for(method, path)
+        if auth_header is not None:
+            headers["Authorization"] = auth_header
         if body:
             headers["Content-Type"] = "application/xml"
         if extra_headers:
@@ -147,13 +235,38 @@ class WebApiClient:
             resp = conn.getresponse()
             data = resp.read()
             content_type = resp.getheader("Content-Type", "")
-            return resp.status, data, content_type
+            www_authenticate = resp.getheader("WWW-Authenticate", "") or ""
+            return resp.status, data, content_type, www_authenticate
         except (OSError, http.client.HTTPException) as exc:
             raise DeviceOfflineError(
                 f"Cannot reach {self.host}:{self.port}: {exc}",
             ) from exc
         finally:
             conn.close()
+
+    def _request(
+        self,
+        method: str,
+        path: str,
+        body: str = "",
+        *,
+        accept: str = "application/xml",
+        extra_headers: dict[str, str] | None = None,
+    ) -> tuple[int, bytes, str]:
+        """Send an HTTP request, transparently completing an RFC 2617 Digest challenge.
+
+        Returns:
+            (http_status, response_body_bytes, content_type)
+        """
+        status, data, content_type, www_authenticate = self._send(method, path, body, accept, extra_headers)
+
+        if status == 401 and self.auth_type != "basic" and "digest" in www_authenticate.lower():
+            challenge = _parse_digest_challenge(www_authenticate)
+            if challenge.get("nonce"):
+                self._digest_challenge = challenge
+                status, data, content_type, _ = self._send(method, path, body, accept, extra_headers)
+
+        return status, data, content_type
 
     def _post(self, path: str, body: str = "") -> bytes:
         """POST to a LAPI endpoint, check status, return response body bytes.
@@ -487,6 +600,8 @@ class WebApiClient:
         self.password = new_password
         creds = b64encode(f"{self.username}:{new_password}".encode()).decode()
         self._auth_header = f"Basic {creds}"
+        self._digest = _DigestAuth(self.username, new_password)
+        self._digest_challenge = None
 
     # ── Image commands (Section 3) ───────────────────────────────
 

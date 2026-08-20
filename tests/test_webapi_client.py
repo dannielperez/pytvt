@@ -50,6 +50,15 @@ def _xml_ok(inner: str) -> bytes:
     ).encode()
 
 
+def _response_with_headers(body: bytes, status: int, headers: dict[str, str]):
+    """Build a mock HTTPResponse with distinct per-header values."""
+    resp = MagicMock()
+    resp.status = status
+    resp.read.return_value = body
+    resp.getheader.side_effect = lambda name, default="": headers.get(name, default)
+    return resp
+
+
 def _xml_error(status_code: int, sub_code: int = 0, msg: str = "Error") -> bytes:
     return (
         f'<?xml version="1.0" encoding="utf-8"?>'
@@ -476,3 +485,89 @@ class TestErrorHandling:
 
         with pytest.raises(WebApiError):
             client.get_device_info()
+
+
+# ── Digest auth (RFC 2617) ──────────────────────────────────────────
+
+
+_DIGEST_CHALLENGE = 'Digest realm="LAPI", qop="auth", nonce="abc123nonce", opaque="xyz789"'
+
+
+class TestDigestAuth:
+    @patch("pytvt.web_api.client.http.client.HTTPConnection")
+    def test_auto_retries_with_digest_on_challenge(self, mock_conn_cls, client):
+        challenge_resp = _response_with_headers(
+            b"",
+            401,
+            {"WWW-Authenticate": _DIGEST_CHALLENGE, "Content-Type": "application/xml"},
+        )
+        ok_resp = _response_with_headers(
+            _xml_ok("<DeviceInfo><deviceName>NVR</deviceName></DeviceInfo>"),
+            200,
+            {"Content-Type": "application/xml"},
+        )
+        mock_conn = MagicMock()
+        mock_conn_cls.return_value = mock_conn
+        mock_conn.getresponse.side_effect = [challenge_resp, ok_resp]
+
+        info = client.get_device_info()
+
+        assert info.device_name == "NVR"
+        assert mock_conn.request.call_count == 2
+        second_call_headers = mock_conn.request.call_args_list[1].kwargs["headers"]
+        assert second_call_headers["Authorization"].startswith("Digest ")
+        assert 'username="admin"' in second_call_headers["Authorization"]
+        assert 'nonce="abc123nonce"' in second_call_headers["Authorization"]
+
+    @patch("pytvt.web_api.client.http.client.HTTPConnection")
+    def test_cached_challenge_skips_basic_probe(self, mock_conn_cls, client):
+        challenge_resp = _response_with_headers(
+            b"", 401, {"WWW-Authenticate": _DIGEST_CHALLENGE, "Content-Type": "application/xml"}
+        )
+        ok_resp = _response_with_headers(
+            _xml_ok("<DeviceInfo><deviceName>NVR</deviceName></DeviceInfo>"), 200, {"Content-Type": "application/xml"}
+        )
+        mock_conn = MagicMock()
+        mock_conn_cls.return_value = mock_conn
+        mock_conn.getresponse.side_effect = [challenge_resp, ok_resp, ok_resp]
+
+        client.get_device_info()
+        assert mock_conn.request.call_count == 2  # Basic probe + Digest retry
+
+        client.get_device_info()
+        assert mock_conn.request.call_count == 3  # cached challenge — one call only
+        third_call_headers = mock_conn.request.call_args_list[2].kwargs["headers"]
+        assert third_call_headers["Authorization"].startswith("Digest ")
+
+    @patch("pytvt.web_api.client.http.client.HTTPConnection")
+    def test_basic_auth_type_never_tries_digest(self, mock_conn_cls):
+        client = WebApiClient("192.168.1.100", "admin", "test123", auth_type="basic")
+        challenge_resp = _response_with_headers(
+            b"", 401, {"WWW-Authenticate": _DIGEST_CHALLENGE, "Content-Type": "application/xml"}
+        )
+        mock_conn = MagicMock()
+        mock_conn_cls.return_value = mock_conn
+        mock_conn.getresponse.return_value = challenge_resp
+
+        with pytest.raises(AuthenticationError):
+            client.get_device_info()
+        assert mock_conn.request.call_count == 1
+        only_call_headers = mock_conn.request.call_args_list[0].kwargs["headers"]
+        assert only_call_headers["Authorization"].startswith("Basic ")
+
+    @patch("pytvt.web_api.client.http.client.HTTPConnection")
+    def test_digest_failure_raises_auth_error(self, mock_conn_cls, client):
+        challenge_resp = _response_with_headers(
+            b"", 401, {"WWW-Authenticate": _DIGEST_CHALLENGE, "Content-Type": "application/xml"}
+        )
+        mock_conn = MagicMock()
+        mock_conn_cls.return_value = mock_conn
+        mock_conn.getresponse.side_effect = [challenge_resp, challenge_resp]
+
+        with pytest.raises(AuthenticationError):
+            client.get_device_info()
+        assert mock_conn.request.call_count == 2
+
+    def test_invalid_auth_type_rejected(self):
+        with pytest.raises(ValueError):
+            WebApiClient("192.168.1.100", "admin", "test123", auth_type="ntlm")

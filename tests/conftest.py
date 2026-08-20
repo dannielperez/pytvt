@@ -40,6 +40,32 @@ def no_http_rtsp_resolve(monkeypatch):
     monkeypatch.setattr(DeviceManager, "_http_rtsp_url", lambda *a, **k: None)
 
 
+@pytest.fixture(autouse=True)
+def no_webapi_snapshot(monkeypatch):
+    """Keep the Web API snapshot pre-leg off the wire by default.
+
+    ``DeviceManager.snapshot_attempt`` tries the device's LAPI ``GetSnapshot``
+    before every other leg, so without this every snapshot test would dial the
+    fake IP it was constructed with. Tests that exercise this leg patch it
+    themselves; the inner patch wins. The yielded value is the real method,
+    for tests that exercise the leg's own body.
+    """
+    from pytvt.device_sdk.http_client import SnapshotAttempt
+    from pytvt.device_sdk.manager import DeviceManager
+
+    original = DeviceManager._webapi_snapshot_attempt
+    monkeypatch.setattr(
+        DeviceManager,
+        "_webapi_snapshot_attempt",
+        lambda *a, **k: SnapshotAttempt(
+            method="webapi",
+            error="Web API leg disabled in tests.",
+            error_kind="webapi_error",
+        ),
+    )
+    yield original
+
+
 @pytest.fixture()
 def default_config() -> ScannerConfig:
     return ScannerConfig(
