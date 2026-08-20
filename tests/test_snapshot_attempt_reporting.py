@@ -201,6 +201,120 @@ class TestFallbackReportsTheMostSpecificReason:
         assert attempt.method == "rtsp"
 
 
+class TestWebApiLeg:
+    """The LAPI ``GetSnapshot`` pre-leg: cheapest transport, tried first."""
+
+    def test_webapi_success_short_circuits_every_other_leg(self):
+        mgr = _manager()
+
+        with (
+            patch.object(
+                DeviceManager,
+                "_webapi_snapshot_attempt",
+                return_value=SnapshotAttempt(image=JPEG, method="webapi"),
+            ),
+            patch.object(mgr, "rtsp_url") as rtsp,
+            patch.object(mgr, "_get_netsdk_session") as netsdk,
+        ):
+            attempt = mgr.snapshot_attempt(channel=1)
+
+        assert attempt.image == JPEG
+        assert attempt.method == "webapi"
+        rtsp.assert_not_called()
+        netsdk.assert_not_called()
+
+    def test_webapi_failure_falls_through_to_the_existing_legs(self):
+        mgr = _manager()
+        session = MagicMock()
+        session.capture_jpeg.return_value = JPEG
+
+        with (
+            patch.object(mgr, "rtsp_url", return_value=RtspUrlResult(success=False)),
+            patch.object(mgr, "_get_netsdk_session", return_value=session),
+        ):
+            attempt = mgr.snapshot_attempt(channel=1)
+
+        assert attempt.image == JPEG
+        assert attempt.method == "netsdk"
+
+    def test_webapi_failure_does_not_mask_a_specific_sdk_error(self):
+        mgr = _manager()
+        session = MagicMock()
+        session.capture_jpeg.side_effect = RuntimeError("NET_SDK login failed (err=7)")
+
+        with (
+            patch.object(mgr, "rtsp_url", return_value=RtspUrlResult(success=False)),
+            patch.object(mgr, "_get_netsdk_session", return_value=session),
+        ):
+            attempt = mgr.snapshot_attempt(channel=1)
+
+        assert attempt.error_kind == "sdk_error"
+        assert "NET_SDK login failed (err=7)" in attempt.error
+
+    def test_nat_connection_skips_the_webapi_leg(self):
+        mgr = DeviceManager(
+            ip=None,
+            identifier="NAAC909BNQGD",
+            username="admin",
+            password="pass123",
+            backend=Backend.NETSDK,
+        )
+        session = MagicMock()
+        session.capture_jpeg.return_value = JPEG
+
+        with (
+            patch.object(
+                DeviceManager,
+                "_webapi_snapshot_attempt",
+                side_effect=AssertionError("webapi leg must not run over NAT"),
+            ),
+            patch.object(mgr, "rtsp_url", return_value=RtspUrlResult(success=False)),
+            patch.object(mgr, "_get_netsdk_session", return_value=session),
+        ):
+            attempt = mgr.snapshot_attempt(channel=1)
+
+        assert attempt.image == JPEG
+
+    def test_maps_client_result_into_a_snapshot_attempt(self, no_webapi_snapshot):
+        from pytvt.web_api.models import SnapshotResult as WebSnapshotResult
+
+        mgr = _manager()
+        web_client = MagicMock()
+        web_client.get_snapshot_webapi.return_value = WebSnapshotResult(
+            success=True,
+            image_data=JPEG,
+            content_type="image/jpeg",
+            method="webapi",
+        )
+
+        with patch("pytvt.web_api.client.WebApiClient", return_value=web_client) as client_cls:
+            attempt = no_webapi_snapshot(mgr, channel=3)
+
+        assert attempt.image == JPEG
+        assert attempt.method == "webapi"
+        # The web API numbers channels from 1; device_sdk from 0.
+        web_client.get_snapshot_webapi.assert_called_once_with(channel_id=4)
+        assert client_cls.call_args.kwargs["port"] == mgr._http_port
+
+    def test_maps_client_failure_into_a_reported_attempt(self, no_webapi_snapshot):
+        from pytvt.web_api.models import SnapshotResult as WebSnapshotResult
+
+        mgr = _manager()
+        web_client = MagicMock()
+        web_client.get_snapshot_webapi.return_value = WebSnapshotResult(
+            success=False,
+            method="webapi",
+            error="HTTP 404 from /LAPI/V1.0/Image/Channels/4/Snapshot",
+        )
+
+        with patch("pytvt.web_api.client.WebApiClient", return_value=web_client):
+            attempt = no_webapi_snapshot(mgr, channel=3)
+
+        assert attempt.success is False
+        assert attempt.error_kind == "webapi_error"
+        assert "HTTP 404" in attempt.error
+
+
 class TestBackwardCompatibility:
     """``snapshot`` keeps its signature and its ``bytes | None`` contract."""
 
