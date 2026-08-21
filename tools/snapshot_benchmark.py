@@ -10,7 +10,8 @@ Legs:
 
 - ``webapi``  — LAPI ``GetSnapshot`` (the NVR's "API Server" service):
                 one authenticated HTTP GET, no subprocess, no SDK login.
-- ``rtsp``    — RTSP frame grab via ffmpeg (URL resolved over the web CGI).
+- ``rtsp``    — RTSP frame grab via ffmpeg (URL resolved over the NVR web
+                CGI, or the camera's direct ``profile1`` URL for a bare IPC).
 - ``netsdk``  — native ``NET_SDK_CaptureJPEGData_V2`` (requires the vendor
                 SDK installed; skipped automatically when unavailable).
 
@@ -145,12 +146,25 @@ def bench_webapi(args) -> LegReport:
 
 
 def bench_rtsp(args) -> LegReport:
+    from urllib.parse import quote
+
     from pytvt.xml_api import NvrClient, rtsp_snapshot_attempt_bytes
 
     report = LegReport(leg="rtsp", uses_subprocess=True)
-    with NvrClient(args.ip, args.username, args.password, port=args.web_port, timeout=args.timeout) as nvr:
-        nvr.login()
-        rtsp_url = nvr.get_rtsp_url(args.channel, "main")
+    # Resolving the RTSP URL over the NVR web CGI needs the recorder's
+    # challenge-response login; a bare IP camera speaks Basic auth and has no
+    # such CGI, so fall back to its conventional direct RTSP profile URL.
+    rtsp_url = ""
+    try:
+        with NvrClient(args.ip, args.username, args.password, port=args.web_port, timeout=args.timeout) as nvr:
+            nvr.login()
+            rtsp_url = nvr.get_rtsp_url(args.channel, "main")
+    except Exception as exc:
+        creds = f"{quote(args.username, safe='')}:{quote(args.password, safe='')}@"
+        rtsp_url = f"rtsp://{creds}{args.ip}:{args.rtsp_port}/profile1"
+        report.errors.append(
+            f"web CGI unavailable ({type(exc).__name__}); using direct RTSP {args.ip}:{args.rtsp_port}/profile1"
+        )
     if not rtsp_url:
         report.failed = args.iterations
         report.errors.append("could not resolve an RTSP URL over the web CGI")
@@ -207,6 +221,7 @@ def main() -> int:
     parser.add_argument("-n", "--iterations", type=int, default=5)
     parser.add_argument("--web-port", type=int, default=80)
     parser.add_argument("--sdk-port", type=int, default=6036)
+    parser.add_argument("--rtsp-port", type=int, default=554, help="RTSP port for the direct-camera fallback")
     parser.add_argument("--timeout", type=int, default=10)
     parser.add_argument(
         "--legs",
@@ -227,7 +242,15 @@ def main() -> int:
             print(f"unknown leg: {leg}", file=sys.stderr)
             return 2
         print(f"[{leg}] running {args.iterations} captures against {args.ip} ch{args.channel} ...", file=sys.stderr)
-        reports.append(fn(args))
+        try:
+            reports.append(fn(args))
+        except Exception as exc:
+            # Isolate a leg's setup failure (e.g. an SDK that will not load, a
+            # login that raises) so it cannot abort the run and discard the
+            # results already collected for the other legs.
+            failed = LegReport(leg=leg, failed=args.iterations)
+            failed.errors.append(f"{type(exc).__name__}: {exc}")
+            reports.append(failed)
 
     if args.json:
         print(json.dumps([r.as_dict() for r in reports], indent=2))
