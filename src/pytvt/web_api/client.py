@@ -181,6 +181,9 @@ class WebApiClient:
 
         # Cache for supported APIs (populated by get_supported_apis)
         self._supported_apis: set[str] | None = None
+        # Which GetSnapshot URL form this device answered ("flat" per the
+        # TVTAPI v2.0.0 doc, or the legacy LAPI-prefixed variant).
+        self._snapshot_path_style: str | None = None
 
     # ── Low-level HTTP ───────────────────────────────────────────
 
@@ -330,7 +333,16 @@ class WebApiClient:
 
     def _get_raw(self, path: str, accept: str = "*/*") -> tuple[bytes, str]:
         """GET that returns raw bytes + content type (for binary responses like snapshots)."""
-        full_path = f"{LAPI_BASE}{path}"
+        return self._get_raw_absolute(f"{LAPI_BASE}{path}", accept=accept)
+
+    def _get_raw_absolute(self, full_path: str, accept: str = "*/*") -> tuple[bytes, str]:
+        """GET an absolute device path (no LAPI prefix), returning raw bytes + content type.
+
+        TVTAPI v2.0.0 §1.3.1 defines command URLs as flat
+        ``/<cmd name>[/channelId]`` paths; the LAPI-prefixed scheme is a
+        firmware variant. Callers that must speak the documented flat form
+        use this directly.
+        """
         http_status, data, content_type = self._request(
             "GET",
             full_path,
@@ -386,6 +398,20 @@ class WebApiClient:
         if self._supported_apis is None:
             self.get_supported_apis()
         return api_name in self._supported_apis  # type: ignore[operator]
+
+    def _supports_quietly(self, api_name: str) -> bool:
+        """Like :meth:`supports`, but a failed capability probe means False.
+
+        Firmware that only speaks the documented flat command URLs 404s the
+        LAPI-prefixed ``SupportedAPIs`` probe; that must not abort a caller
+        that has its own fallbacks.
+        """
+        try:
+            return self.supports(api_name)
+        except (AuthenticationError, DeviceOfflineError):
+            raise
+        except WebApiError:
+            return False
 
     # ── System commands (Section 2) ──────────────────────────────
 
@@ -699,35 +725,52 @@ class WebApiClient:
     def get_snapshot_webapi(self, channel_id: int = 1) -> SnapshotResult:
         """Get a live snapshot via Web API ``GetSnapshot`` (Section 3.2.5).
 
-        The device returns a JPEG image directly.
+        The device returns a JPEG image directly. TVTAPI v2.0.0 documents the
+        endpoint as a flat ``GET /GetSnapshot[/channelId]`` (validated against
+        real NVR hardware — the LAPI-prefixed path 404s there), so the flat
+        form is tried first with the LAPI form kept as a firmware-variant
+        fallback. The style that answers is remembered for this client.
 
         Returns:
             :class:`~.models.SnapshotResult` with image bytes.
         """
-        try:
-            data, content_type = self._get_raw(
-                f"/Image/Channels/{channel_id}/Snapshot",
-                accept="image/jpeg",
-            )
-        except (UnsupportedFunctionError, WebApiError) as exc:
-            return SnapshotResult(
-                success=False,
-                method="webapi",
-                error=str(exc),
-            )
+        candidates = [
+            ("flat", f"/GetSnapshot/{channel_id}"),
+            ("lapi", f"{LAPI_BASE}/Image/Channels/{channel_id}/Snapshot"),
+        ]
+        if self._snapshot_path_style is not None:
+            candidates = [c for c in candidates if c[0] == self._snapshot_path_style]
 
-        if not data or len(data) < 100:
+        last_error = ""
+        for style, full_path in candidates:
+            try:
+                data, content_type = self._get_raw_absolute(full_path, accept="image/jpeg")
+            except AuthenticationError:
+                raise
+            except DeviceOfflineError as exc:
+                # Unreachable on one path means unreachable on the other —
+                # don't pay a second connect timeout.
+                return SnapshotResult(success=False, method="webapi", error=str(exc))
+            except (UnsupportedFunctionError, WebApiError) as exc:
+                last_error = str(exc)
+                continue
+
+            if not data or len(data) < 100:
+                last_error = "Empty or invalid snapshot response"
+                continue
+
+            self._snapshot_path_style = style
             return SnapshotResult(
-                success=False,
+                success=True,
+                image_data=data,
+                content_type=content_type,
                 method="webapi",
-                error="Empty or invalid snapshot response",
             )
 
         return SnapshotResult(
-            success=True,
-            image_data=data,
-            content_type=content_type,
+            success=False,
             method="webapi",
+            error=last_error or "No snapshot path variant answered",
         )
 
     def get_snapshot_by_time(
@@ -808,20 +851,23 @@ class WebApiClient:
         Returns:
             :class:`~.models.SnapshotResult`.
         """
-        # Try GetSnapshot first
-        if self.supports("GetSnapshot"):
-            result = self.get_snapshot_webapi(channel_id)
-            if result.success:
-                return result
-            logger.debug(
-                "GetSnapshot failed on %s CH%d: %s — trying alternatives",
-                self.host,
-                channel_id,
-                result.error,
-            )
+        # Try GetSnapshot first. Deliberately not gated on supports():
+        # capability discovery itself uses the LAPI path scheme, which 404s
+        # on firmware that only speaks the documented flat commands — and
+        # get_snapshot_webapi already reports its own failure cheaply.
+        result = self.get_snapshot_webapi(channel_id)
+        if result.success:
+            return result
+        logger.debug(
+            "GetSnapshot failed on %s CH%d: %s — trying alternatives",
+            self.host,
+            channel_id,
+            result.error,
+        )
 
         # Try GetSnapshotByTime
-        if self.supports("GetSnapshotByTime"):
+        webapi_error = result.error
+        if self._supports_quietly("GetSnapshotByTime"):
             result = self.get_snapshot_by_time(channel_id)
             if result.success:
                 return result
@@ -835,7 +881,7 @@ class WebApiClient:
         return SnapshotResult(
             success=False,
             method="webapi",
-            error="No supported Web API snapshot method available",
+            error=webapi_error or "No supported Web API snapshot method available",
         )
 
     def get_snapshot_with_rtsp_fallback(

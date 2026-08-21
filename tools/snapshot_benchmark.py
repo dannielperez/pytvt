@@ -26,7 +26,6 @@ stdout plus optional ``--json`` for machine consumption.
 from __future__ import annotations
 
 import argparse
-import contextlib
 import json
 import os
 import resource
@@ -169,28 +168,34 @@ def bench_rtsp(args) -> LegReport:
 def bench_netsdk(args) -> LegReport:
     report = LegReport(leg="netsdk")
     try:
-        from pytvt.device_sdk.client import Client
+        from pytvt.device_sdk.client import NetSdkClient
     except Exception as exc:
         report.failed = args.iterations
         report.errors.append(f"NetSDK unavailable: {type(exc).__name__}: {exc}")
         return report
 
     try:
-        client = Client()
-        session = client.login(args.ip, args.sdk_port, args.username, args.password)
+        client = NetSdkClient()
     except Exception as exc:
+        # The native libdvrnetsdk.so is Linux-only; report and move on.
         report.failed = args.iterations
-        report.errors.append(f"NetSDK login failed: {type(exc).__name__}: {exc}")
+        report.errors.append(f"NetSDK init failed: {type(exc).__name__}: {exc}")
         return report
 
-    def capture() -> bytes | None:
-        return session.capture_jpeg(args.channel - 1)  # NetSDK is 0-based
+    with client:
+        try:
+            session = client.login(args.ip, args.username, args.password, port=args.sdk_port)
+        except Exception as exc:
+            report.failed = args.iterations
+            report.errors.append(f"NetSDK login failed: {type(exc).__name__}: {exc}")
+            return report
 
-    try:
-        return _run_leg(report, args.iterations, capture)
-    finally:
-        with contextlib.suppress(Exception):
-            session.logout()
+        with session:
+
+            def capture() -> bytes | None:
+                return session.capture_jpeg(args.channel - 1)  # NetSDK is 0-based
+
+            return _run_leg(report, args.iterations, capture)
 
 
 def main() -> int:
