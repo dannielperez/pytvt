@@ -383,6 +383,32 @@ class TestSnapshotRouting:
         assert result.success is True
         assert result.method == "webapi"
         assert result.image_data == jpeg_bytes
+        # The documented flat command URL is the first (and here, only) request.
+        assert mock_conn.request.call_args_list[0].args[1] == "/GetSnapshot/1"
+        assert client._snapshot_path_style == "flat"
+
+    @patch("pytvt.web_api.client.http.client.HTTPConnection")
+    def test_webapi_snapshot_falls_back_to_lapi_path(self, mock_conn_cls, client):
+        """Firmware that 404s the flat command still answers on the LAPI path."""
+        jpeg_bytes = b"\xff\xd8\xff\xe0" + b"\x00" * 200
+        mock_conn = MagicMock()
+        mock_conn_cls.return_value = mock_conn
+        mock_conn.getresponse.side_effect = [
+            _ok_response(b"Not Found", status=404),
+            _ok_response(jpeg_bytes, content_type="image/jpeg"),
+        ]
+
+        result = client.get_snapshot_webapi(channel_id=2)
+        assert result.success is True
+        assert mock_conn.request.call_args_list[0].args[1] == "/GetSnapshot/2"
+        assert mock_conn.request.call_args_list[1].args[1] == f"{LAPI_BASE}/Image/Channels/2/Snapshot"
+        assert client._snapshot_path_style == "lapi"
+
+        # The style that answered is remembered — next capture goes straight there.
+        mock_conn.getresponse.side_effect = [_ok_response(jpeg_bytes, content_type="image/jpeg")]
+        result = client.get_snapshot_webapi(channel_id=2)
+        assert result.success is True
+        assert mock_conn.request.call_args_list[2].args[1] == f"{LAPI_BASE}/Image/Channels/2/Snapshot"
 
     @patch("pytvt.web_api.client.http.client.HTTPConnection")
     def test_webapi_snapshot_too_small(self, mock_conn_cls, client):
@@ -396,7 +422,7 @@ class TestSnapshotRouting:
 
     @patch("pytvt.web_api.client.http.client.HTTPConnection")
     def test_get_snapshot_tries_both_methods(self, mock_conn_cls, client):
-        """When GetSnapshot fails, falls back to GetSnapshotByTime."""
+        """When GetSnapshot fails (both path styles), falls back to GetSnapshotByTime."""
         client._supported_apis = {"GetSnapshot", "GetSnapshotByTime"}
 
         jpeg_bytes = b"\xff\xd8\xff\xe0" + b"\x00" * 200
@@ -405,11 +431,11 @@ class TestSnapshotRouting:
         def side_effect():
             nonlocal call_count
             call_count += 1
-            if call_count == 1:
-                # First call (GetSnapshot via _get_raw) — return small/bad data
+            if call_count <= 2:
+                # GetSnapshot via flat then LAPI path — return small/bad data
                 return _ok_response(b"bad", content_type="text/html")
             else:
-                # Second call (GetSnapshotByTime) — return JPEG
+                # Third call (GetSnapshotByTime) — return JPEG
                 return _ok_response(jpeg_bytes, 200, "image/jpeg")
 
         mock_conn = MagicMock()
@@ -420,16 +446,24 @@ class TestSnapshotRouting:
         assert result.success is True
         assert result.method == "webapi_by_time"
 
-    def test_get_snapshot_no_supported_method(self, client):
+    @patch("pytvt.web_api.client.http.client.HTTPConnection")
+    def test_get_snapshot_no_supported_method(self, mock_conn_cls, client):
         client._supported_apis = set()
+        mock_conn = MagicMock()
+        mock_conn_cls.return_value = mock_conn
+        mock_conn.getresponse.return_value = _ok_response(b"Not Found", status=404)
+
         result = client.get_snapshot()
         assert result.success is False
-        assert "No supported" in result.error
+        assert result.error  # carries the webapi attempt's own failure detail
 
     @patch("pytvt.web_api.client.http.client.HTTPConnection")
     def test_rtsp_fallback_no_url(self, mock_conn_cls, client):
         """Without rtsp_url, RTSP fallback is skipped."""
         client._supported_apis = set()
+        mock_conn = MagicMock()
+        mock_conn_cls.return_value = mock_conn
+        mock_conn.getresponse.return_value = _ok_response(b"Not Found", status=404)
 
         result = client.get_snapshot_with_rtsp_fallback(channel_id=1)
         assert result.success is False
