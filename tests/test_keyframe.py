@@ -278,3 +278,18 @@ class TestDecodeKeyframeToJpeg:
         ):
             kf.decode_keyframe_to_jpeg(b"", "hevc")
         assert excinfo.value.kind == "empty_frame"
+
+
+class TestCallbackLifetime:
+    def test_thunk_is_retained_after_the_preview_is_stopped(self, session, mock_lib):
+        """A late callback after StopLivePlay must hit a live trampoline, not freed memory."""
+        mock_lib.NET_SDK_LivePlayEx.side_effect = _deliver([_frame(FrameType.VIDEO, HEVC_KEYFRAME, key=1)])
+
+        session.capture_keyframe(0, timeout=1.0)
+
+        thunk = mock_lib.NET_SDK_LivePlayEx.call_args.args[2]
+        assert thunk in session._live_thunks
+        # Retention is bounded: the deque caps how many trampolines stay alive.
+        for _ in range(12):
+            session.capture_keyframe(0, timeout=1.0)
+        assert len(session._live_thunks) <= 8

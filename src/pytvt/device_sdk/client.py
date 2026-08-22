@@ -26,6 +26,7 @@ import threading
 import time
 import warnings
 import weakref
+from collections import deque
 from collections.abc import Callable, Iterable
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -710,6 +711,10 @@ class DeviceSession:
         # Smart-event callback registration is process-global, so at most one
         # plate stream may be owned by this session/client at a time.
         self._plate_stream: PlateEventStream | None = None
+        # Live-preview callback thunks outlive their preview: StopLivePlay is
+        # not documented to join the SDK's callback thread, so the trampoline
+        # is kept referenced (bounded) instead of being freed on return.
+        self._live_thunks: deque[object] = deque(maxlen=8)
 
     def __enter__(self) -> DeviceSession:
         return self
@@ -1171,10 +1176,11 @@ class DeviceSession:
         try:
             arrived = done.wait(timeout)
         finally:
-            # The callback thunk must outlive the preview; stop before it can be
-            # collected and before the state dict goes away.
+            # Stop first, then keep the thunk referenced past this call: a
+            # late callback after StopLivePlay must hit a live trampoline
+            # (``done`` is already set, so it is ignored), never freed memory.
             stop_live_play(handle)
-            del thunk
+            self._live_thunks.append(thunk)
         capture_ms = int((time.monotonic() - started) * 1000)
         if state["error"]:
             raise NetSdkError(f"LivePlayEx keyframe grab failed: {state['error']}")

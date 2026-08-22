@@ -557,3 +557,30 @@ class TestMainStreamIntent:
 
         assert attempt.method == "http"
         assert order == ["webapi", "http"]
+
+
+class TestMainStreamFallbackUnderDeadline:
+    """Under a deadline the CIF Web API fallback still runs for ``main``.
+
+    A fresh SDK login is unbounded, so the NetSDK legs are skipped once a
+    deadline is set — but the Web API leg is deadline-aware and capped, so a
+    recorder where RTSP is blocked and only the API Server answers must still
+    produce an image instead of "capture failed".
+    """
+
+    def test_webapi_is_attempted_for_main_with_deadline_on_the_netsdk_backend(self):
+        mgr = _manager()
+
+        with (
+            patch.object(mgr, "rtsp_url", return_value=RtspUrlResult(success=False, error="no url")),
+            patch.object(
+                DeviceManager,
+                "_webapi_snapshot_attempt",
+                return_value=SnapshotAttempt(image=JPEG, method="webapi"),
+            ) as webapi,
+            patch.object(mgr, "_get_netsdk_session", side_effect=AssertionError("no SDK login under a deadline")),
+        ):
+            attempt = mgr.snapshot_attempt(channel=0, stream="main", total_timeout=5)
+
+        assert attempt.method == "webapi"
+        webapi.assert_called_once()

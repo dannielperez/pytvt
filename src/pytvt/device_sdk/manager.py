@@ -578,14 +578,17 @@ class DeviceManager:
                 if keyframe.image:
                     return keyframe
                 attempts.append(keyframe)
-            if deadline is not None:
-                return _first_failure(attempts)
             if wants_main:
+                # Snapshot-stream fallback (CIF) once the full-resolution legs
+                # are exhausted; deadline-aware and capped, so it also runs
+                # under a deadline where a fresh SDK login may not.
                 webapi = _webapi_leg()
                 if webapi is not None:
                     if webapi.image:
                         return webapi
                     attempts.append(webapi)
+            if deadline is not None:
+                return _first_failure(attempts)
             netsdk = self._netsdk_snapshot_attempt(channel=channel)
             if netsdk.image:
                 return netsdk

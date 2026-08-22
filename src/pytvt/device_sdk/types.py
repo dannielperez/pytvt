@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import ctypes as ct
 from datetime import datetime
+from typing import ClassVar
 
 # ── Time structures ─────────────────────────────────────────────────
 
@@ -734,7 +735,7 @@ class NET_SDK_IVE_VSD_TARGET_ATTRIBUTES(ct.Union):
 
     _layout_ = "ms"
     _pack_ = 4
-    _fields_ = [  # noqa: RUF012 - ctypes requires this mutable class declaration
+    _fields_: ClassVar = [
         ("car", NET_SDK_IVE_VSD_TARGET_CAR),
         ("raw", ct.c_ubyte * 1088),
     ]
