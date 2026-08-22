@@ -13,6 +13,8 @@ from __future__ import annotations
 import ctypes as ct
 import struct
 import subprocess
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -42,8 +44,23 @@ def _frame(
     width: int = 2560,
     height: int = 1440,
     time_us: int = 1_700_000_000_000_000,
+    channel: int = 0,
 ) -> bytes:
-    header = struct.pack("<10I2q", 1, 0, data_type, len(payload), key, width, height, 0, 0x40, 0, time_us, 0)
+    header = struct.pack(
+        "<10I2q",
+        1,
+        channel,
+        data_type,
+        len(payload),
+        key,
+        width,
+        height,
+        0,
+        0x40,
+        0,
+        time_us,
+        0,
+    )
     assert len(header) == ct.sizeof(NET_SDK_FRAME_INFO)
     return header + payload
 
@@ -110,6 +127,8 @@ class TestCaptureKeyframe:
         assert (capture.width, capture.height) == (2560, 1440)
         assert capture.stream_type == 0
         assert capture.frame_time_us == 1_700_000_000_000_000
+        assert 0 <= capture.first_stream_data_ms <= capture.keyframe_received_ms
+        assert capture.keyframe_received_ms <= capture.capture_ms
         # Preview was requested for the right channel/stream with no render window.
         _uid, info_ptr, callback, _user = mock_lib.NET_SDK_LivePlayEx.call_args.args
         info = info_ptr._obj
@@ -142,6 +161,33 @@ class TestCaptureKeyframe:
         assert (capture.width, capture.height) == (352, 240)
         assert mock_lib.NET_SDK_LivePlayEx.call_args.args[1]._obj.streamType == 1
 
+    def test_concurrent_channels_keep_request_scoped_callbacks_and_buffers(self, session, mock_lib):
+        rendezvous = threading.Barrier(2)
+        payloads = {4: HEVC_KEYFRAME + b"channel-4", 7: HEVC_KEYFRAME + b"channel-7"}
+
+        def _live_play(_user_id, info, callback, _user):
+            channel = info._obj.lChannel
+            frame = _frame(
+                FrameType.VIDEO,
+                payloads[channel],
+                key=1,
+                channel=channel,
+            )
+            buffer = ct.create_string_buffer(frame, len(frame))
+            rendezvous.wait(timeout=1)
+            callback(channel + 100, FrameType.VIDEO, ct.addressof(buffer), len(frame), None)
+            return channel + 100
+
+        mock_lib.NET_SDK_LivePlayEx.side_effect = _live_play
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = {channel: executor.submit(session.capture_keyframe, channel, timeout=1) for channel in (4, 7)}
+            captures = {channel: future.result() for channel, future in futures.items()}
+
+        assert captures[4].data == payloads[4]
+        assert captures[7].data == payloads[7]
+        assert captures[4].data != captures[7].data
+
     def test_timeout_stops_the_preview_and_raises(self, session, mock_lib):
         mock_lib.NET_SDK_LivePlayEx.side_effect = _deliver([_frame(FrameType.VIDEO_FORMAT, FORMAT_HEVC)], handle=9)
 
@@ -149,6 +195,31 @@ class TestCaptureKeyframe:
             session.capture_keyframe(0, timeout=0.05)
 
         mock_lib.NET_SDK_StopLivePlay.assert_called_once_with(9)
+
+    def test_late_callback_after_timeout_is_closed_before_stop(self, session, mock_lib):
+        captured = {}
+
+        def _live_play(_user_id, _info, callback, _user):
+            captured["callback"] = callback
+            return 11
+
+        def _stop(_handle):
+            frame = _frame(FrameType.VIDEO, HEVC_KEYFRAME, key=1)
+            buffer = ct.create_string_buffer(frame, len(frame))
+            captured["callback"](11, FrameType.VIDEO, ct.addressof(buffer), len(frame), None)
+            return True
+
+        mock_lib.NET_SDK_LivePlayEx.side_effect = _live_play
+        mock_lib.NET_SDK_StopLivePlay.side_effect = _stop
+
+        with (
+            patch("pytvt.device_sdk.client.ct.string_at") as copy_buffer,
+            pytest.raises(NetSdkError, match="no keyframe"),
+        ):
+            session.capture_keyframe(0, timeout=0.01)
+
+        copy_buffer.assert_not_called()
+        assert len(session._live_thunks) == 1
 
     def test_live_play_failure_raises_the_sdk_error(self, session, mock_lib):
         mock_lib.NET_SDK_LivePlayEx.return_value = -1
@@ -186,6 +257,8 @@ class TestCaptureMainStill:
         assert still.image == JPEG
         assert (still.width, still.height, still.codec, still.stream_type) == (2560, 1440, "hevc", 0)
         assert still.capture_ms >= 0 and still.decode_ms >= 0
+        assert still.frame_time_us == 1_700_000_000_000_000
+        assert 0 <= still.first_stream_data_ms <= still.keyframe_received_ms
         decode.assert_called_once_with(HEVC_KEYFRAME, "hevc", quality=3, timeout=4.0)
 
     def test_decode_errors_propagate(self, session, mock_lib):

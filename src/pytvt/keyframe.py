@@ -50,6 +50,8 @@ class KeyframeCapture:
     stream_type: int  # NET_SDK_STREAM_TYPE (0 main, 1 sub, ...)
     capture_ms: int  # LivePlayEx call → keyframe in hand
     frame_time_us: int = 0  # recorder's absolute frame time, microseconds since epoch
+    first_stream_data_ms: int = 0  # LivePlayEx call → first callback
+    keyframe_received_ms: int = 0  # LivePlayEx call → accepted keyframe callback
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +65,9 @@ class StillCapture:
     stream_type: int
     capture_ms: int
     decode_ms: int
+    frame_time_us: int = 0
+    first_stream_data_ms: int = 0
+    keyframe_received_ms: int = 0
 
 
 def codec_from_format_frame(payload: bytes) -> str:
