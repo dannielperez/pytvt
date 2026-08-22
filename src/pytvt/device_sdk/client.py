@@ -26,7 +26,6 @@ import threading
 import time
 import warnings
 import weakref
-from collections import deque
 from collections.abc import Callable, Iterable
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -711,10 +710,14 @@ class DeviceSession:
         # Smart-event callback registration is process-global, so at most one
         # plate stream may be owned by this session/client at a time.
         self._plate_stream: PlateEventStream | None = None
-        # Live-preview callback thunks outlive their preview: StopLivePlay is
-        # not documented to join the SDK's callback thread, so the trampoline
-        # is kept referenced (bounded) instead of being freed on return.
-        self._live_thunks: deque[object] = deque(maxlen=8)
+        # One session-lifetime live-preview trampoline avoids freeing a ctypes
+        # callback while a late SDK callback may still hold its address.
+        # Request state is routed by the opaque integer passed through pUser and
+        # removed after StopLivePlay; the stable thunk never captures frame data.
+        self._live_request_lock = threading.Lock()
+        self._live_requests: dict[int, Callable[[int, int | None, int], None]] = {}
+        self._next_live_request_id = 1
+        self._live_thunk = LIVE_DATA_CALLBACK_EX(self._dispatch_live_data)
 
     def __enter__(self) -> DeviceSession:
         return self
@@ -776,6 +779,21 @@ class DeviceSession:
             logger.debug("Logged out handle=%d", handle)
         finally:
             self._handle = -1
+
+    def _dispatch_live_data(
+        self,
+        _handle: int,
+        data_type: int,
+        buffer: int | None,
+        length: int,
+        user: int | None,
+    ) -> None:
+        """Route a native preview callback to bounded request-local state."""
+        request_id = int(user or 0)
+        with self._live_request_lock:
+            callback = self._live_requests.get(request_id)
+        if callback is not None:
+            callback(data_type, buffer, length)
 
     # ── Device information ──────────────────────────────────────
 
@@ -1137,50 +1155,87 @@ class DeviceSession:
         stop_live_play = self._require("NET_SDK_StopLivePlay")
         header_size = ct.sizeof(NET_SDK_FRAME_INFO)
         done = threading.Event()
-        state: dict[str, object] = {"codec": "", "width": 0, "height": 0, "time_us": 0, "data": None, "error": ""}
+        state: dict[str, object] = {
+            "codec": "",
+            "width": 0,
+            "height": 0,
+            "time_us": 0,
+            "data": None,
+            "error": "",
+            "first_data_ms": 0,
+            "keyframe_received_ms": 0,
+        }
+        started = time.monotonic()
 
-        def _on_data(_handle: int, data_type: int, buffer: int | None, length: int, _user: int | None) -> None:
+        def _on_data(data_type: int, buffer: int | None, length: int) -> None:
             # Runs on the SDK's own thread: copy out, never block, never raise.
             try:
                 if done.is_set() or not buffer or length < header_size:
                     return
-                raw = ct.string_at(buffer, length)
-                info = NET_SDK_FRAME_INFO.from_buffer_copy(raw[:header_size])
-                payload = raw[header_size:]
+                callback_ms = int((time.monotonic() - started) * 1000)
+                if not state["first_data_ms"]:
+                    state["first_data_ms"] = callback_ms
+                info = NET_SDK_FRAME_INFO.from_buffer_copy(
+                    ct.string_at(buffer, header_size),
+                )
+                payload_length = length - header_size
+                if payload_length > max_bytes:
+                    state["error"] = f"Keyframe of {payload_length} bytes exceeds the {max_bytes}-byte limit"
+                    done.set()
+                    return
                 if data_type == FrameType.VIDEO_FORMAT:
+                    payload = ct.string_at(buffer + header_size, payload_length)
                     state["codec"] = codec_from_format_frame(payload) or state["codec"]
                     state["width"] = state["width"] or int(info.width)
                     state["height"] = state["height"] or int(info.height)
                     return
                 if data_type != FrameType.VIDEO or int(info.keyFrame) != 1:
                     return
-                if len(payload) > max_bytes:
-                    state["error"] = f"Keyframe of {len(payload)} bytes exceeds the {max_bytes}-byte limit"
-                    done.set()
-                    return
+                payload = ct.string_at(buffer + header_size, payload_length)
                 state["data"] = payload
                 state["width"] = int(info.width) or int(state["width"])  # type: ignore[call-overload]
                 state["height"] = int(info.height) or int(state["height"])  # type: ignore[call-overload]
                 state["time_us"] = int(info.time)
+                state["keyframe_received_ms"] = callback_ms
                 done.set()
             except Exception as exc:  # pragma: no cover - defensive: ctypes swallows callback errors
                 state["error"] = f"{type(exc).__name__}: {exc}"
                 done.set()
 
-        thunk = LIVE_DATA_CALLBACK_EX(_on_data)
         request = NET_SDK_CLIENTINFO(lChannel=channel, streamType=int(stream), hPlayWnd=None, bNoDecode=1)
-        started = time.monotonic()
-        handle = int(live_play(self._handle, ct.byref(request), thunk, None))
-        if handle < 0:
-            self._check(False, "LivePlayEx")
+        with self._live_request_lock:
+            request_id = self._next_live_request_id
+            self._next_live_request_id += 1
+            self._live_requests[request_id] = _on_data
+        handle = -1
         try:
+            handle = int(
+                live_play(
+                    self._handle,
+                    ct.byref(request),
+                    self._live_thunk,
+                    ct.c_void_p(request_id),
+                ),
+            )
+            if handle < 0:
+                self._check(False, "LivePlayEx")
             arrived = done.wait(timeout)
         finally:
-            # Stop first, then keep the thunk referenced past this call: a
-            # late callback after StopLivePlay must hit a live trampoline
-            # (``done`` is already set, so it is ignored), never freed memory.
-            stop_live_play(handle)
-            self._live_thunks.append(thunk)
+            # Close callback state before asking the SDK to stop. A timeout has
+            # not otherwise set ``done``; without this assignment a late native
+            # callback could still copy into and mutate the abandoned request.
+            # Keep the thunk referenced past this call so any callback already
+            # in flight hits a live trampoline and observes the closed state.
+            done.set()
+            try:
+                if handle >= 0 and not stop_live_play(handle):
+                    # An orphan preview can keep recorder/native resources and
+                    # callback traffic alive. Leave this uncoded so pooled
+                    # consumers invalidate the session and recycle its worker.
+                    raise NetSdkError("StopLivePlay failed; recorder session is unsafe to reuse")
+            finally:
+                with self._live_request_lock:
+                    self._live_requests.pop(request_id, None)
         capture_ms = int((time.monotonic() - started) * 1000)
         if state["error"]:
             raise NetSdkError(f"LivePlayEx keyframe grab failed: {state['error']}")
@@ -1196,6 +1251,8 @@ class DeviceSession:
             stream_type=int(stream),
             capture_ms=capture_ms,
             frame_time_us=int(state["time_us"]),  # type: ignore[call-overload]
+            first_stream_data_ms=int(state["first_data_ms"]),  # type: ignore[call-overload]
+            keyframe_received_ms=int(state["keyframe_received_ms"]),  # type: ignore[call-overload]
         )
 
     def capture_main_still(
@@ -1225,6 +1282,9 @@ class DeviceSession:
             stream_type=keyframe.stream_type,
             capture_ms=keyframe.capture_ms,
             decode_ms=int((time.monotonic() - decode_started) * 1000),
+            frame_time_us=keyframe.frame_time_us,
+            first_stream_data_ms=keyframe.first_stream_data_ms,
+            keyframe_received_ms=keyframe.keyframe_received_ms,
         )
 
     # ── Native face capture search ─────────────────────────────

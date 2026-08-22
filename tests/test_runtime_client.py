@@ -1213,6 +1213,8 @@ def _keyframe_result(**overrides):
         "streamType": 0,
         "captureMs": 212,
         "frameTimeUs": 1_700_000_000_000_000,
+        "firstStreamDataMs": 87,
+        "keyframeReceivedMs": 211,
     }
     result.update(overrides)
     return result
@@ -1248,6 +1250,23 @@ def test_typed_runtime_keyframe_owns_job_schema_and_result_validation() -> None:
     assert (keyframe.codec, keyframe.width, keyframe.height) == ("hevc", 2560, 1440)
     assert (keyframe.channel, keyframe.stream_type, keyframe.capture_ms) == (3, 0, 212)
     assert keyframe.frame_time_us == 1_700_000_000_000_000
+    assert keyframe.first_stream_data_ms == 87
+    assert keyframe.keyframe_received_ms == 211
+
+
+def test_typed_runtime_keyframe_accepts_older_runtime_without_timeline_fields() -> None:
+    result = _keyframe_result()
+    result.pop("firstStreamDataMs")
+    result.pop("keyframeReceivedMs")
+
+    class Client(SyncRuntimeClient):
+        def execute(self, _job, **_options):
+            return result
+
+    keyframe = Client().capture_keyframe("192.0.2.10", "operator", "secret", channel=3)
+
+    assert keyframe.first_stream_data_ms == 0
+    assert keyframe.keyframe_received_ms == 0
 
 
 @pytest.mark.parametrize(
@@ -1260,6 +1279,7 @@ def test_typed_runtime_keyframe_owns_job_schema_and_result_validation() -> None:
         _keyframe_result(width=-1),
         _keyframe_result(streamType=9),
         _keyframe_result(captureMs="fast"),
+        _keyframe_result(firstStreamDataMs=300, keyframeReceivedMs=200),
     ],
 )
 def test_typed_runtime_keyframe_rejects_invalid_payload(result) -> None:
@@ -1316,6 +1336,9 @@ def test_typed_runtime_main_still_decodes_locally() -> None:
     assert (still.channel, still.width, still.height, still.codec) == (2, 2560, 1440, "hevc")
     assert still.method == "runtime_keyframe"
     assert still.capture_ms == 212 and still.decode_ms >= 0
+    assert still.frame_time_us == 1_700_000_000_000_000
+    assert still.first_stream_data_ms == 87
+    assert still.keyframe_received_ms == 211
 
 
 def test_typed_runtime_main_still_propagates_decode_error() -> None:
