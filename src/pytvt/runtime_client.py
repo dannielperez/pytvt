@@ -186,6 +186,8 @@ class RuntimeKeyframe:
     stream_type: int
     capture_ms: int
     frame_time_us: int = 0
+    first_stream_data_ms: int = 0
+    keyframe_received_ms: int = 0
 
 
 @dataclass(frozen=True)
@@ -200,6 +202,9 @@ class RuntimeStill:
     stream_type: int
     capture_ms: int
     decode_ms: int
+    frame_time_us: int = 0
+    first_stream_data_ms: int = 0
+    keyframe_received_ms: int = 0
     method: str = "runtime_keyframe"
 
 
@@ -834,6 +839,9 @@ class SyncRuntimeClient:
             stream_type=keyframe.stream_type,
             capture_ms=keyframe.capture_ms,
             decode_ms=int((time.monotonic() - started) * 1000),
+            frame_time_us=keyframe.frame_time_us,
+            first_stream_data_ms=keyframe.first_stream_data_ms,
+            keyframe_received_ms=keyframe.keyframe_received_ms,
         )
 
     def resolve_rtsp_url(
@@ -1543,6 +1551,10 @@ def _parse_keyframe(result: Any, *, channel: int, max_bytes: int = MAX_RUNTIME_S
     codec = result.get("codec", "")
     if not isinstance(codec, str) or codec not in {"", "hevc", "h264"}:
         raise RuntimeClientError("runtime returned an invalid keyframe")
+    first_stream_data_ms = _int("firstStreamDataMs", high=600_000)
+    keyframe_received_ms = _int("keyframeReceivedMs", high=600_000)
+    if keyframe_received_ms and keyframe_received_ms < first_stream_data_ms:
+        raise RuntimeClientError("runtime returned an invalid keyframe")
     return RuntimeKeyframe(
         data=data,
         codec=codec,
@@ -1552,6 +1564,8 @@ def _parse_keyframe(result: Any, *, channel: int, max_bytes: int = MAX_RUNTIME_S
         stream_type=_int("streamType", high=3),
         capture_ms=_int("captureMs", high=600_000),
         frame_time_us=_int("frameTimeUs"),
+        first_stream_data_ms=first_stream_data_ms,
+        keyframe_received_ms=keyframe_received_ms,
     )
 
 
