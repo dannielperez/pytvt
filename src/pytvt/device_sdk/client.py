@@ -1227,10 +1227,15 @@ class DeviceSession:
             # Keep the thunk referenced past this call so any callback already
             # in flight hits a live trampoline and observes the closed state.
             done.set()
-            if handle >= 0:
-                stop_live_play(handle)
-            with self._live_request_lock:
-                self._live_requests.pop(request_id, None)
+            try:
+                if handle >= 0 and not stop_live_play(handle):
+                    # An orphan preview can keep recorder/native resources and
+                    # callback traffic alive. Leave this uncoded so pooled
+                    # consumers invalidate the session and recycle its worker.
+                    raise NetSdkError("StopLivePlay failed; recorder session is unsafe to reuse")
+            finally:
+                with self._live_request_lock:
+                    self._live_requests.pop(request_id, None)
         capture_ms = int((time.monotonic() - started) * 1000)
         if state["error"]:
             raise NetSdkError(f"LivePlayEx keyframe grab failed: {state['error']}")

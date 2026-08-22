@@ -237,6 +237,18 @@ class TestCaptureKeyframe:
 
         mock_lib.NET_SDK_StopLivePlay.assert_not_called()
 
+    def test_stop_failure_invalidates_session_and_releases_request_state(self, session, mock_lib):
+        mock_lib.NET_SDK_LivePlayEx.side_effect = _deliver(
+            [_frame(FrameType.VIDEO, HEVC_KEYFRAME, key=1)],
+        )
+        mock_lib.NET_SDK_StopLivePlay.return_value = False
+
+        with pytest.raises(NetSdkError, match="session is unsafe to reuse") as exc_info:
+            session.capture_keyframe(0, timeout=1)
+
+        assert exc_info.value.invalidates_session is True
+        assert session._live_requests == {}
+
     def test_oversized_keyframe_is_rejected(self, session, mock_lib):
         mock_lib.NET_SDK_LivePlayEx.side_effect = _deliver([_frame(FrameType.VIDEO, HEVC_KEYFRAME, key=1)])
 
