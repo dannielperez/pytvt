@@ -26,7 +26,6 @@ import threading
 import time
 import warnings
 import weakref
-from collections import deque
 from collections.abc import Callable, Iterable
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -711,10 +710,14 @@ class DeviceSession:
         # Smart-event callback registration is process-global, so at most one
         # plate stream may be owned by this session/client at a time.
         self._plate_stream: PlateEventStream | None = None
-        # Live-preview callback thunks outlive their preview: StopLivePlay is
-        # not documented to join the SDK's callback thread, so the trampoline
-        # is kept referenced (bounded) instead of being freed on return.
-        self._live_thunks: deque[object] = deque(maxlen=8)
+        # One session-lifetime live-preview trampoline avoids freeing a ctypes
+        # callback while a late SDK callback may still hold its address.
+        # Request state is routed by the opaque integer passed through pUser and
+        # removed after StopLivePlay; the stable thunk never captures frame data.
+        self._live_request_lock = threading.Lock()
+        self._live_requests: dict[int, Callable[[int, int | None, int], None]] = {}
+        self._next_live_request_id = 1
+        self._live_thunk = LIVE_DATA_CALLBACK_EX(self._dispatch_live_data)
 
     def __enter__(self) -> DeviceSession:
         return self
@@ -776,6 +779,21 @@ class DeviceSession:
             logger.debug("Logged out handle=%d", handle)
         finally:
             self._handle = -1
+
+    def _dispatch_live_data(
+        self,
+        _handle: int,
+        data_type: int,
+        buffer: int | None,
+        length: int,
+        user: int | None,
+    ) -> None:
+        """Route a native preview callback to bounded request-local state."""
+        request_id = int(user or 0)
+        with self._live_request_lock:
+            callback = self._live_requests.get(request_id)
+        if callback is not None:
+            callback(data_type, buffer, length)
 
     # ── Device information ──────────────────────────────────────
 
@@ -1149,7 +1167,7 @@ class DeviceSession:
         }
         started = time.monotonic()
 
-        def _on_data(_handle: int, data_type: int, buffer: int | None, length: int, _user: int | None) -> None:
+        def _on_data(data_type: int, buffer: int | None, length: int) -> None:
             # Runs on the SDK's own thread: copy out, never block, never raise.
             try:
                 if done.is_set() or not buffer or length < header_size:
@@ -1157,20 +1175,23 @@ class DeviceSession:
                 callback_ms = int((time.monotonic() - started) * 1000)
                 if not state["first_data_ms"]:
                     state["first_data_ms"] = callback_ms
-                raw = ct.string_at(buffer, length)
-                info = NET_SDK_FRAME_INFO.from_buffer_copy(raw[:header_size])
-                payload = raw[header_size:]
+                info = NET_SDK_FRAME_INFO.from_buffer_copy(
+                    ct.string_at(buffer, header_size),
+                )
+                payload_length = length - header_size
+                if payload_length > max_bytes:
+                    state["error"] = f"Keyframe of {payload_length} bytes exceeds the {max_bytes}-byte limit"
+                    done.set()
+                    return
                 if data_type == FrameType.VIDEO_FORMAT:
+                    payload = ct.string_at(buffer + header_size, payload_length)
                     state["codec"] = codec_from_format_frame(payload) or state["codec"]
                     state["width"] = state["width"] or int(info.width)
                     state["height"] = state["height"] or int(info.height)
                     return
                 if data_type != FrameType.VIDEO or int(info.keyFrame) != 1:
                     return
-                if len(payload) > max_bytes:
-                    state["error"] = f"Keyframe of {len(payload)} bytes exceeds the {max_bytes}-byte limit"
-                    done.set()
-                    return
+                payload = ct.string_at(buffer + header_size, payload_length)
                 state["data"] = payload
                 state["width"] = int(info.width) or int(state["width"])  # type: ignore[call-overload]
                 state["height"] = int(info.height) or int(state["height"])  # type: ignore[call-overload]
@@ -1181,12 +1202,23 @@ class DeviceSession:
                 state["error"] = f"{type(exc).__name__}: {exc}"
                 done.set()
 
-        thunk = LIVE_DATA_CALLBACK_EX(_on_data)
         request = NET_SDK_CLIENTINFO(lChannel=channel, streamType=int(stream), hPlayWnd=None, bNoDecode=1)
-        handle = int(live_play(self._handle, ct.byref(request), thunk, None))
-        if handle < 0:
-            self._check(False, "LivePlayEx")
+        with self._live_request_lock:
+            request_id = self._next_live_request_id
+            self._next_live_request_id += 1
+            self._live_requests[request_id] = _on_data
+        handle = -1
         try:
+            handle = int(
+                live_play(
+                    self._handle,
+                    ct.byref(request),
+                    self._live_thunk,
+                    ct.c_void_p(request_id),
+                ),
+            )
+            if handle < 0:
+                self._check(False, "LivePlayEx")
             arrived = done.wait(timeout)
         finally:
             # Close callback state before asking the SDK to stop. A timeout has
@@ -1195,8 +1227,10 @@ class DeviceSession:
             # Keep the thunk referenced past this call so any callback already
             # in flight hits a live trampoline and observes the closed state.
             done.set()
-            stop_live_play(handle)
-            self._live_thunks.append(thunk)
+            if handle >= 0:
+                stop_live_play(handle)
+            with self._live_request_lock:
+                self._live_requests.pop(request_id, None)
         capture_ms = int((time.monotonic() - started) * 1000)
         if state["error"]:
             raise NetSdkError(f"LivePlayEx keyframe grab failed: {state['error']}")

@@ -93,7 +93,7 @@ def _deliver(frames: list[bytes], handle: int = 7):
     def _live_play(user_id, info, callback, user):
         for frame, buf in zip(frames, buffers, strict=True):
             data_type = struct.unpack_from("<I", frame, 8)[0]
-            callback(handle, data_type, ct.addressof(buf), len(frame), None)
+            callback(handle, data_type, ct.addressof(buf), len(frame), user)
         return handle
 
     return _live_play
@@ -165,7 +165,7 @@ class TestCaptureKeyframe:
         rendezvous = threading.Barrier(2)
         payloads = {4: HEVC_KEYFRAME + b"channel-4", 7: HEVC_KEYFRAME + b"channel-7"}
 
-        def _live_play(_user_id, info, callback, _user):
+        def _live_play(_user_id, info, callback, user):
             channel = info._obj.lChannel
             frame = _frame(
                 FrameType.VIDEO,
@@ -175,7 +175,7 @@ class TestCaptureKeyframe:
             )
             buffer = ct.create_string_buffer(frame, len(frame))
             rendezvous.wait(timeout=1)
-            callback(channel + 100, FrameType.VIDEO, ct.addressof(buffer), len(frame), None)
+            callback(channel + 100, FrameType.VIDEO, ct.addressof(buffer), len(frame), user)
             return channel + 100
 
         mock_lib.NET_SDK_LivePlayEx.side_effect = _live_play
@@ -199,14 +199,21 @@ class TestCaptureKeyframe:
     def test_late_callback_after_timeout_is_closed_before_stop(self, session, mock_lib):
         captured = {}
 
-        def _live_play(_user_id, _info, callback, _user):
+        def _live_play(_user_id, _info, callback, user):
             captured["callback"] = callback
+            captured["user"] = user
             return 11
 
         def _stop(_handle):
             frame = _frame(FrameType.VIDEO, HEVC_KEYFRAME, key=1)
             buffer = ct.create_string_buffer(frame, len(frame))
-            captured["callback"](11, FrameType.VIDEO, ct.addressof(buffer), len(frame), None)
+            captured["callback"](
+                11,
+                FrameType.VIDEO,
+                ct.addressof(buffer),
+                len(frame),
+                captured["user"],
+            )
             return True
 
         mock_lib.NET_SDK_LivePlayEx.side_effect = _live_play
@@ -219,7 +226,7 @@ class TestCaptureKeyframe:
             session.capture_keyframe(0, timeout=0.01)
 
         copy_buffer.assert_not_called()
-        assert len(session._live_thunks) == 1
+        assert session._live_requests == {}
 
     def test_live_play_failure_raises_the_sdk_error(self, session, mock_lib):
         mock_lib.NET_SDK_LivePlayEx.return_value = -1
@@ -233,10 +240,16 @@ class TestCaptureKeyframe:
     def test_oversized_keyframe_is_rejected(self, session, mock_lib):
         mock_lib.NET_SDK_LivePlayEx.side_effect = _deliver([_frame(FrameType.VIDEO, HEVC_KEYFRAME, key=1)])
 
-        with pytest.raises(NetSdkError, match="exceeds the 16-byte limit"):
+        with (
+            patch("pytvt.device_sdk.client.ct.string_at", wraps=ct.string_at) as copy_buffer,
+            pytest.raises(NetSdkError, match="exceeds the 16-byte limit"),
+        ):
             session.capture_keyframe(0, timeout=1.0, max_bytes=16)
 
         mock_lib.NET_SDK_StopLivePlay.assert_called_once()
+        assert [call.args[1] for call in copy_buffer.call_args_list] == [
+            ct.sizeof(NET_SDK_FRAME_INFO),
+        ]
 
     def test_missing_preview_symbols_raise_a_capability_error(self, session, mock_lib):
         del mock_lib.NET_SDK_LivePlayEx
@@ -354,15 +367,13 @@ class TestDecodeKeyframeToJpeg:
 
 
 class TestCallbackLifetime:
-    def test_thunk_is_retained_after_the_preview_is_stopped(self, session, mock_lib):
-        """A late callback after StopLivePlay must hit a live trampoline, not freed memory."""
+    def test_one_session_lifetime_thunk_routes_repeated_previews(self, session, mock_lib):
+        """Repeated previews reuse one stable trampoline without retaining frames."""
         mock_lib.NET_SDK_LivePlayEx.side_effect = _deliver([_frame(FrameType.VIDEO, HEVC_KEYFRAME, key=1)])
 
-        session.capture_keyframe(0, timeout=1.0)
-
-        thunk = mock_lib.NET_SDK_LivePlayEx.call_args.args[2]
-        assert thunk in session._live_thunks
-        # Retention is bounded: the deque caps how many trampolines stay alive.
         for _ in range(12):
             session.capture_keyframe(0, timeout=1.0)
-        assert len(session._live_thunks) <= 8
+
+        thunks = [call.args[2] for call in mock_lib.NET_SDK_LivePlayEx.call_args_list]
+        assert all(thunk is session._live_thunk for thunk in thunks)
+        assert session._live_requests == {}
