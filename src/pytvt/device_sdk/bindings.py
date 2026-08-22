@@ -204,6 +204,36 @@ def bind(lib: ct.CDLL) -> None:
         ct.c_char_p,  # sPicFileName
     ]
 
+    # ── Live preview (main-stream keyframe grab) ────────────────
+    # POINTERHANDLE NET_SDK_LivePlayEx(LONG lUserID, LPNET_SDK_CLIENTINFO lpClientInfo,
+    #     LIVE_DATA_CALLBACK_EX fLiveDataCallBack, void* pUser);   -1 on failure
+    # The recorder answers a main-stream LivePlayEx with the current GOP from its
+    # I-frame, so one keyframe arrives in ~0.2-0.3 s without waiting a GOP
+    # (verified live 2026-08-21, N9000 relaying a 2560x1440 H.265 IPC). The
+    # stream-less capture APIs above return only the IPC's CIF snapshot stream.
+    if hasattr(lib, "NET_SDK_LivePlayEx"):
+        lib.NET_SDK_LivePlayEx.restype = ct.c_longlong
+        lib.NET_SDK_LivePlayEx.argtypes = [
+            ct.c_long,  # lUserID
+            ct.POINTER(t.NET_SDK_CLIENTINFO),  # lpClientInfo
+            t.LIVE_DATA_CALLBACK_EX,  # fLiveDataCallBack
+            ct.c_void_p,  # pUser
+        ]
+    if hasattr(lib, "NET_SDK_StopLivePlay"):
+        lib.NET_SDK_StopLivePlay.restype = ct.c_bool
+        lib.NET_SDK_StopLivePlay.argtypes = [ct.c_longlong]  # lLiveHandle
+    if hasattr(lib, "NET_SDK_SetLiveDataCallBackEx"):
+        lib.NET_SDK_SetLiveDataCallBackEx.restype = ct.c_bool
+        lib.NET_SDK_SetLiveDataCallBackEx.argtypes = [
+            ct.c_longlong,  # lLiveHandle
+            t.LIVE_DATA_CALLBACK_EX,
+            ct.c_void_p,  # pUser
+        ]
+    if hasattr(lib, "NET_SDK_MakeKeyFrame"):
+        # Force a main-stream I-frame (IPC; the header notes N9000 lacks it).
+        lib.NET_SDK_MakeKeyFrame.restype = ct.c_bool
+        lib.NET_SDK_MakeKeyFrame.argtypes = [ct.c_long, ct.c_long]  # lUserID, lChannel
+
     # ── Native face capture search ──────────────────────────────
     # Optional on older NetSDK drops and recorder families.
     if hasattr(lib, "NET_SDK_FaceMatchOperate"):

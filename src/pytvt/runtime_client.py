@@ -30,6 +30,7 @@ from .device_sdk import (
     VehicleDirection,
     VehicleType,
 )
+from .keyframe import decode_keyframe_to_jpeg
 
 RUNTIME_PROTOCOL_VERSION = 2
 DEFAULT_RUNTIME_SOCKET_PATH = Path("/run/pytvt-runtime/runtime.sock")
@@ -166,6 +167,40 @@ class RuntimeSnapshot:
     image: bytes
     channel: int
     method: str = "runtime"
+
+
+@dataclass(frozen=True)
+class RuntimeKeyframe:
+    """One raw main/sub-stream keyframe grabbed through the persistent recorder session.
+
+    ``data`` is the Annex-B elementary stream (parameter sets + one I-frame);
+    decode with :func:`pytvt.keyframe.decode_keyframe_to_jpeg` or use
+    :meth:`SyncRuntimeClient.capture_main_still`.
+    """
+
+    data: bytes
+    codec: str
+    width: int
+    height: int
+    channel: int
+    stream_type: int
+    capture_ms: int
+    frame_time_us: int = 0
+
+
+@dataclass(frozen=True)
+class RuntimeStill:
+    """A full-resolution JPEG still: runtime keyframe + local ffmpeg decode."""
+
+    image: bytes
+    channel: int
+    width: int
+    height: int
+    codec: str
+    stream_type: int
+    capture_ms: int
+    decode_ms: int
+    method: str = "runtime_keyframe"
 
 
 @dataclass(frozen=True)
@@ -698,6 +733,108 @@ class SyncRuntimeClient:
             channel=channel,
         )
         return RuntimeSnapshot(image=_parse_snapshot(result), channel=channel)
+
+    def capture_keyframe(
+        self,
+        host: str,
+        username: str,
+        password: str,
+        *,
+        port: int = 6036,
+        channel: int = 0,
+        stream_type: int = 0,
+        keyframe_timeout_ms: int = 5_000,
+        timeout_ms: int | None = None,
+        total_timeout_ms: int | None = None,
+        require_immediate_admission: bool = False,
+    ) -> RuntimeKeyframe:
+        """Grab one raw live-preview keyframe through the reusable recorder session.
+
+        Unlike :meth:`capture_snapshot` (the IPC's CIF snapshot stream) this
+        returns the main stream's most recent I-frame at native resolution.
+        A runtime that predates the ``keyframe`` operation, or an SDK drop
+        without live preview, raises :class:`RuntimeRemoteError` with kind
+        ``unsupported_operation`` / ``capability_unavailable`` so callers can
+        fall back deliberately.
+        """
+        if isinstance(channel, bool) or not isinstance(channel, int) or not 0 <= channel <= 255:
+            raise ValueError("channel must be between 0 and 255")
+        if isinstance(stream_type, bool) or not isinstance(stream_type, int) or not 0 <= stream_type <= 2:
+            raise ValueError("stream_type must be between 0 and 2")
+        if (
+            isinstance(keyframe_timeout_ms, bool)
+            or not isinstance(keyframe_timeout_ms, int)
+            or not 100 <= keyframe_timeout_ms <= 30_000
+        ):
+            raise ValueError("keyframe_timeout_ms must be between 100 and 30000")
+        try:
+            result = self._execute_device_operation(
+                "keyframe",
+                host,
+                port,
+                username,
+                password,
+                timeout_ms=timeout_ms,
+                total_timeout_ms=total_timeout_ms,
+                require_immediate_admission=require_immediate_admission,
+                channel=channel,
+                streamType=stream_type,
+                keyframeTimeoutMs=keyframe_timeout_ms,
+            )
+        except RuntimeRemoteError as exc:
+            # Runtimes older than the ``keyframe`` operation reject it as a
+            # generic operation error; surface that as a typed capability gap.
+            if exc.kind == "operation_error" and "unsupported operation" in str(exc):
+                raise RuntimeRemoteError("unsupported_operation", str(exc)) from exc
+            raise
+        return _parse_keyframe(result, channel=channel)
+
+    def capture_main_still(
+        self,
+        host: str,
+        username: str,
+        password: str,
+        *,
+        port: int = 6036,
+        channel: int = 0,
+        stream_type: int = 0,
+        keyframe_timeout_ms: int = 5_000,
+        timeout_ms: int | None = None,
+        total_timeout_ms: int | None = None,
+        require_immediate_admission: bool = False,
+        quality: int = 2,
+        decode_timeout: float = 10.0,
+    ) -> RuntimeStill:
+        """Full-resolution JPEG: runtime keyframe + ffmpeg decode in this process.
+
+        Raises :class:`pytvt.keyframe.KeyframeDecodeError` when ffmpeg is
+        missing or the frame does not decode, in addition to the runtime errors
+        of :meth:`capture_keyframe`.
+        """
+        keyframe = self.capture_keyframe(
+            host,
+            username,
+            password,
+            port=port,
+            channel=channel,
+            stream_type=stream_type,
+            keyframe_timeout_ms=keyframe_timeout_ms,
+            timeout_ms=timeout_ms,
+            total_timeout_ms=total_timeout_ms,
+            require_immediate_admission=require_immediate_admission,
+        )
+        started = time.monotonic()
+        image = decode_keyframe_to_jpeg(keyframe.data, keyframe.codec, quality=quality, timeout=decode_timeout)
+        return RuntimeStill(
+            image=image,
+            channel=channel,
+            width=keyframe.width,
+            height=keyframe.height,
+            codec=keyframe.codec,
+            stream_type=keyframe.stream_type,
+            capture_ms=keyframe.capture_ms,
+            decode_ms=int((time.monotonic() - started) * 1000),
+        )
 
     def resolve_rtsp_url(
         self,
@@ -1385,6 +1522,37 @@ def _parse_snapshot(result: Any, *, max_bytes: int = MAX_RUNTIME_SNAPSHOT_BYTES)
     if not image.startswith(b"\xff\xd8") or not image.endswith(b"\xff\xd9") or len(image) > max_bytes:
         raise RuntimeClientError("runtime returned an invalid snapshot")
     return image
+
+
+def _parse_keyframe(result: Any, *, channel: int, max_bytes: int = MAX_RUNTIME_SNAPSHOT_BYTES) -> RuntimeKeyframe:
+    if not isinstance(result, dict) or not isinstance(result.get("data"), str):
+        raise RuntimeClientError("runtime returned an invalid keyframe")
+    try:
+        data = base64.b64decode(result["data"], validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise RuntimeClientError("runtime returned an invalid keyframe") from exc
+    if not data or len(data) > max_bytes:
+        raise RuntimeClientError("runtime returned an invalid keyframe")
+
+    def _int(key: str, *, default: int = 0, low: int = 0, high: int = 2**62) -> int:
+        value = result.get(key, default)
+        if isinstance(value, bool) or not isinstance(value, int) or not low <= value <= high:
+            raise RuntimeClientError("runtime returned an invalid keyframe")
+        return value
+
+    codec = result.get("codec", "")
+    if not isinstance(codec, str) or codec not in {"", "hevc", "h264"}:
+        raise RuntimeClientError("runtime returned an invalid keyframe")
+    return RuntimeKeyframe(
+        data=data,
+        codec=codec,
+        width=_int("width", high=16384),
+        height=_int("height", high=16384),
+        channel=channel,
+        stream_type=_int("streamType", high=3),
+        capture_ms=_int("captureMs", high=600_000),
+        frame_time_us=_int("frameTimeUs"),
+    )
 
 
 def _parse_rtsp_url(result: Any) -> str:

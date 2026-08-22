@@ -105,6 +105,10 @@ class SnapshotAttempt:
     method: str = ""
     error: str = ""
     error_kind: str = ""
+    # Frame dimensions when the transport reports them (the NetSDK keyframe
+    # leg reads them from the recorder's frame header); ``None`` otherwise.
+    width: int | None = None
+    height: int | None = None
 
     @property
     def success(self) -> bool:

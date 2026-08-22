@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import ctypes as ct
 from datetime import datetime
+from typing import ClassVar
 
 # ── Time structures ─────────────────────────────────────────────────
 
@@ -734,7 +735,7 @@ class NET_SDK_IVE_VSD_TARGET_ATTRIBUTES(ct.Union):
 
     _layout_ = "ms"
     _pack_ = 4
-    _fields_ = [  # noqa: RUF012 - ctypes requires this mutable class declaration
+    _fields_: ClassVar = [
         ("car", NET_SDK_IVE_VSD_TARGET_CAR),
         ("raw", ct.c_ubyte * 1088),
     ]
@@ -1105,6 +1106,47 @@ TALK_DATA_CALLBACK = ct.CFUNCTYPE(None, ct.c_longlong, ct.c_void_p, ct.c_uint, c
 # void(LONG lUserID, LONG channelID, DWORD dwCommand, char* pBuf, DWORD dwBufLen,
 #      void* pUser)
 SUBSCRIBE_CALLBACK_V2 = ct.CFUNCTYPE(None, ct.c_long, ct.c_long, ct.c_uint, ct.c_void_p, ct.c_uint, ct.c_void_p)
+
+# void(POINTERHANDLE lLiveHandle, UINT dataType, BYTE* pBuffer, UINT dataLen,
+#      void* pUser) — pBuffer holds NET_SDK_FRAME_INFO followed by the frame data.
+LIVE_DATA_CALLBACK_EX = ct.CFUNCTYPE(None, ct.c_longlong, ct.c_uint, ct.c_void_p, ct.c_uint, ct.c_void_p)
+
+
+# ── Live preview ────────────────────────────────────────────────────
+
+
+class NET_SDK_CLIENTINFO(ct.Structure):
+    """Preview request (``NET_SDK_LivePlay``/``NET_SDK_LivePlayEx``)."""
+
+    _layout_ = "ms"
+    _pack_ = 4
+    _fields_ = [
+        ("lChannel", ct.c_long),  # channel, 0-based
+        ("streamType", ct.c_long),  # NET_SDK_STREAM_TYPE (0 main, 1 sub, ...)
+        ("hPlayWnd", ct.c_void_p),  # HWND; NULL on Linux (no rendering)
+        ("bNoDecode", ct.c_int),  # 1 = raw stream only (Windows decode flag)
+    ]
+
+
+class NET_SDK_FRAME_INFO(ct.Structure):
+    """Frame header prepended to every ``LIVE_DATA_CALLBACK_EX`` buffer."""
+
+    _layout_ = "ms"
+    _pack_ = 4
+    _fields_ = [
+        ("deviceID", ct.c_uint),
+        ("channel", ct.c_uint),
+        ("frameType", ct.c_uint),  # DD_FRAME_TYPE
+        ("length", ct.c_uint),  # frame data length (after this header)
+        ("keyFrame", ct.c_uint),  # 1 = key frame
+        ("width", ct.c_uint),
+        ("height", ct.c_uint),
+        ("frameIndex", ct.c_uint),
+        ("frameAttrib", ct.c_uint),  # DD_FRAME_ATTRIB bit set
+        ("streamID", ct.c_uint),
+        ("time", ct.c_longlong),  # absolute, microseconds since the epoch
+        ("relativeTime", ct.c_longlong),  # monotonic, microseconds
+    ]
 
 
 class NET_DVR_SUBSCRIBE_REPLY(ct.Structure):

@@ -102,6 +102,7 @@ from .runtime_client import (
     RuntimeFaceBatchItem,
     RuntimeFaceBatchResult,
     RuntimeFaceCapture,
+    RuntimeKeyframe,
     RuntimeOperationTimeoutError,
     RuntimePlateEventStream,
     RuntimePlatformAuthorityResult,
@@ -110,6 +111,7 @@ from .runtime_client import (
     RuntimeRemoteError,
     RuntimeRtspUrl,
     RuntimeSnapshot,
+    RuntimeStill,
     SyncRuntimeClient,
 )
 from .scanner import filter_tvt_devices, load_devices, scan_single_nvr
@@ -202,6 +204,8 @@ __all__ = [
     "RuntimeFaceCapture",
     "RuntimePlateEventStream",
     "RuntimeOperationTimeoutError",
+    "RuntimeKeyframe",
+    "RuntimeStill",
     "RuntimePlatformInventoryResult",
     "RuntimePlatformAuthorityResult",
     "RuntimePlatformSnapshot",

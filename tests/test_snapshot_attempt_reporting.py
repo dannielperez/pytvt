@@ -21,8 +21,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from pytvt import xml_api
+from pytvt.device_sdk.client import NetSdkCapabilityError
 from pytvt.device_sdk.http_client import RtspUrlResult, SnapshotAttempt
 from pytvt.device_sdk.manager import Backend, DeviceManager
+from pytvt.keyframe import KeyframeDecodeError, StillCapture
 
 CREDS = dict(ip="10.0.0.1", username="admin", password="pass123")
 JPEG = b"\xff\xd8\xff\xe0" + b"\x00" * 50
@@ -174,6 +176,9 @@ class TestFallbackReportsTheMostSpecificReason:
         mgr = _manager()
         session = MagicMock()
         session.capture_jpeg.side_effect = RuntimeError("capability not supported")
+        # An SDK drop without the live-preview symbols reports an uninformative
+        # "unsupported" keyframe leg that must not mask the real SDK error.
+        session.capture_main_still.side_effect = NetSdkCapabilityError("no LivePlayEx")
 
         with (
             patch.object(mgr, "rtsp_url", return_value=RtspUrlResult(success=False, error="no url")),
@@ -216,7 +221,9 @@ class TestWebApiLeg:
             patch.object(mgr, "rtsp_url") as rtsp,
             patch.object(mgr, "_get_netsdk_session") as netsdk,
         ):
-            attempt = mgr.snapshot_attempt(channel=1)
+            # ``sub`` is the cheapest-first contract; ``main`` is a resolution
+            # contract the CIF Web API frame cannot satisfy (see TestMainStreamIntent).
+            attempt = mgr.snapshot_attempt(channel=1, stream="sub")
 
         assert attempt.image == JPEG
         assert attempt.method == "webapi"
@@ -232,7 +239,7 @@ class TestWebApiLeg:
             patch.object(mgr, "rtsp_url", return_value=RtspUrlResult(success=False)),
             patch.object(mgr, "_get_netsdk_session", return_value=session),
         ):
-            attempt = mgr.snapshot_attempt(channel=1)
+            attempt = mgr.snapshot_attempt(channel=1, stream="sub")
 
         assert attempt.image == JPEG
         assert attempt.method == "netsdk"
@@ -246,7 +253,7 @@ class TestWebApiLeg:
             patch.object(mgr, "rtsp_url", return_value=RtspUrlResult(success=False)),
             patch.object(mgr, "_get_netsdk_session", return_value=session),
         ):
-            attempt = mgr.snapshot_attempt(channel=1)
+            attempt = mgr.snapshot_attempt(channel=1, stream="sub")
 
         assert attempt.error_kind == "sdk_error"
         assert "NET_SDK login failed (err=7)" in attempt.error
@@ -271,7 +278,7 @@ class TestWebApiLeg:
             patch.object(mgr, "rtsp_url", return_value=RtspUrlResult(success=False)),
             patch.object(mgr, "_get_netsdk_session", return_value=session),
         ):
-            attempt = mgr.snapshot_attempt(channel=1)
+            attempt = mgr.snapshot_attempt(channel=1, stream="sub")
 
         assert attempt.image == JPEG
 
@@ -322,6 +329,8 @@ class TestBackwardCompatibility:
         mgr = _manager()
         session = MagicMock()
         session.capture_jpeg.return_value = JPEG
+        # Older SDK drop without live preview: the single-shot leg still answers.
+        session.capture_main_still.side_effect = NetSdkCapabilityError("no LivePlayEx")
 
         with (
             patch.object(mgr, "rtsp_url", return_value=RtspUrlResult(success=False)),
@@ -333,6 +342,7 @@ class TestBackwardCompatibility:
         mgr = _manager()
         session = MagicMock()
         session.capture_jpeg.side_effect = RuntimeError("boom")
+        session.capture_main_still.side_effect = NetSdkCapabilityError("no LivePlayEx")
 
         with (
             patch.object(mgr, "rtsp_url", return_value=RtspUrlResult(success=False)),
@@ -347,3 +357,230 @@ class TestBackwardCompatibility:
 
         with patch.object(mgr, "_get_netsdk_session", return_value=session):
             assert mgr._netsdk_snapshot(channel=0) == JPEG
+
+
+def _still() -> StillCapture:
+    return StillCapture(image=JPEG, width=2560, height=1440, codec="hevc", stream_type=0, capture_ms=210, decode_ms=160)
+
+
+class TestMainStreamIntent:
+    """``stream="main"`` is a resolution contract, not a hint.
+
+    Every stream-less single-shot leg (Web API ``GetSnapshot``, NetSDK
+    ``CaptureJPEGData_V2``, the HTTP bridge) returns the IPC's configured
+    snapshot stream — CIF/4CIF on the fleet, no resolution parameter exists
+    (verified live 2026-08-21). A caller that asks for ``main`` must not get a
+    CIF preview merely because that leg is cheapest; those legs become the
+    fallback behind the frame sources that honour the request (RTSP main, the
+    NetSDK live-preview keyframe).
+    """
+
+    def test_webapi_does_not_preempt_a_working_rtsp_main_leg(self):
+        mgr = _manager()
+
+        with (
+            patch.object(
+                DeviceManager,
+                "_webapi_snapshot_attempt",
+                side_effect=AssertionError("webapi must not run before the main-stream legs"),
+            ),
+            patch.object(mgr, "rtsp_url", return_value=RtspUrlResult(success=True, rtsp_url=RTSP)),
+            patch.object(xml_api, "rtsp_snapshot_attempt_bytes", return_value=xml_api.RtspFrameGrabResult(image=JPEG)),
+        ):
+            attempt = mgr.snapshot_attempt(channel=1, stream="main")
+
+        assert attempt.method == "rtsp"
+        assert attempt.image == JPEG
+
+    def test_default_stream_is_main(self):
+        """Callers that never passed ``stream`` asked for the main profile all along."""
+        mgr = _manager()
+
+        with (
+            patch.object(DeviceManager, "_webapi_snapshot_attempt", side_effect=AssertionError("cheap leg ran first")),
+            patch.object(mgr, "rtsp_url", return_value=RtspUrlResult(success=True, rtsp_url=RTSP)),
+            patch.object(xml_api, "rtsp_snapshot_attempt_bytes", return_value=xml_api.RtspFrameGrabResult(image=JPEG)),
+        ):
+            assert mgr.snapshot_attempt(channel=1).method == "rtsp"
+
+    def test_keyframe_leg_beats_the_cif_single_shot_when_rtsp_fails(self):
+        mgr = _manager()
+        session = MagicMock()
+        session.capture_main_still.return_value = _still()
+        session.capture_jpeg.side_effect = AssertionError("CIF single-shot must not pre-empt the keyframe")
+
+        with (
+            patch.object(DeviceManager, "_webapi_snapshot_attempt", side_effect=AssertionError("webapi ran")),
+            patch.object(mgr, "rtsp_url", return_value=RtspUrlResult(success=False, error="no url")),
+            patch.object(mgr, "_get_netsdk_session", return_value=session),
+        ):
+            attempt = mgr.snapshot_attempt(channel=2, stream="main")
+
+        assert attempt.method == "netsdk_keyframe"
+        assert attempt.image == JPEG
+        assert (attempt.width, attempt.height) == (2560, 1440)
+        session.capture_main_still.assert_called_once()
+        assert session.capture_main_still.call_args.args == (2,)
+        assert session.capture_main_still.call_args.kwargs["stream"] == 0
+
+    def test_keyframe_unsupported_falls_back_to_webapi_then_single_shot(self):
+        mgr = _manager()
+        session = MagicMock()
+        session.capture_main_still.side_effect = NetSdkCapabilityError("no LivePlayEx")
+        session.capture_jpeg.return_value = JPEG
+        order: list[str] = []
+
+        def _webapi(**_kwargs):
+            order.append("webapi")
+            return SnapshotAttempt(method="webapi", error="HTTP 404", error_kind="webapi_error")
+
+        def _capture(channel):
+            order.append("netsdk")
+            return JPEG
+
+        session.capture_jpeg.side_effect = _capture
+        with (
+            patch.object(DeviceManager, "_webapi_snapshot_attempt", side_effect=_webapi),
+            patch.object(mgr, "rtsp_url", return_value=RtspUrlResult(success=False, error="no url")),
+            patch.object(mgr, "_get_netsdk_session", return_value=session),
+        ):
+            attempt = mgr.snapshot_attempt(channel=0, stream="main")
+
+        assert attempt.method == "netsdk"
+        assert order == ["webapi", "netsdk"]
+
+    def test_keyframe_decode_failure_is_reported_and_does_not_mask_nothing(self):
+        mgr = _manager()
+        session = MagicMock()
+        session.capture_main_still.side_effect = KeyframeDecodeError("decode_failed", "ffmpeg could not decode")
+        session.capture_jpeg.side_effect = RuntimeError("Recorder returned nothing")
+
+        with (
+            patch.object(
+                DeviceManager,
+                "_webapi_snapshot_attempt",
+                return_value=SnapshotAttempt(method="webapi", error="HTTP 404", error_kind="webapi_error"),
+            ),
+            patch.object(mgr, "rtsp_url", return_value=RtspUrlResult(success=False, error="no url")),
+            patch.object(mgr, "_get_netsdk_session", return_value=session),
+        ):
+            attempt = mgr.snapshot_attempt(channel=0, stream="main")
+
+        # The decode failure is the first specific failure in leg order.
+        assert attempt.error_kind == "keyframe_error"
+        assert "ffmpeg could not decode" in attempt.error
+
+    def test_missing_ffmpeg_is_uninformative_and_yields_to_the_sdk_error(self):
+        mgr = _manager()
+        session = MagicMock()
+        session.capture_main_still.side_effect = KeyframeDecodeError("ffmpeg_unavailable", "ffmpeg is not installed")
+        session.capture_jpeg.side_effect = RuntimeError("NET_SDK login failed (err=7)")
+
+        with (
+            patch.object(
+                DeviceManager,
+                "_webapi_snapshot_attempt",
+                return_value=SnapshotAttempt(method="webapi", error="HTTP 404", error_kind="webapi_error"),
+            ),
+            patch.object(mgr, "rtsp_url", return_value=RtspUrlResult(success=False, error="no url")),
+            patch.object(mgr, "_get_netsdk_session", return_value=session),
+        ):
+            attempt = mgr.snapshot_attempt(channel=0, stream="main")
+
+        assert attempt.error_kind == "sdk_error"
+
+    def test_deadline_skips_the_keyframe_leg_without_a_warm_session(self):
+        """A fresh SDK login is unbounded; under a deadline only a held session may be used."""
+        mgr = _manager()
+        session = MagicMock()
+        session.capture_main_still.return_value = _still()
+
+        with (
+            patch.object(mgr, "rtsp_url", return_value=RtspUrlResult(success=False, error="no url")),
+            patch.object(mgr, "_get_netsdk_session", return_value=session) as get_session,
+        ):
+            attempt = mgr.snapshot_attempt(channel=0, stream="main", total_timeout=5)
+
+        assert attempt.success is False
+        get_session.assert_not_called()
+
+    def test_deadline_uses_an_already_held_session_for_the_keyframe(self):
+        mgr = _manager()
+        session = MagicMock()
+        session.capture_main_still.return_value = _still()
+        mgr._netsdk_session = session
+
+        with patch.object(mgr, "rtsp_url", return_value=RtspUrlResult(success=False, error="no url")):
+            attempt = mgr.snapshot_attempt(channel=0, stream="main", total_timeout=5)
+
+        assert attempt.method == "netsdk_keyframe"
+        assert session.capture_main_still.call_args.kwargs["timeout"] <= 5
+
+    def test_no_fallback_means_rtsp_only_for_main(self):
+        mgr = _manager()
+
+        with (
+            patch.object(DeviceManager, "_webapi_snapshot_attempt", side_effect=AssertionError("webapi ran")),
+            patch.object(mgr, "_get_netsdk_session", side_effect=AssertionError("SDK leg ran")),
+            patch.object(mgr, "_http_rtsp_url", return_value=None),
+        ):
+            attempt = mgr.snapshot_attempt(channel=0, stream="main", allow_fallback=False)
+
+        assert attempt.error_kind == "no_stream_url"
+
+    def test_sub_keeps_the_cheapest_leg_first(self):
+        mgr = _manager()
+
+        with (
+            patch.object(
+                DeviceManager, "_webapi_snapshot_attempt", return_value=SnapshotAttempt(image=JPEG, method="webapi")
+            ),
+            patch.object(mgr, "rtsp_url", side_effect=AssertionError("rtsp ran before webapi for sub")),
+        ):
+            assert mgr.snapshot_attempt(channel=0, stream="sub").method == "webapi"
+
+    def test_sdk_http_backend_main_tries_webapi_before_the_bridge(self):
+        mgr = _manager(backend=Backend.SDK_HTTP)
+        order: list[str] = []
+
+        def _webapi(**_kwargs):
+            order.append("webapi")
+            return SnapshotAttempt(method="webapi", error="HTTP 404", error_kind="webapi_error")
+
+        http = MagicMock()
+        http.snapshot.side_effect = lambda *a, **k: order.append("http") or JPEG
+        with (
+            patch.object(DeviceManager, "_webapi_snapshot_attempt", side_effect=_webapi),
+            patch.object(mgr, "_get_http", return_value=http),
+        ):
+            attempt = mgr.snapshot_attempt(channel=0, stream="main", prefer_rtsp=False)
+
+        assert attempt.method == "http"
+        assert order == ["webapi", "http"]
+
+
+class TestMainStreamFallbackUnderDeadline:
+    """Under a deadline the CIF Web API fallback still runs for ``main``.
+
+    A fresh SDK login is unbounded, so the NetSDK legs are skipped once a
+    deadline is set — but the Web API leg is deadline-aware and capped, so a
+    recorder where RTSP is blocked and only the API Server answers must still
+    produce an image instead of "capture failed".
+    """
+
+    def test_webapi_is_attempted_for_main_with_deadline_on_the_netsdk_backend(self):
+        mgr = _manager()
+
+        with (
+            patch.object(mgr, "rtsp_url", return_value=RtspUrlResult(success=False, error="no url")),
+            patch.object(
+                DeviceManager,
+                "_webapi_snapshot_attempt",
+                return_value=SnapshotAttempt(image=JPEG, method="webapi"),
+            ) as webapi,
+            patch.object(mgr, "_get_netsdk_session", side_effect=AssertionError("no SDK login under a deadline")),
+        ):
+            attempt = mgr.snapshot_attempt(channel=0, stream="main", total_timeout=5)
+
+        assert attempt.method == "webapi"
+        webapi.assert_called_once()

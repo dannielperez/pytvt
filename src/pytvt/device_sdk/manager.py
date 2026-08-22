@@ -124,7 +124,7 @@ def _first_failure(attempts: list[SnapshotAttempt]) -> SnapshotAttempt:
     uninformative — so it never masks a more specific leg's error.
     """
     for attempt in attempts:
-        if attempt.error_kind not in ("", "no_stream_url", "webapi_error"):
+        if attempt.error_kind not in ("", "no_stream_url", "webapi_error", "keyframe_unsupported"):
             return attempt
     for attempt in attempts:
         if attempt.error_kind != "webapi_error":
@@ -521,20 +521,35 @@ class DeviceManager:
             stream=stream,
             stream_type=stream_type,
         )
+        # Main-stream intent is a resolution contract, not a hint. The
+        # stream-less single-shot legs (Web API GetSnapshot, NetSDK
+        # CaptureJPEGData_V2, the HTTP bridge) can only return the IPC's
+        # configured snapshot stream — CIF/4CIF on the fleet, no resolution
+        # parameter exists — so for ``main`` they run last, as a fallback,
+        # instead of pre-empting the legs that deliver a full-resolution frame
+        # (RTSP main, NetSDK live keyframe). ``sub`` keeps the cheapest leg first.
+        wants_main = stream_type == _SNAPSHOT_STREAM_TYPES["main"]
         deadline = None if total_timeout is None else time.monotonic() + max(0.0, total_timeout)
         attempts: list[SnapshotAttempt] = []
-        if self._connection_method != "nat" and (deadline is None or deadline > time.monotonic()):
+
+        def _webapi_leg() -> SnapshotAttempt | None:
+            if self._connection_method == "nat" or (deadline is not None and deadline <= time.monotonic()):
+                return None
             remaining = None if deadline is None else max(0.001, deadline - time.monotonic())
             # Probe timeout is capped: an API-disabled recorder answers with a
             # fast 4xx on the shared web port, but a silently-dropping network
             # must not delay the legs that were going to work anyway.
-            webapi = self._webapi_snapshot_attempt(
+            return self._webapi_snapshot_attempt(
                 channel=channel,
                 timeout=min(timeout, 5) if remaining is None else min(timeout, 5, remaining),
             )
-            if webapi.image:
-                return webapi
-            attempts.append(webapi)
+
+        if not wants_main:
+            webapi = _webapi_leg()
+            if webapi is not None:
+                if webapi.image:
+                    return webapi
+                attempts.append(webapi)
         if prefer_rtsp:
             rtsp = self._rtsp_snapshot_attempt(
                 channel=channel,
@@ -550,6 +565,28 @@ class DeviceManager:
             return _first_failure(attempts)
 
         if self._backend == Backend.NETSDK:
+            # Full-resolution keyframe through the recorder's own preview. A
+            # fresh SDK login is unbounded, so under a deadline this leg only
+            # runs on a session this manager already holds.
+            if wants_main and (deadline is None or self._netsdk_session is not None):
+                remaining = None if deadline is None else max(0.001, deadline - time.monotonic())
+                keyframe = self._netsdk_keyframe_snapshot_attempt(
+                    channel=channel,
+                    stream_type=stream_type,
+                    timeout=min(timeout, 5) if remaining is None else min(timeout, 5, remaining),
+                )
+                if keyframe.image:
+                    return keyframe
+                attempts.append(keyframe)
+            if wants_main:
+                # Snapshot-stream fallback (CIF) once the full-resolution legs
+                # are exhausted; deadline-aware and capped, so it also runs
+                # under a deadline where a fresh SDK login may not.
+                webapi = _webapi_leg()
+                if webapi is not None:
+                    if webapi.image:
+                        return webapi
+                    attempts.append(webapi)
             if deadline is not None:
                 return _first_failure(attempts)
             netsdk = self._netsdk_snapshot_attempt(channel=channel)
@@ -558,6 +595,12 @@ class DeviceManager:
             attempts.append(netsdk)
             return _first_failure(attempts)
 
+        if wants_main:
+            webapi = _webapi_leg()
+            if webapi is not None:
+                if webapi.image:
+                    return webapi
+                attempts.append(webapi)
         remaining = None if deadline is None else max(0.001, deadline - time.monotonic())
         http = self._http_snapshot_attempt(channel=channel, timeout=remaining)
         if http.image:
@@ -996,6 +1039,75 @@ class DeviceManager:
                 error_kind="empty_frame",
             )
         return SnapshotAttempt(image=data, method="netsdk")
+
+    def _netsdk_keyframe_snapshot_attempt(
+        self,
+        *,
+        channel: int = 0,
+        stream_type: int = 0,
+        timeout: float = 5.0,
+    ) -> SnapshotAttempt:
+        """Full-resolution leg: one live-preview keyframe decoded to JPEG.
+
+        Distinct from the NETSDK single-shot leg, which returns the IPC's
+        snapshot stream. A missing SDK symbol or ffmpeg is reported with an
+        "unsupported" kind so it never masks a more specific failure.
+        """
+        from ..keyframe import KeyframeDecodeError
+        from .client import NetSdkCapabilityError
+
+        try:
+            session = self._get_netsdk_session()
+        except Exception as exc:
+            logger.warning(
+                "NETSDK session unavailable ip=%s channel=%s: %s: %s",
+                self._ip,
+                channel,
+                type(exc).__name__,
+                exc,
+            )
+            return SnapshotAttempt(
+                method="netsdk_keyframe",
+                error=f"{type(exc).__name__}: {exc}",
+                error_kind="session_error",
+            )
+        try:
+            still = session.capture_main_still(channel, stream=stream_type, timeout=timeout)
+        except NetSdkCapabilityError as exc:
+            return SnapshotAttempt(
+                method="netsdk_keyframe",
+                error=f"{type(exc).__name__}: {exc}",
+                error_kind="keyframe_unsupported",
+            )
+        except KeyframeDecodeError as exc:
+            kind = "keyframe_unsupported" if exc.kind == "ffmpeg_unavailable" else "keyframe_error"
+            logger.warning(
+                "NETSDK keyframe decode failed ip=%s channel=%s kind=%s: %s",
+                self._ip,
+                channel,
+                exc.kind,
+                exc,
+            )
+            return SnapshotAttempt(method="netsdk_keyframe", error=str(exc), error_kind=kind)
+        except Exception as exc:
+            logger.warning(
+                "NETSDK keyframe grab failed ip=%s channel=%s: %s: %s",
+                self._ip,
+                channel,
+                type(exc).__name__,
+                exc,
+            )
+            return SnapshotAttempt(
+                method="netsdk_keyframe",
+                error=f"{type(exc).__name__}: {exc}",
+                error_kind="keyframe_error",
+            )
+        return SnapshotAttempt(
+            image=still.image,
+            method="netsdk_keyframe",
+            width=still.width or None,
+            height=still.height or None,
+        )
 
     def _netsdk_rtsp_url(self, *, channel: int = 0, stream_type: int = 0) -> RtspUrlResult:
         try:

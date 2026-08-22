@@ -444,3 +444,27 @@ class SdkError(IntEnum):
     FACE_EXIST = 121
     FACE_UNKNOWN_OPERATE_ERROR = 122
     FACE_NOT_UPLOAD = 123
+
+
+class FrameType(IntEnum):
+    """DD_FRAME_TYPE — ``dataType`` of a ``LIVE_DATA_CALLBACK_EX`` buffer."""
+
+    NONE = 0x00
+    VIDEO = 0x01
+    AUDIO = 0x02
+    TALK_AUDIO = 0x03
+    JPEG = 0x04
+    VIDEO_FORMAT = 0x05  # 40-byte format header: FourCC at offset 16 (``HEVC``/``H264``)
+    AUDIO_FORMAT = 0x06
+    TALK_AUDIO_FORMAT = 0x07
+    END = 0x0A
+
+
+class FrameAttrib(IntEnum):
+    """DD_FRAME_ATTRIB — bit flags in ``NET_SDK_FRAME_INFO.frameAttrib``."""
+
+    LIVE_FIRST_STREAM = 0x40  # main stream
+    LIVE_SECOND_STREAM = 0x80  # sub stream
+    LIVE_JPEG = 0x100
+    LIVE_THIRD_STREAM = 0x400
+    LIVE_FOURTH_STREAM = 0x800

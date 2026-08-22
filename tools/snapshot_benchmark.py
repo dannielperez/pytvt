@@ -10,9 +10,14 @@ Legs:
 
 - ``webapi``  — LAPI ``GetSnapshot`` (the NVR's "API Server" service):
                 one authenticated HTTP GET, no subprocess, no SDK login.
-- ``rtsp``    — RTSP frame grab via ffmpeg (URL resolved over the web CGI).
+- ``rtsp``    — RTSP frame grab via ffmpeg (URL resolved over the NVR web
+                CGI, or the camera's direct ``profile1`` URL for a bare IPC).
 - ``netsdk``  — native ``NET_SDK_CaptureJPEGData_V2`` (requires the vendor
                 SDK installed; skipped automatically when unavailable).
+- ``netsdk_keyframe`` — native ``NET_SDK_LivePlayEx`` main-stream keyframe +
+                ffmpeg decode: the only full-resolution single-frame path
+                (webapi/netsdk/ONVIF single shots return the IPC's CIF
+                snapshot stream). Requires the SDK and ffmpeg.
 
 Usage::
 
@@ -145,12 +150,25 @@ def bench_webapi(args) -> LegReport:
 
 
 def bench_rtsp(args) -> LegReport:
+    from urllib.parse import quote
+
     from pytvt.xml_api import NvrClient, rtsp_snapshot_attempt_bytes
 
     report = LegReport(leg="rtsp", uses_subprocess=True)
-    with NvrClient(args.ip, args.username, args.password, port=args.web_port, timeout=args.timeout) as nvr:
-        nvr.login()
-        rtsp_url = nvr.get_rtsp_url(args.channel, "main")
+    # Resolving the RTSP URL over the NVR web CGI needs the recorder's
+    # challenge-response login; a bare IP camera speaks Basic auth and has no
+    # such CGI, so fall back to its conventional direct RTSP profile URL.
+    rtsp_url = ""
+    try:
+        with NvrClient(args.ip, args.username, args.password, port=args.web_port, timeout=args.timeout) as nvr:
+            nvr.login()
+            rtsp_url = nvr.get_rtsp_url(args.channel, "main")
+    except Exception as exc:
+        creds = f"{quote(args.username, safe='')}:{quote(args.password, safe='')}@"
+        rtsp_url = f"rtsp://{creds}{args.ip}:{args.rtsp_port}/profile1"
+        report.errors.append(
+            f"web CGI unavailable ({type(exc).__name__}); using direct RTSP {args.ip}:{args.rtsp_port}/profile1"
+        )
     if not rtsp_url:
         report.failed = args.iterations
         report.errors.append("could not resolve an RTSP URL over the web CGI")
@@ -198,6 +216,50 @@ def bench_netsdk(args) -> LegReport:
             return _run_leg(report, args.iterations, capture)
 
 
+def bench_netsdk_keyframe(args) -> LegReport:
+    """Full-resolution leg: one main-stream keyframe via ``NET_SDK_LivePlayEx`` + ffmpeg decode."""
+    report = LegReport(leg="netsdk_keyframe", uses_subprocess=True)
+    try:
+        from pytvt.device_sdk.client import NetSdkClient
+        from pytvt.device_sdk.constants import StreamType
+    except Exception as exc:
+        report.failed = args.iterations
+        report.errors.append(f"NetSDK unavailable: {type(exc).__name__}: {exc}")
+        return report
+
+    try:
+        client = NetSdkClient()
+    except Exception as exc:
+        report.failed = args.iterations
+        report.errors.append(f"NetSDK init failed: {type(exc).__name__}: {exc}")
+        return report
+
+    with client:
+        try:
+            session = client.login(args.ip, args.username, args.password, port=args.sdk_port)
+        except Exception as exc:
+            report.failed = args.iterations
+            report.errors.append(f"NetSDK login failed: {type(exc).__name__}: {exc}")
+            return report
+
+        with session:
+
+            def capture() -> bytes | None:
+                still = session.capture_main_still(
+                    args.channel - 1,  # NetSDK is 0-based
+                    stream=StreamType.MAIN,
+                    timeout=args.timeout,
+                )
+                report.errors.append(f"capture {still.capture_ms} ms + decode {still.decode_ms} ms ({still.codec})")
+                return still.image
+
+            result = _run_leg(report, args.iterations, capture)
+            # Keep only the last timing breakdown so the table stays readable.
+            breakdown = [e for e in result.errors if e.startswith("capture ")]
+            result.errors = [e for e in result.errors if not e.startswith("capture ")] + breakdown[-1:]
+            return result
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--ip", required=True, help="Device IP address")
@@ -207,11 +269,12 @@ def main() -> int:
     parser.add_argument("-n", "--iterations", type=int, default=5)
     parser.add_argument("--web-port", type=int, default=80)
     parser.add_argument("--sdk-port", type=int, default=6036)
+    parser.add_argument("--rtsp-port", type=int, default=554, help="RTSP port for the direct-camera fallback")
     parser.add_argument("--timeout", type=int, default=10)
     parser.add_argument(
         "--legs",
-        default="webapi,rtsp,netsdk",
-        help="Comma-separated legs to run (webapi,rtsp,netsdk)",
+        default="webapi,rtsp,netsdk,netsdk_keyframe",
+        help="Comma-separated legs to run (webapi,rtsp,netsdk,netsdk_keyframe)",
     )
     parser.add_argument("--json", action="store_true", help="Emit JSON instead of a table")
     args = parser.parse_args()
@@ -219,7 +282,12 @@ def main() -> int:
     if not args.password:
         parser.error("password required (-p or TVT_PASSWORD)")
 
-    bench_fns = {"webapi": bench_webapi, "rtsp": bench_rtsp, "netsdk": bench_netsdk}
+    bench_fns = {
+        "webapi": bench_webapi,
+        "rtsp": bench_rtsp,
+        "netsdk": bench_netsdk,
+        "netsdk_keyframe": bench_netsdk_keyframe,
+    }
     reports: list[LegReport] = []
     for leg in (leg.strip() for leg in args.legs.split(",")):
         fn = bench_fns.get(leg)
@@ -227,7 +295,15 @@ def main() -> int:
             print(f"unknown leg: {leg}", file=sys.stderr)
             return 2
         print(f"[{leg}] running {args.iterations} captures against {args.ip} ch{args.channel} ...", file=sys.stderr)
-        reports.append(fn(args))
+        try:
+            reports.append(fn(args))
+        except Exception as exc:
+            # Isolate a leg's setup failure (e.g. an SDK that will not load, a
+            # login that raises) so it cannot abort the run and discard the
+            # results already collected for the other legs.
+            failed = LegReport(leg=leg, failed=args.iterations)
+            failed.errors.append(f"{type(exc).__name__}: {exc}")
+            reports.append(failed)
 
     if args.json:
         print(json.dumps([r.as_dict() for r in reports], indent=2))
