@@ -1199,3 +1199,140 @@ def test_typed_plate_stream_rejects_malformed_event() -> None:
     )
     with pytest.raises(RuntimeClientError, match="invalid plate stream response"):
         stream.get(timeout=0)
+
+
+# ── keyframe / main-stream still ──────────────────────────────────────
+
+
+def _keyframe_result(**overrides):
+    result = {
+        "data": base64.b64encode(b"\x00\x00\x00\x01\x40\x01keyframe").decode(),
+        "codec": "hevc",
+        "width": 2560,
+        "height": 1440,
+        "streamType": 0,
+        "captureMs": 212,
+        "frameTimeUs": 1_700_000_000_000_000,
+    }
+    result.update(overrides)
+    return result
+
+
+def test_typed_runtime_keyframe_owns_job_schema_and_result_validation() -> None:
+    captured: dict = {}
+
+    class Client(SyncRuntimeClient):
+        def execute(self, job, **options):
+            captured.update(job)
+            captured["options"] = options
+            return _keyframe_result()
+
+    keyframe = Client().capture_keyframe(
+        "192.0.2.10",
+        "operator",
+        "secret",
+        channel=3,
+        stream_type=0,
+        keyframe_timeout_ms=4000,
+        total_timeout_ms=9000,
+        require_immediate_admission=True,
+    )
+
+    assert captured["operation"] == "keyframe"
+    assert captured["channel"] == 3
+    assert captured["streamType"] == 0
+    assert captured["keyframeTimeoutMs"] == 4000
+    assert captured["options"]["require_immediate_admission"] is True
+    assert captured["options"]["total_timeout_ms"] == 9000
+    assert keyframe.data == b"\x00\x00\x00\x01\x40\x01keyframe"
+    assert (keyframe.codec, keyframe.width, keyframe.height) == ("hevc", 2560, 1440)
+    assert (keyframe.channel, keyframe.stream_type, keyframe.capture_ms) == (3, 0, 212)
+    assert keyframe.frame_time_us == 1_700_000_000_000_000
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        "not-a-dict",
+        _keyframe_result(data="not-base64"),
+        _keyframe_result(data=""),
+        _keyframe_result(codec="mjpeg"),
+        _keyframe_result(width=-1),
+        _keyframe_result(streamType=9),
+        _keyframe_result(captureMs="fast"),
+    ],
+)
+def test_typed_runtime_keyframe_rejects_invalid_payload(result) -> None:
+    class Client(SyncRuntimeClient):
+        def execute(self, _job, **_options):
+            return result
+
+    with pytest.raises(RuntimeClientError, match="invalid keyframe"):
+        Client().capture_keyframe("192.0.2.10", "operator", "secret", channel=0)
+
+
+@pytest.mark.parametrize(("field", "value"), [("channel", 256), ("stream_type", 3), ("keyframe_timeout_ms", 10)])
+def test_typed_runtime_keyframe_rejects_invalid_arguments(field, value) -> None:
+    kwargs = {"channel": 0, "stream_type": 0, "keyframe_timeout_ms": 5000, field: value}
+    with pytest.raises(ValueError):
+        SyncRuntimeClient().capture_keyframe("192.0.2.10", "operator", "secret", **kwargs)
+
+
+def test_older_runtime_unknown_operation_is_a_typed_capability_gap() -> None:
+    """Runtimes that predate ``keyframe`` answer operation_error/'unsupported operation'."""
+
+    class Client(SyncRuntimeClient):
+        def execute(self, _job, **_options):
+            raise RuntimeRemoteError("operation_error", "ValueError: unsupported operation")
+
+    with pytest.raises(RuntimeRemoteError) as excinfo:
+        Client().capture_keyframe("192.0.2.10", "operator", "secret", channel=0)
+    assert excinfo.value.kind == "unsupported_operation"
+
+    class NewerClient(SyncRuntimeClient):
+        def execute(self, _job, **_options):
+            raise RuntimeRemoteError("capability_unavailable", "NetSdkCapabilityError: no LivePlayEx")
+
+    with pytest.raises(RuntimeRemoteError) as excinfo:
+        NewerClient().capture_keyframe("192.0.2.10", "operator", "secret", channel=0)
+    assert excinfo.value.kind == "capability_unavailable"
+
+
+def test_typed_runtime_main_still_decodes_locally() -> None:
+    from unittest.mock import patch
+
+    class Client(SyncRuntimeClient):
+        def execute(self, _job, **_options):
+            return _keyframe_result()
+
+    jpeg = b"\xff\xd8still\xff\xd9"
+    with patch("pytvt.runtime_client.decode_keyframe_to_jpeg", return_value=jpeg) as decode:
+        still = Client().capture_main_still(
+            "192.0.2.10", "operator", "secret", channel=2, quality=3, decode_timeout=4.0
+        )
+
+    decode.assert_called_once_with(b"\x00\x00\x00\x01\x40\x01keyframe", "hevc", quality=3, timeout=4.0)
+    assert still.image == jpeg
+    assert (still.channel, still.width, still.height, still.codec) == (2, 2560, 1440, "hevc")
+    assert still.method == "runtime_keyframe"
+    assert still.capture_ms == 212 and still.decode_ms >= 0
+
+
+def test_typed_runtime_main_still_propagates_decode_error() -> None:
+    from unittest.mock import patch
+
+    from pytvt.keyframe import KeyframeDecodeError
+
+    class Client(SyncRuntimeClient):
+        def execute(self, _job, **_options):
+            return _keyframe_result()
+
+    with (
+        patch(
+            "pytvt.runtime_client.decode_keyframe_to_jpeg",
+            side_effect=KeyframeDecodeError("ffmpeg_unavailable", "no ffmpeg"),
+        ),
+        pytest.raises(KeyframeDecodeError) as excinfo,
+    ):
+        Client().capture_main_still("192.0.2.10", "operator", "secret", channel=2)
+    assert excinfo.value.kind == "ffmpeg_unavailable"

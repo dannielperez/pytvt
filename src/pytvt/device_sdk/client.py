@@ -35,6 +35,12 @@ from tempfile import TemporaryDirectory
 from typing import Literal
 
 from .._jpeg import strip_jpeg_nul_padding
+from ..keyframe import (
+    KeyframeCapture,
+    StillCapture,
+    codec_from_format_frame,
+    decode_keyframe_to_jpeg,
+)
 from ..models import PlatformAccessConfig
 from ..platform_access import parse_platform_access_config, response_status
 from . import bindings as sdk
@@ -43,6 +49,7 @@ from .constants import (
     DiskProperty,
     DiskStatus,
     FaceMatchCommand,
+    FrameType,
     PtzCommand,
     PtzSpeed,
     RecordType,
@@ -70,12 +77,14 @@ from .types import (
     CLOUD_UPGRADE_INFO,
     DD_TIME,
     DD_TIME_EX,
+    LIVE_DATA_CALLBACK_EX,
     NET_DVR_IVE_POINT_T,
     NET_DVR_SUBSCRIBE_REPLY,
     NET_SDK_ALRAM_OUT_STATUS,
     NET_SDK_CH_DEVICE_STATUS,
     NET_SDK_CH_SNAP_FACE_IMG_LIST,
     NET_SDK_CH_SNAP_FACE_IMG_LIST_SEARCH,
+    NET_SDK_CLIENTINFO,
     NET_SDK_DEV_SUPPORT,
     NET_SDK_DEVICE_DISCOVERY_INFO,
     NET_SDK_DEVICE_IP_INFO,
@@ -83,6 +92,7 @@ from .types import (
     NET_SDK_DISK_INFO,
     NET_SDK_FACE_IMG_INFO_CH,
     NET_SDK_FACE_INFO_IMG_DATA,
+    NET_SDK_FRAME_INFO,
     NET_SDK_IPC_DEVICE_INFO,
     NET_SDK_LOG,
     NET_SDK_NVR_DISKREC_DATE_ITEM,
@@ -1086,6 +1096,130 @@ class DeviceSession:
             raise NetSdkError(
                 "CaptureJPEGFile_V2 did not produce a readable snapshot",
             ) from file_error
+
+    # ── Main-stream keyframe still (live preview) ─────────────────
+
+    def capture_keyframe(
+        self,
+        channel: int,
+        *,
+        stream: StreamType = StreamType.MAIN,
+        timeout: float = 5.0,
+        max_bytes: int = 8 * 1024 * 1024,
+    ) -> KeyframeCapture:
+        """Grab one raw keyframe of ``stream`` for ``channel`` via ``NET_SDK_LivePlayEx``.
+
+        The stream-less capture APIs (:meth:`capture_jpeg`) return the IPC's
+        configured snapshot stream (CIF/4CIF on the fleet) — there is no
+        resolution parameter. The main-stream preview, by contrast, starts at
+        the recorder's most recent I-frame: the first video callback is the
+        keyframe, delivered in ~0.2-0.3 s without a GOP wait (verified live
+        2026-08-21 against an N9000 relaying a 2560x1440 H.265 IPC). The
+        preview is stopped as soon as the keyframe is in hand, so one open
+        stream exists only for that window.
+
+        Returns the Annex-B elementary stream (parameter sets + I-frame) with
+        the codec/dimensions the recorder reported; decode with
+        :func:`pytvt.keyframe.decode_keyframe_to_jpeg` or use
+        :meth:`capture_main_still`.
+
+        Raises:
+            NetSdkCapabilityError: the loaded SDK lacks the preview symbols.
+            NetSdkError: the preview could not start, no keyframe arrived within
+                ``timeout``, or the keyframe exceeded ``max_bytes``.
+        """
+        live_play = self._require("NET_SDK_LivePlayEx")
+        stop_live_play = self._require("NET_SDK_StopLivePlay")
+        header_size = ct.sizeof(NET_SDK_FRAME_INFO)
+        done = threading.Event()
+        state: dict[str, object] = {"codec": "", "width": 0, "height": 0, "time_us": 0, "data": None, "error": ""}
+
+        def _on_data(_handle: int, data_type: int, buffer: int | None, length: int, _user: int | None) -> None:
+            # Runs on the SDK's own thread: copy out, never block, never raise.
+            try:
+                if done.is_set() or not buffer or length < header_size:
+                    return
+                raw = ct.string_at(buffer, length)
+                info = NET_SDK_FRAME_INFO.from_buffer_copy(raw[:header_size])
+                payload = raw[header_size:]
+                if data_type == FrameType.VIDEO_FORMAT:
+                    state["codec"] = codec_from_format_frame(payload) or state["codec"]
+                    state["width"] = state["width"] or int(info.width)
+                    state["height"] = state["height"] or int(info.height)
+                    return
+                if data_type != FrameType.VIDEO or int(info.keyFrame) != 1:
+                    return
+                if len(payload) > max_bytes:
+                    state["error"] = f"Keyframe of {len(payload)} bytes exceeds the {max_bytes}-byte limit"
+                    done.set()
+                    return
+                state["data"] = payload
+                state["width"] = int(info.width) or int(state["width"])  # type: ignore[call-overload]
+                state["height"] = int(info.height) or int(state["height"])  # type: ignore[call-overload]
+                state["time_us"] = int(info.time)
+                done.set()
+            except Exception as exc:  # pragma: no cover - defensive: ctypes swallows callback errors
+                state["error"] = f"{type(exc).__name__}: {exc}"
+                done.set()
+
+        thunk = LIVE_DATA_CALLBACK_EX(_on_data)
+        request = NET_SDK_CLIENTINFO(lChannel=channel, streamType=int(stream), hPlayWnd=None, bNoDecode=1)
+        started = time.monotonic()
+        handle = int(live_play(self._handle, ct.byref(request), thunk, None))
+        if handle < 0:
+            self._check(False, "LivePlayEx")
+        try:
+            arrived = done.wait(timeout)
+        finally:
+            # The callback thunk must outlive the preview; stop before it can be
+            # collected and before the state dict goes away.
+            stop_live_play(handle)
+            del thunk
+        capture_ms = int((time.monotonic() - started) * 1000)
+        if state["error"]:
+            raise NetSdkError(f"LivePlayEx keyframe grab failed: {state['error']}")
+        if not arrived or state["data"] is None:
+            raise NetSdkError(
+                f"LivePlayEx delivered no keyframe within {timeout:g}s (channel={channel}, stream={int(stream)})"
+            )
+        return KeyframeCapture(
+            data=state["data"],  # type: ignore[arg-type]
+            codec=str(state["codec"]),
+            width=int(state["width"]),  # type: ignore[call-overload]
+            height=int(state["height"]),  # type: ignore[call-overload]
+            stream_type=int(stream),
+            capture_ms=capture_ms,
+            frame_time_us=int(state["time_us"]),  # type: ignore[call-overload]
+        )
+
+    def capture_main_still(
+        self,
+        channel: int,
+        *,
+        stream: StreamType = StreamType.MAIN,
+        timeout: float = 5.0,
+        quality: int = 2,
+        decode_timeout: float = 10.0,
+        max_bytes: int = 8 * 1024 * 1024,
+    ) -> StillCapture:
+        """Full-resolution JPEG still: :meth:`capture_keyframe` + ffmpeg decode.
+
+        Raises :class:`pytvt.keyframe.KeyframeDecodeError` when the keyframe
+        cannot be decoded (missing ffmpeg, unknown codec, decoder failure) and
+        the NetSDK errors of :meth:`capture_keyframe`.
+        """
+        keyframe = self.capture_keyframe(channel, stream=stream, timeout=timeout, max_bytes=max_bytes)
+        decode_started = time.monotonic()
+        image = decode_keyframe_to_jpeg(keyframe.data, keyframe.codec, quality=quality, timeout=decode_timeout)
+        return StillCapture(
+            image=image,
+            width=keyframe.width,
+            height=keyframe.height,
+            codec=keyframe.codec,
+            stream_type=keyframe.stream_type,
+            capture_ms=keyframe.capture_ms,
+            decode_ms=int((time.monotonic() - decode_started) * 1000),
+        )
 
     # ── Native face capture search ─────────────────────────────
 

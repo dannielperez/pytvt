@@ -103,3 +103,46 @@ def test_rtsp_falls_back_to_direct_ipc_url_when_cgi_login_fails(monkeypatch):
     # Credentials are URL-encoded and the direct profile1 URL is used.
     assert captured["url"] == "rtsp://ad%20min:p%40ss%2Fword@10.0.0.2:554/profile1"
     assert any("direct RTSP" in e for e in report.errors)
+
+
+def test_netsdk_keyframe_leg_reports_full_resolution_and_timing(monkeypatch):
+    """The keyframe leg is the only full-resolution single-frame path; pin its wiring."""
+    from types import SimpleNamespace
+
+    from pytvt.device_sdk import client as client_mod
+
+    jpeg = b"\xff\xd8\xff\xc0\x00\x11\x08\x05\xa0\x0a\x00\x03" + b"\x00" * 40  # SOF0: 2560x1440
+    still = SimpleNamespace(image=jpeg, capture_ms=210, decode_ms=160, codec="hevc", width=2560, height=1440)
+
+    class _Session:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def capture_main_still(self, channel, *, stream, timeout):
+            assert channel == 0  # 1-based CLI channel → 0-based NetSDK
+            return still
+
+    class _Client:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def login(self, ip, username, password, port):
+            return _Session()
+
+    monkeypatch.setattr(client_mod, "NetSdkClient", _Client)
+    args = SimpleNamespace(
+        ip="10.0.0.2", username="admin", password="pw", sdk_port=6036, channel=1, timeout=5, iterations=2
+    )
+
+    report = bench.bench_netsdk_keyframe(args)
+
+    assert report.ok == 2
+    assert (report.width, report.height) == (2560, 1440)
+    assert report.uses_subprocess is True
+    assert any("capture 210 ms + decode 160 ms (hevc)" in e for e in report.errors)

@@ -14,6 +14,10 @@ Legs:
                 CGI, or the camera's direct ``profile1`` URL for a bare IPC).
 - ``netsdk``  — native ``NET_SDK_CaptureJPEGData_V2`` (requires the vendor
                 SDK installed; skipped automatically when unavailable).
+- ``netsdk_keyframe`` — native ``NET_SDK_LivePlayEx`` main-stream keyframe +
+                ffmpeg decode: the only full-resolution single-frame path
+                (webapi/netsdk/ONVIF single shots return the IPC's CIF
+                snapshot stream). Requires the SDK and ffmpeg.
 
 Usage::
 
@@ -212,6 +216,50 @@ def bench_netsdk(args) -> LegReport:
             return _run_leg(report, args.iterations, capture)
 
 
+def bench_netsdk_keyframe(args) -> LegReport:
+    """Full-resolution leg: one main-stream keyframe via ``NET_SDK_LivePlayEx`` + ffmpeg decode."""
+    report = LegReport(leg="netsdk_keyframe", uses_subprocess=True)
+    try:
+        from pytvt.device_sdk.client import NetSdkClient
+        from pytvt.device_sdk.constants import StreamType
+    except Exception as exc:
+        report.failed = args.iterations
+        report.errors.append(f"NetSDK unavailable: {type(exc).__name__}: {exc}")
+        return report
+
+    try:
+        client = NetSdkClient()
+    except Exception as exc:
+        report.failed = args.iterations
+        report.errors.append(f"NetSDK init failed: {type(exc).__name__}: {exc}")
+        return report
+
+    with client:
+        try:
+            session = client.login(args.ip, args.username, args.password, port=args.sdk_port)
+        except Exception as exc:
+            report.failed = args.iterations
+            report.errors.append(f"NetSDK login failed: {type(exc).__name__}: {exc}")
+            return report
+
+        with session:
+
+            def capture() -> bytes | None:
+                still = session.capture_main_still(
+                    args.channel - 1,  # NetSDK is 0-based
+                    stream=StreamType.MAIN,
+                    timeout=args.timeout,
+                )
+                report.errors.append(f"capture {still.capture_ms} ms + decode {still.decode_ms} ms ({still.codec})")
+                return still.image
+
+            result = _run_leg(report, args.iterations, capture)
+            # Keep only the last timing breakdown so the table stays readable.
+            breakdown = [e for e in result.errors if e.startswith("capture ")]
+            result.errors = [e for e in result.errors if not e.startswith("capture ")] + breakdown[-1:]
+            return result
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--ip", required=True, help="Device IP address")
@@ -225,8 +273,8 @@ def main() -> int:
     parser.add_argument("--timeout", type=int, default=10)
     parser.add_argument(
         "--legs",
-        default="webapi,rtsp,netsdk",
-        help="Comma-separated legs to run (webapi,rtsp,netsdk)",
+        default="webapi,rtsp,netsdk,netsdk_keyframe",
+        help="Comma-separated legs to run (webapi,rtsp,netsdk,netsdk_keyframe)",
     )
     parser.add_argument("--json", action="store_true", help="Emit JSON instead of a table")
     args = parser.parse_args()
@@ -234,7 +282,12 @@ def main() -> int:
     if not args.password:
         parser.error("password required (-p or TVT_PASSWORD)")
 
-    bench_fns = {"webapi": bench_webapi, "rtsp": bench_rtsp, "netsdk": bench_netsdk}
+    bench_fns = {
+        "webapi": bench_webapi,
+        "rtsp": bench_rtsp,
+        "netsdk": bench_netsdk,
+        "netsdk_keyframe": bench_netsdk_keyframe,
+    }
     reports: list[LegReport] = []
     for leg in (leg.strip() for leg in args.legs.split(",")):
         fn = bench_fns.get(leg)

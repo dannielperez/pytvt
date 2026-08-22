@@ -382,17 +382,45 @@ class TestNetsdkDispatch:
         assert "Connection refused" in (result.error or "")
 
     def test_snapshot(self, mgr: DeviceManager) -> None:
+        from pytvt.device_sdk.client import NetSdkCapabilityError
+
         mock_session = MagicMock()
         mock_session.capture_jpeg.return_value = b"\xff\xd8" + b"\x00" * 10
+        # SDK drop without live preview: main intent falls back to the single shot.
+        mock_session.capture_main_still.side_effect = NetSdkCapabilityError("no LivePlayEx")
         mgr._netsdk_session = mock_session
 
         result = mgr.snapshot(channel=1)
         assert result is not None
         mock_session.capture_jpeg.assert_called_once_with(1)
 
+    def test_snapshot_main_prefers_the_live_keyframe(self, mgr: DeviceManager) -> None:
+        from pytvt.keyframe import StillCapture
+
+        mock_session = MagicMock()
+        still = StillCapture(
+            image=b"\xff\xd8" + b"\x00" * 10,
+            width=2560,
+            height=1440,
+            codec="hevc",
+            stream_type=0,
+            capture_ms=200,
+            decode_ms=150,
+        )
+        mock_session.capture_main_still.return_value = still
+        mgr._netsdk_session = mock_session
+
+        attempt = mgr.snapshot_attempt(channel=1, stream="main")
+        assert attempt.method == "netsdk_keyframe"
+        assert (attempt.width, attempt.height) == (2560, 1440)
+        mock_session.capture_jpeg.assert_not_called()
+
     def test_snapshot_error(self, mgr: DeviceManager) -> None:
+        from pytvt.device_sdk.client import NetSdkCapabilityError
+
         mock_session = MagicMock()
         mock_session.capture_jpeg.side_effect = RuntimeError("fail")
+        mock_session.capture_main_still.side_effect = NetSdkCapabilityError("no LivePlayEx")
         mgr._netsdk_session = mock_session
 
         result = mgr.snapshot()
