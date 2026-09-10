@@ -19,9 +19,12 @@ Supports:
 from __future__ import annotations
 
 import ctypes as ct
+import hashlib
 import logging
 import math
+import os
 import re
+import tempfile
 import threading
 import time
 import warnings
@@ -615,6 +618,15 @@ class DeviceSupport:
     vfd_match: bool = False
     thermal: bool = False
     passline: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class ConfigExportResult:
+    """Verified device-configuration export ready for backup ingestion."""
+
+    path: Path
+    size_bytes: int
+    sha256: str
 
 
 # ── Errors ──────────────────────────────────────────────────────────
@@ -2244,15 +2256,49 @@ class DeviceSession:
             "RestoreConfig",
         )
 
-    def export_config(self, file_path: str) -> None:
-        """Export device configuration to a file."""
-        self._check(
-            sdk._lib.NET_SDK_GetConfigFile(  # type: ignore[union-attr]
-                self._handle,
-                file_path.encode("utf-8"),
-            ),
-            "GetConfigFile",
+    def export_config(self, file_path: str | Path) -> ConfigExportResult:
+        """Atomically export and verify a device configuration backup.
+
+        The vendor call writes to a temporary sibling first.  A failed or
+        empty export is removed without replacing an existing destination.
+        Successful exports are atomically published and returned with the
+        size and SHA-256 integrity evidence expected by backup consumers.
+        """
+        destination = Path(file_path).expanduser()
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        descriptor, temporary_name = tempfile.mkstemp(
+            dir=destination.parent,
+            prefix=f".{destination.name}.",
+            suffix=".partial",
         )
+        os.close(descriptor)
+        temporary = Path(temporary_name)
+        try:
+            self._check(
+                sdk._lib.NET_SDK_GetConfigFile(  # type: ignore[union-attr]
+                    self._handle,
+                    os.fsencode(temporary),
+                ),
+                "GetConfigFile",
+            )
+            size_bytes = temporary.stat().st_size
+            if size_bytes <= 0:
+                raise NetSdkError("GetConfigFile produced an empty configuration export")
+
+            digest = hashlib.sha256()
+            with temporary.open("rb") as exported:
+                for chunk in iter(lambda: exported.read(1024 * 1024), b""):
+                    digest.update(chunk)
+                os.fsync(exported.fileno())
+
+            os.replace(temporary, destination)
+            return ConfigExportResult(
+                path=destination,
+                size_bytes=size_bytes,
+                sha256=digest.hexdigest(),
+            )
+        finally:
+            temporary.unlink(missing_ok=True)
 
     def import_config(self, file_path: str) -> None:
         """Import device configuration from a file."""
