@@ -21,6 +21,7 @@ Platform: Linux x86-64 and aarch64 only ($TVT_SDK_PATH or sdk_path=... to overri
 from .client import (
     CallLogEntry,
     CloudUpgradeStatus,
+    ConfigExportResult,
     DeviceUser,
     EncodeStream,
     MotionConfig,
@@ -113,6 +114,7 @@ __all__ = [
     "RecordSchedule",
     "CallLogEntry",
     "CloudUpgradeStatus",
+    "ConfigExportResult",
     "DeviceUser",
     "NvrChannelInfo",
     "RecordDevice",
