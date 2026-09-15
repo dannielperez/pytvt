@@ -16,7 +16,7 @@ import time
 import xml.etree.ElementTree as ET
 import zipfile
 from collections import Counter
-from datetime import datetime
+from datetime import datetime, timezone
 from urllib.parse import urljoin, urlsplit
 from xml.sax.saxutils import escape
 from zoneinfo import ZoneInfo
@@ -100,7 +100,9 @@ class MaintenanceClient:
     def system_info(self):
         root = self._post("querySystemInfo", "<condition><langType>en</langType></condition>")
         fields = ("productModel", "softwareVersion", "updateTime", "serverTime", "serverRunTime", "cpu", "memory")
-        return {field: (root.findtext("content/" + field) or "")[:160] for field in fields}
+        return {field: (root.findtext("content/" + field) or "")[:160] for field in fields} | {
+            "collected_at": datetime.now(timezone.utc).isoformat()
+        }
 
     def download(self, target, *, max_bytes=1_000_000_000, deadline_seconds=900):
         deadline = time.monotonic() + deadline_seconds
@@ -270,7 +272,7 @@ def collect_audit(client, *, tz_name, start, end):
     meta.update(archive_sha256=digest, compressed_bytes=size, before=before, after=after)
     for label, sample in (("before export", before), ("after export", after)):
         try:
-            at = datetime.fromisoformat(sample["serverTime"]).replace(tzinfo=ZoneInfo(tz_name))
+            at = datetime.fromisoformat(sample["collected_at"])
             value = float(sample["cpu"].rstrip("%"))
         except (ValueError, KeyError):
             continue

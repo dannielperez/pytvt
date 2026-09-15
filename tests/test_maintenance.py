@@ -92,3 +92,23 @@ def test_archive_limits_checked_before_read():
     target.seek(0)
     with pytest.raises(MaintenanceError, match="limits"):
         analyze(target)
+
+
+def test_resource_samples_use_collection_clock_and_cleanup():
+    from unittest.mock import patch
+    from pytvt.maintenance import collect_audit
+
+    client = Mock()
+    client.system_info.return_value = {
+        "cpu": "99.5%",
+        "serverTime": "2099-01-01 00:00:00",
+        "collected_at": "2026-09-15T19:00:00+00:00",
+    }
+    client.download.return_value = ("a" * 64, 123)
+    with patch("pytvt.maintenance.analyze_archive", return_value=({"schema": 1, "observations": []}, {})):
+        result, _ = collect_audit(
+            client, tz_name="America/Puerto_Rico", start=datetime.now(timezone.utc), end=datetime.now(timezone.utc)
+        )
+    assert len(result["observations"]) == 2
+    assert result["observations"][0]["window_end"] == "2026-09-15T19:00:00+00:00"
+    client.logout.assert_called_once()
