@@ -368,9 +368,7 @@ def _parse_http_response_body(data: bytes) -> bytes:
     if len(data) < 72:
         return data
 
-    content_len = struct.unpack_from("<I", data, 0)[0]
-    content = data[72:]  # Skip contentLen(4) + seq(4) + reverse(64)
-    return content
+    return data[72:]  # Skip contentLen(4) + seq(4) + reverse(64)
 
 
 def scan_nvr(
@@ -536,7 +534,6 @@ def scan_nvr(
 
                 if cmd_type == CMD_HTTP_REPLY and resp_data:
                     body = _parse_http_response_body(resp_data)
-                    body_str = body.decode("utf-8", errors="replace")
 
                     # Try to parse as JSON
                     # Find JSON start
