@@ -11,6 +11,7 @@ sdk_login.py to validate protocol findings.
 
 See research/README.md for context.
 """
+
 import hashlib
 import os
 import struct
@@ -19,11 +20,12 @@ import sys
 # Load .env
 env_path = os.path.join(os.path.dirname(__file__), "..", ".env")
 if os.path.exists(env_path):
-    for line in open(env_path):
-        line = line.strip()
-        if line and not line.startswith("#") and "=" in line:
-            k, v = line.split("=", 1)
-            os.environ.setdefault(k, v)
+    with open(env_path) as env_file:
+        for line in env_file:
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                os.environ.setdefault(k, v)
 
 password = os.environ.get("TVT_PASSWORD", "")
 if not password:
@@ -72,10 +74,10 @@ with open(pcap_file, "rb") as f:
         if ip[9] != 6:
             continue
 
-        src_port = struct.unpack(">H", ip[ihl:ihl+2])[0]
-        dst_port = struct.unpack(">H", ip[ihl+2:ihl+4])[0]
-        tcp_hdr_len = ((ip[ihl+12] >> 4) & 0x0F) * 4
-        payload = ip[ihl+tcp_hdr_len:]
+        src_port = struct.unpack(">H", ip[ihl : ihl + 2])[0]
+        dst_port = struct.unpack(">H", ip[ihl + 2 : ihl + 4])[0]
+        tcp_hdr_len = ((ip[ihl + 12] >> 4) & 0x0F) * 4
+        payload = ip[ihl + tcp_hdr_len :]
         if not payload:
             continue
 
@@ -85,7 +87,9 @@ with open(pcap_file, "rb") as f:
             init_nonce_le = int.from_bytes(init_nonce_bytes, "little")
             login_encrypt = payload[44]
             pv = struct.unpack_from("<I", payload, 12)[0]
-            print(f"INIT: protocolVer={pv} loginEncrypt={login_encrypt} nonce={init_nonce_bytes.hex()} nonce_LE={init_nonce_le}")
+            print(
+                f"INIT: protocolVer={pv} loginEncrypt={login_encrypt} nonce={init_nonce_bytes.hex()} nonce_LE={init_nonce_le}"
+            )
 
         # SDK -> NVR: look for login packet
         elif dst_port == 6036 and len(payload) >= 20 and payload[:4] == b"1111":
@@ -108,15 +112,15 @@ with open(pcap_file, "rb") as f:
 
                         # Now verify the password encryption scheme
                         md5_upper = hashlib.md5(password.encode()).hexdigest().upper()
-                        print(f"\n  --- Verification ---")
+                        print("\n  --- Verification ---")
                         print(f"  Password: {password}")
                         print(f"  MD5(pw).upper(): {md5_upper}")
                         print(f"  Nonce LE int:    {init_nonce_le}")
 
                         tests = [
-                            ("%08d",  md5_upper + f"{init_nonce_le:08d}"),
-                            ("%d",    md5_upper + str(init_nonce_le)),
-                            ("%07d",  md5_upper + f"{init_nonce_le:07d}"),
+                            ("%08d", md5_upper + f"{init_nonce_le:08d}"),
+                            ("%d", md5_upper + str(init_nonce_le)),
+                            ("%07d", md5_upper + f"{init_nonce_le:07d}"),
                             ("BE %08d", md5_upper + f"{int.from_bytes(init_nonce_bytes, 'big'):08d}"),
                         ]
 
@@ -125,20 +129,24 @@ with open(pcap_file, "rb") as f:
                             match = " <<< MATCH!" if sha1 == login_pw else ""
                             print(f"  SHA1(md5+nonce{fmt_name:>8s}) = {sha1.hex()}{match}")
                             if match:
-                                print(f"\n  *** PASSWORD ENCRYPTION SCHEME CONFIRMED ***")
-                                print(f"  Algorithm: SHA1( MD5(password).hexdigest().upper() + sprintf('{fmt_name}', nonce_LE_uint24) )")
+                                print("\n  *** PASSWORD ENCRYPTION SCHEME CONFIRMED ***")
+                                print(
+                                    f"  Algorithm: SHA1( MD5(password).hexdigest().upper() + sprintf('{fmt_name}', nonce_LE_uint24) )"
+                                )
 
                         # If none matched, try more combos
                         if all(hashlib.sha1(c.encode()).digest() != login_pw for _, c in tests):
-                            print(f"\n  No match. Trying more combinations...")
+                            print("\n  No match. Trying more combinations...")
 
                             # Try with the 4-byte loginEncrypt+nonce
                             nonce4_le = int.from_bytes(payload[64:68], "little") if len(payload) > 68 else None
 
                             # Try XOR of SHA1 with nonce
                             sha1_plain = hashlib.sha1(password.encode()).digest()
-                            xor_nonce = bytes(a ^ b for a, b in zip(sha1_plain, (key_str * 3)[:20]))
-                            print(f"  SHA1(pw) XOR nonce_str: {xor_nonce.hex()} {'MATCH!' if xor_nonce == login_pw else ''}")
+                            xor_nonce = bytes(a ^ b for a, b in zip(sha1_plain, (key_str * 3)[:20], strict=False))
+                            print(
+                                f"  SHA1(pw) XOR nonce_str: {xor_nonce.hex()} {'MATCH!' if xor_nonce == login_pw else ''}"
+                            )
 
                             # Try MD5 binary + nonce -> SHA1
                             md5_bin = hashlib.md5(password.encode()).digest()
@@ -151,7 +159,9 @@ with open(pcap_file, "rb") as f:
                             for n_str in [f"{init_nonce_le:08d}", str(init_nonce_le)]:
                                 combined = n_str + md5_upper
                                 sha1 = hashlib.sha1(combined.encode()).digest()
-                                print(f"  SHA1('{n_str}'+md5upper): {sha1.hex()} {'MATCH!' if sha1 == login_pw else ''}")
+                                print(
+                                    f"  SHA1('{n_str}'+md5upper): {sha1.hex()} {'MATCH!' if sha1 == login_pw else ''}"
+                                )
 
                         break  # Found and processed login
 

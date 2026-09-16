@@ -22,13 +22,6 @@ from __future__ import annotations
 import argparse
 import json
 
-from manifest_resolver import (
-    ManifestNotFoundError,
-    InvalidManifestError,
-    SDKBinaryNotFoundError,
-)
-from sdk_comparator import compare_diagnostics_by_manifest, format_comparison_summary
-
 from management_validation_lib import (
     attach_backend_diagnostics,
     base_report,
@@ -41,6 +34,12 @@ from management_validation_lib import (
     to_plain_data,
     write_report,
 )
+from manifest_resolver import (
+    InvalidManifestError,
+    ManifestNotFoundError,
+    SDKBinaryNotFoundError,
+)
+from sdk_comparator import compare_diagnostics_by_manifest, format_comparison_summary
 
 
 def _active_sdk_session_handle(client: object) -> int | None:
@@ -206,7 +205,9 @@ def _run_device_id_classification_matrix(args) -> int:
         report["operations"].append(op)
         report["operations"].extend(close_ops)
 
-    report["final_status"] = "success" if any(item.get("success") for item in report["device_id_classification_matrix"]) else "failed"
+    report["final_status"] = (
+        "success" if any(item.get("success") for item in report["device_id_classification_matrix"]) else "failed"
+    )
     report_path = write_report(args.output_dir, "management_live_validation", report)
     print(report_path)
     print(
@@ -237,7 +238,9 @@ def _run_login_matrix(args) -> int:
         client = make_client(args)
         op, _ = run_operation(
             "login",
-            lambda did=device_id: client.login(args.username, args.password, device_id=did),
+            lambda did=device_id, current_client=client: current_client.login(
+                args.username, args.password, device_id=did
+            ),
             "Controlled single-variable optional device_id injection experiment.",
         )
         handle = _active_sdk_session_handle(client)
@@ -281,7 +284,11 @@ def _run_login_matrix(args) -> int:
     report["final_status"] = "success" if any(item.get("success") for item in report["login_matrix"]) else "failed"
     report_path = write_report(args.output_dir, "management_live_validation", report)
     print(report_path)
-    print(json.dumps({"final_status": report["final_status"], "login_matrix_count": len(report["login_matrix"])}, indent=2))
+    print(
+        json.dumps(
+            {"final_status": report["final_status"], "login_matrix_count": len(report["login_matrix"])}, indent=2
+        )
+    )
     return 0
 
 
@@ -411,13 +418,16 @@ def main() -> int:
             "captured_at": base_report(args)["captured_at"],
             "sdk_path": args.sdk_path,
             "backend": diagnostics.get("backend"),
-            "context": diagnostics.get("context", {
-                "platform": diagnostics.get("platform", {}),
-                "sdk": diagnostics.get("sdk", {}),
-                "product_scope": diagnostics.get("product_scope", []),
-                "capabilities": diagnostics.get("capabilities", {}),
-                "notes": diagnostics.get("notes", []),
-            }),
+            "context": diagnostics.get(
+                "context",
+                {
+                    "platform": diagnostics.get("platform", {}),
+                    "sdk": diagnostics.get("sdk", {}),
+                    "product_scope": diagnostics.get("product_scope", []),
+                    "capabilities": diagnostics.get("capabilities", {}),
+                    "notes": diagnostics.get("notes", []),
+                },
+            ),
             "symbol_probe": diagnostics.get("symbol_probe", {}),
             "symbol_inventory_summary": {
                 "count": len(symbol_inventory) if isinstance(symbol_inventory, list) else 0,
@@ -557,7 +567,11 @@ def main() -> int:
     report["final_status"] = "success" if not failures else "failed"
     report_path = write_report(args.output_dir, "management_live_validation", report)
     print(report_path)
-    print(json.dumps({"final_status": report["final_status"], "backend_selected": report.get("backend_selected")}, indent=2))
+    print(
+        json.dumps(
+            {"final_status": report["final_status"], "backend_selected": report.get("backend_selected")}, indent=2
+        )
+    )
     return 0 if not failures else 1
 
 

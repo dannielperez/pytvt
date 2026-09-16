@@ -7,8 +7,8 @@ builds deterministic comparison reports without inferring new semantics.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
+from dataclasses import dataclass
 from typing import Any
 
 
@@ -80,10 +80,7 @@ def compare_diagnostics_by_manifest(
     """
     sdk_ids = [item for item in manifest_ids if item in diagnostics_by_manifest]
 
-    symbol_sets = {
-        sdk_id: _symbol_set_from_diagnostics(diagnostics_by_manifest[sdk_id])
-        for sdk_id in sdk_ids
-    }
+    symbol_sets = {sdk_id: _symbol_set_from_diagnostics(diagnostics_by_manifest[sdk_id]) for sdk_id in sdk_ids}
     all_symbols = sorted({symbol for items in symbol_sets.values() for symbol in items})
     symbol_diff: list[dict[str, Any]] = []
     for symbol in all_symbols:
@@ -159,13 +156,10 @@ def compare_diagnostics_by_manifest(
             _flatten_context("", context, flattened)
         flat_context_by_sdk[sdk_id] = flattened
 
-    context_fields = sorted({field for flat in flat_context_by_sdk.values() for field in flat.keys()})
+    context_fields = sorted({field for flat in flat_context_by_sdk.values() for field in flat})
     context_diff: list[dict[str, Any]] = []
     for field in context_fields:
-        values: dict[str, Any] = {
-            sdk_id: flat_context_by_sdk[sdk_id].get(field)
-            for sdk_id in sdk_ids
-        }
+        values: dict[str, Any] = {sdk_id: flat_context_by_sdk[sdk_id].get(field) for sdk_id in sdk_ids}
         normalized = {_normalized_value(value) for value in values.values()}
         if len(normalized) > 1:
             context_diff.append({"field": field, "values": values})
@@ -244,10 +238,13 @@ def format_comparison_summary(report: dict[str, Any]) -> str:
                 continue
             field = item.get("field", "unknown")
             values = item.get("values", {})
-            rendered = ", ".join(
-                f"{sdk_id}={json.dumps(values.get(sdk_id), sort_keys=True)}"
-                for sdk_id in sorted(values.keys())
-            ) if isinstance(values, dict) else str(values)
+            rendered = (
+                ", ".join(
+                    f"{sdk_id}={json.dumps(values.get(sdk_id), sort_keys=True)}" for sdk_id in sorted(values.keys())
+                )
+                if isinstance(values, dict)
+                else str(values)
+            )
             lines.append(f"- {field}: {rendered}")
 
     return "\n".join(lines)

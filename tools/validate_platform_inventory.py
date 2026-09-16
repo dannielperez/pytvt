@@ -42,13 +42,15 @@ from typing import Any
 try:
     from dotenv import load_dotenv
 except ImportError:  # pragma: no cover - python-dotenv is a declared dep
+
     def load_dotenv(*_args: Any, **_kwargs: Any) -> bool:
         return False
 
+
 from pytvt.platform_sdk import ManagementClient
 from pytvt.platform_sdk.exceptions import CapabilityNotAvailable
-from pytvt.platform_sdk.platform_constants import redact_sensitive
 from pytvt.platform_sdk.inventory import get_platform_inventory_snapshot
+from pytvt.platform_sdk.platform_constants import redact_sensitive
 
 
 def _asdict(obj: Any) -> Any:
@@ -106,14 +108,10 @@ def build_report(client: ManagementClient, sample: int) -> dict[str, Any]:
             "transfer": summarize(_safe_call(client.list_transfer_servers)),
             "storage": summarize(_safe_call(client.list_storage_servers)),
             "alarm_host": summarize(_safe_call(client.list_alarm_servers)),
-            "intelligent_analysis": summarize(
-                _safe_call(client.list_intelligent_analysis_servers)
-            ),
+            "intelligent_analysis": summarize(_safe_call(client.list_intelligent_analysis_servers)),
             "access": summarize(_safe_call(client.list_access_servers)),
             "tv_wall": summarize(_safe_call(client.list_tv_wall_servers)),
-            "connect_events": summarize(
-                _safe_call(client.list_server_connection_events)
-            ),
+            "connect_events": summarize(_safe_call(client.list_server_connection_events)),
         },
         "alarms": {
             "zones": summarize(_safe_call(client.list_alarm_zones)),
@@ -177,14 +175,8 @@ def _print_snapshot_human(snapshot: dict[str, Any], args: Any) -> None:
     print("=== Inventory Snapshot ===")
     if args.summary:
         s = snapshot["summary"]
-        print(
-            f"  sites={s['site_count']} devices={s['device_count']} "
-            f"channels={s['channel_count']}"
-        )
-        print(
-            f"  health: online={s['online_devices']} "
-            f"degraded={s['degraded_devices']} offline={s['offline_devices']}"
-        )
+        print(f"  sites={s['site_count']} devices={s['device_count']} channels={s['channel_count']}")
+        print(f"  health: online={s['online_devices']} degraded={s['degraded_devices']} offline={s['offline_devices']}")
         caps = snapshot["capabilities"]
         cap_str = ", ".join(f"{k}={'yes' if v else 'no'}" for k, v in caps.items())
         print(f"  capabilities: {cap_str}")
@@ -208,10 +200,7 @@ def _print_snapshot_human(snapshot: dict[str, Any], args: Any) -> None:
     if args.alarms:
         print(f"  alarm_events: {len(snapshot['alarm_events'])}")
         for e in snapshot["alarm_events"][:10]:
-            print(
-                f"    - {e['type']} ({e['severity']}) "
-                f"device={e['device_guid']} ts={e['timestamp']}"
-            )
+            print(f"    - {e['type']} ({e['severity']}) device={e['device_guid']} ts={e['timestamp']}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -240,8 +229,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--sdk",
         default=os.getenv("TVT_PLATFORM_SDK"),
-        help="Absolute path to libPlatClientSDK.so / PlatClientSDK.dll "
-        "(env: TVT_PLATFORM_SDK)",
+        help="Absolute path to libPlatClientSDK.so / PlatClientSDK.dll (env: TVT_PLATFORM_SDK)",
     )
     parser.add_argument(
         "--sample",
