@@ -1453,7 +1453,9 @@ class NvrClient:
 
         Writes the switch read by :meth:`query_nvr_face_detection`. When
         ``schedule_id`` is omitted the channel's current arming schedule is
-        preserved.
+        preserved. Readback must confirm both values before returning; an
+        accepted but ignored write raises :class:`NvrApiError`. Reads share
+        the client's existing session deadline and never replay the write.
 
         CGI endpoint: ``editRealFaceMatch`` (the write paired with the
         ``queryBackFaceMatch`` read).
@@ -1471,6 +1473,9 @@ class NvrClient:
         )
         data = self._post("editRealFaceMatch", self._build_request_with_content(content))
         self._check_response(data, "editRealFaceMatch")
+        observed = self.query_nvr_face_detection(channel)
+        if observed.enabled is not enabled or observed.schedule_id != schedule_id:
+            raise NvrApiError("NVR face detection readback did not match the requested configuration")
 
     def query_face_match_config(self, channel: int) -> str:
         """Query the face *recognition* (match) config for a channel.

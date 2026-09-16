@@ -14,6 +14,7 @@ import socket
 import threading
 import time
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 import pytest
 
@@ -595,9 +596,25 @@ class TestAlarmServerConfig:
 
 
 class TestSetNvrFaceDetection:
+    @pytest.mark.parametrize("observed", [False, None])
+    def test_rejects_accepted_write_without_matching_readback(self, observed):
+        client = _client()
+        client._post = lambda path, body: "<response><status>success</status></response>"
+        client.query_nvr_face_detection = lambda channel: SimpleNamespace(enabled=observed, schedule_id="{SCHED}")
+        with pytest.raises(NvrApiError, match="readback"):
+            client.set_nvr_face_detection(9, True, schedule_id="{SCHED}")
+
+    def test_rejects_changed_schedule(self):
+        client = _client()
+        client._post = lambda path, body: "<response><status>success</status></response>"
+        client.query_nvr_face_detection = lambda channel: SimpleNamespace(enabled=True, schedule_id="{OTHER}")
+        with pytest.raises(NvrApiError, match="readback"):
+            client.set_nvr_face_detection(9, True, schedule_id="{SCHED}")
+
     def test_uses_editrealfacematch_with_switch(self):
         sent = {}
         client = _client()
+        client.query_nvr_face_detection = lambda channel: SimpleNamespace(enabled=True, schedule_id="{SCHED}")
 
         def fake_post(path, body):
             sent["path"] = path
@@ -610,6 +627,42 @@ class TestSetNvrFaceDetection:
         assert 'guid="{00000009-0000-0000-0000-000000000000}"' in sent["body"]
         assert 'scheduleGuid="{SCHED}"' in sent["body"]
         assert "<switch>true</switch>" in sent["body"]
+
+    @pytest.mark.parametrize("enabled", [True, False])
+    def test_preserves_schedule_and_checks_requested_channel(self, enabled):
+        client = _client()
+        calls = []
+
+        def read(channel):
+            calls.append(("read", channel))
+            return SimpleNamespace(enabled=enabled, schedule_id="{EXISTING}")
+
+        def write(path, body):
+            calls.append(("write", path))
+            assert 'scheduleGuid="{EXISTING}"' in body
+            return "<response><status>success</status></response>"
+
+        client.query_nvr_face_detection = read
+        client._post = write
+        client.set_nvr_face_detection(9, enabled)
+        assert calls == [("read", 9), ("write", "editRealFaceMatch"), ("read", 9)]
+
+    def test_readback_timeout_does_not_retry_write(self):
+        client = _client()
+        writes = []
+
+        def write(path, body):
+            writes.append(path)
+            return "<response><status>success</status></response>"
+
+        def read(channel):
+            raise TimeoutError("session deadline exceeded")
+
+        client._post = write
+        client.query_nvr_face_detection = read
+        with pytest.raises(TimeoutError):
+            client.set_nvr_face_detection(9, True, schedule_id="{SCHED}")
+        assert writes == ["editRealFaceMatch"]
 
 
 class TestAlarmCodes:
