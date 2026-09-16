@@ -19,13 +19,12 @@ import json
 import os
 import socket
 import sys
-import time
 from datetime import datetime
 
 # Add parent for imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from pytvt.xml_api import NvrClient
 from pytvt.models import NvrApiError
+from pytvt.xml_api import NvrClient
 
 INVENTORY_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "data", "results", "ruijie", "nvr_devices.json")
 REPORT_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "data", "results", "tvt")
@@ -43,7 +42,7 @@ def is_port_open(ip: str, port: int, timeout: float = 3.0) -> bool:
     try:
         with socket.create_connection((ip, port), timeout=timeout):
             return True
-    except (OSError, socket.timeout):
+    except (TimeoutError, OSError):
         return False
 
 
@@ -131,7 +130,7 @@ def save_xlsx(report: list[dict], path: str) -> bool:
     """Save report to Excel if openpyxl is available."""
     try:
         from openpyxl import Workbook
-        from openpyxl.styles import Font, PatternFill, Alignment
+        from openpyxl.styles import Alignment, Font, PatternFill
     except ImportError:
         return False
 
@@ -140,9 +139,24 @@ def save_xlsx(report: list[dict], path: str) -> bool:
     ws.title = "NVR Service Report"
 
     # Header
-    headers = ["Site", "IP", "Hostname", "Manufacturer", "HTTP Port",
-               "Reachable", "Login OK", "RTSP Was On", "API Was On",
-               "RTSP Now", "API Now", "RTSP Port", "Channels", "Action", "Error", "Status"]
+    headers = [
+        "Site",
+        "IP",
+        "Hostname",
+        "Manufacturer",
+        "HTTP Port",
+        "Reachable",
+        "Login OK",
+        "RTSP Was On",
+        "API Was On",
+        "RTSP Now",
+        "API Now",
+        "RTSP Port",
+        "Channels",
+        "Action",
+        "Error",
+        "Status",
+    ]
     header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
     header_font = Font(color="FFFFFF", bold=True)
 
@@ -161,22 +175,34 @@ def save_xlsx(report: list[dict], path: str) -> bool:
     for row_idx, r in enumerate(report, 2):
         status = r.get("status", "")
         vals = [
-            r.get("site", ""), r.get("ip", ""), r.get("hostname", ""),
-            r.get("manufacturer", ""), r.get("http_port", ""),
-            r.get("reachable", ""), r.get("login_ok", ""),
-            r.get("rtsp_was_enabled", ""), r.get("api_was_enabled", ""),
-            r.get("rtsp_enabled", ""), r.get("api_enabled", ""),
-            r.get("rtsp_port", ""), r.get("channels", ""),
-            r.get("action", ""), r.get("error", ""), status,
+            r.get("site", ""),
+            r.get("ip", ""),
+            r.get("hostname", ""),
+            r.get("manufacturer", ""),
+            r.get("http_port", ""),
+            r.get("reachable", ""),
+            r.get("login_ok", ""),
+            r.get("rtsp_was_enabled", ""),
+            r.get("api_was_enabled", ""),
+            r.get("rtsp_enabled", ""),
+            r.get("api_enabled", ""),
+            r.get("rtsp_port", ""),
+            r.get("channels", ""),
+            r.get("action", ""),
+            r.get("error", ""),
+            status,
         ]
         for col, v in enumerate(vals, 1):
             cell = ws.cell(row=row_idx, column=col, value=v if v is not None else "")
 
         # Color the row by status
         fill = {
-            "enabled": green, "already enabled": green,
-            "skipped": gray, "unreachable": red,
-            "login failed": red, "error": red,
+            "enabled": green,
+            "already enabled": green,
+            "skipped": gray,
+            "unreachable": red,
+            "login failed": red,
+            "error": red,
         }.get(status, yellow)
 
         for col in range(1, len(headers) + 1):
@@ -193,6 +219,7 @@ def save_xlsx(report: list[dict], path: str) -> bool:
 
 def main():
     import argparse
+
     parser = argparse.ArgumentParser(description="Batch-enable RTSP + API on TVT NVRs")
     parser.add_argument("-p", "--password", default=NVR_PASSWORD, help="NVR admin password")
     parser.add_argument("-u", "--username", default="admin", help="NVR username (default: admin)")
@@ -225,7 +252,7 @@ def main():
     unreachable_count = 0
 
     print(f"Loaded {len(devices)} entries ({len(seen_ips)} unique IPs)")
-    print(f"{'='*90}")
+    print(f"{'=' * 90}")
 
     for ip, device in sorted(seen_ips.items()):
         site = device.get("site", "")
@@ -233,15 +260,17 @@ def main():
         mfr = device.get("manufacturer", "")
 
         entry = {
-            "site": site, "ip": ip, "hostname": hostname,
-            "manufacturer": mfr, "timestamp": datetime.now().isoformat(),
+            "site": site,
+            "ip": ip,
+            "hostname": hostname,
+            "manufacturer": mfr,
+            "timestamp": datetime.now().isoformat(),
         }
 
         # Skip check
         skip_reason = should_skip(device)
         if skip_reason:
-            entry.update({"status": "skipped", "action": f"skip: {skip_reason}",
-                          "reachable": None, "login_ok": None})
+            entry.update({"status": "skipped", "action": f"skip: {skip_reason}", "reachable": None, "login_ok": None})
             report.append(entry)
             skipped_count += 1
             print(f"  SKIP  {ip:<18} {site:<40} ({skip_reason})")
@@ -253,8 +282,9 @@ def main():
         # Find HTTP port
         http_port = find_http_port(ip)
         if not http_port:
-            entry.update({"status": "unreachable", "reachable": False,
-                          "http_port": None, "error": "no HTTP port found"})
+            entry.update(
+                {"status": "unreachable", "reachable": False, "http_port": None, "error": "no HTTP port found"}
+            )
             report.append(entry)
             unreachable_count += 1
             print("UNREACHABLE")
@@ -296,8 +326,8 @@ def main():
         report.append(entry)
 
     # Summary
-    print(f"\n{'='*90}")
-    print(f"SUMMARY")
+    print(f"\n{'=' * 90}")
+    print("SUMMARY")
     print(f"  Total NVRs processed:  {total}")
     print(f"  Services enabled:      {enabled_count}")
     print(f"  Already enabled:       {already_count}")

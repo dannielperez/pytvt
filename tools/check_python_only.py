@@ -11,7 +11,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FORBIDDEN_SUFFIXES = {".js", ".mjs", ".cjs"}
 FORBIDDEN_NAMES = {"package.json", "package-lock.json"}

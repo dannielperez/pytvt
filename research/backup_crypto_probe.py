@@ -14,10 +14,9 @@ import json
 import math
 import re
 from collections import Counter
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Iterable
-
 
 HEX_RUN = re.compile(rb"(?<![0-9A-Fa-f])[0-9A-Fa-f]{16,64}(?![0-9A-Fa-f])")
 
@@ -74,23 +73,12 @@ def shannon_entropy(data: bytes) -> float:
 
 
 def likely_block_sizes(region: ByteRange) -> list[int]:
-    return [
-        size
-        for size in (4, 8, 16, 32)
-        if region.start % size == 0 and region.length % size == 0
-    ]
+    return [size for size in (4, 8, 16, 32) if region.start % size == 0 and region.length % size == 0]
 
 
 def repeated_blocks(data: bytes, block_size: int, limit: int = 5) -> list[dict[str, object]]:
-    blocks = Counter(
-        data[offset : offset + block_size]
-        for offset in range(0, len(data) - block_size + 1, block_size)
-    )
-    return [
-        {"hex": block.hex(), "count": count}
-        for block, count in blocks.most_common(limit)
-        if count > 1
-    ]
+    blocks = Counter(data[offset : offset + block_size] for offset in range(0, len(data) - block_size + 1, block_size))
+    return [{"hex": block.hex(), "count": count} for block, count in blocks.most_common(limit) if count > 1]
 
 
 def classify_hex_fields(
@@ -188,31 +176,19 @@ def analyze(
     interpretation = report["interpretation"]
     assert isinstance(interpretation, list)
     if reference == repeat:
-        interpretation.append(
-            "Repeated exports are byte-identical; no per-export random salt/IV/nonce is visible."
-        )
+        interpretation.append("Repeated exports are byte-identical; no per-export random salt/IV/nonce is visible.")
     else:
-        interpretation.append(
-            "Repeated exports differ; changing header fields are possible salt/IV/nonce values."
-        )
+        interpretation.append("Repeated exports differ; changing header fields are possible salt/IV/nonce values.")
 
-    report["ascii_hex_header_fields"] = classify_hex_fields(
-        reference, repeat, changed, header_bytes
-    )
-    report["binary_header_candidates"] = binary_header_candidates(
-        reference, repeat, changed, header_bytes
-    )
-    report["repeated_blocks"] = {
-        str(size): repeated_blocks(reference, size) for size in (8, 16)
-    }
+    report["ascii_hex_header_fields"] = classify_hex_fields(reference, repeat, changed, header_bytes)
+    report["binary_header_candidates"] = binary_header_candidates(reference, repeat, changed, header_bytes)
+    report["repeated_blocks"] = {str(size): repeated_blocks(reference, size) for size in (8, 16)}
 
     if changed is not None:
         raw = differing_ranges(reference, changed)
         merged = merge_ranges(raw, merge_gap)
         report["mutation_diff"] = {
-            "different_byte_count": sum(
-                left != right for left, right in zip(reference, changed)
-            )
+            "different_byte_count": sum(left != right for left, right in zip(reference, changed, strict=False))
             + abs(len(reference) - len(changed)),
             "raw_ranges": [asdict(item) | {"length": item.length} for item in raw],
             "merged_ranges": [asdict(item) | {"length": item.length} for item in merged],
@@ -220,18 +196,15 @@ def analyze(
         if merged:
             encrypted_region = max(merged, key=lambda item: item.length)
             sizes = likely_block_sizes(encrypted_region)
-            report["probable_mutated_record"] = (
-                asdict(encrypted_region)
-                | {"length": encrypted_region.length, "aligned_block_sizes": sizes}
-            )
+            report["probable_mutated_record"] = asdict(encrypted_region) | {
+                "length": encrypted_region.length,
+                "aligned_block_sizes": sizes,
+            }
             if sizes:
                 interpretation.append(
-                    "The largest changed region is aligned like a {}-byte block-cipher record."
-                    .format(max(sizes))
+                    f"The largest changed region is aligned like a {max(sizes)}-byte block-cipher record."
                 )
-    interpretation.append(
-        "A stable candidate is not proven to be a salt; confirm it by tracing the KDF or decryptor."
-    )
+    interpretation.append("A stable candidate is not proven to be a salt; confirm it by tracing the KDF or decryptor.")
     return report
 
 
@@ -241,9 +214,7 @@ def format_report(report: dict[str, object]) -> str:
     assert isinstance(files, dict)
     for label, metadata in files.items():
         assert isinstance(metadata, dict)
-        lines.append(
-            f"{label}: {metadata['path']} ({metadata['size']} bytes, sha256 {metadata['sha256']})"
-        )
+        lines.append(f"{label}: {metadata['path']} ({metadata['size']} bytes, sha256 {metadata['sha256']})")
     lines.extend(["", f"repeat byte-identical: {str(report['repeat_is_identical']).lower()}"])
 
     lines.extend(["", "interpretation:"])
@@ -255,41 +226,34 @@ def format_report(report: dict[str, object]) -> str:
     if not fields:
         lines.append("  (none)")
     for field in fields:
-        lines.append(
-            "  0x{offset:x} len={length} {classification}: {value}".format(**field)
-        )
+        lines.append("  0x{offset:x} len={length} {classification}: {value}".format(**field))
 
     lines.extend(["", "stable binary header candidates:"])
     candidates = report["binary_header_candidates"]
     if not candidates:
         lines.append("  (none)")
     for candidate in candidates:
-        lines.append(
-            "  0x{offset:x} len={length} entropy={entropy}: {hex}".format(**candidate)
-        )
+        lines.append("  0x{offset:x} len={length} entropy={entropy}: {hex}".format(**candidate))
 
     mutation = report.get("mutation_diff")
     if isinstance(mutation, dict):
         lines.extend(["", f"different bytes after mutation: {mutation['different_byte_count']}"])
         lines.append("merged changed ranges:")
         for item in mutation["merged_ranges"]:
-            lines.append(
-                f"  0x{item['start']:x}..0x{item['end']:x} ({item['length']} bytes)"
-            )
+            lines.append(f"  0x{item['start']:x}..0x{item['end']:x} ({item['length']} bytes)")
         record = report.get("probable_mutated_record")
         if isinstance(record, dict):
             lines.append(
-                "probable encrypted record: 0x{start:x}..0x{end:x}; "
-                "aligned block sizes={aligned_block_sizes}".format(**record)
+                "probable encrypted record: 0x{start:x}..0x{end:x}; aligned block sizes={aligned_block_sizes}".format(
+                    **record
+                )
             )
     return "\n".join(lines)
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description=(
-            "Compare deterministic TVT backup exports and rank salt/IV/key/checksum candidates."
-        )
+        description=("Compare deterministic TVT backup exports and rank salt/IV/key/checksum candidates.")
     )
     parser.add_argument("reference", type=Path, help="first export with the known configuration")
     parser.add_argument("repeat", type=Path, help="second export made without changing anything")

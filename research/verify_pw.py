@@ -13,6 +13,7 @@ src/pytvt/protocol.py (encrypt_password_sha1).
 
 See research/README.md for context.
 """
+
 import hashlib
 import os
 import socket
@@ -22,17 +23,19 @@ import sys
 # Load .env if present
 env_path = os.path.join(os.path.dirname(__file__), "..", ".env")
 if os.path.exists(env_path):
-    for line in open(env_path):
-        line = line.strip()
-        if line and not line.startswith("#") and "=" in line:
-            k, v = line.split("=", 1)
-            os.environ.setdefault(k, v)
+    with open(env_path) as env_file:
+        for line in env_file:
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                os.environ.setdefault(k, v)
 
 host = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("TVT_HOST", "192.168.1.100")
 port = int(os.environ.get("TVT_PORT", "6036"))
 password = os.environ.get("TVT_PASSWORD")
 if not password:
-    print("TVT_PASSWORD not set"); sys.exit(1)
+    print("TVT_PASSWORD not set")
+    sys.exit(1)
 
 print(f"Connecting to {host}:{port} ...")
 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -44,7 +47,8 @@ data = sock.recv(64)
 sock.close()
 
 if len(data) < 64:
-    print(f"Short init packet: {len(data)} bytes"); sys.exit(1)
+    print(f"Short init packet: {len(data)} bytes")
+    sys.exit(1)
 
 flag = data[:4]
 protocol_ver = struct.unpack_from("<I", data, 12)[0]

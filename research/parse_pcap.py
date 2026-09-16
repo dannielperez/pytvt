@@ -12,6 +12,7 @@ src/pytvt/protocol.py as production code.
 
 See research/README.md for context.
 """
+
 import struct
 import sys
 
@@ -121,7 +122,7 @@ with open(PCAP_FILE, "rb") as f:
             # Header: cmd(4) cmdVer(4) cmdId(2) unused(2) dataLen(4)
             # But the SDK actually uses: flag(2) pad(1) ver(1) cmd(4) cmdVer(4) dataLen(4)
             # Let me just dump the raw hex and manually decode
-            print(f"  Raw first 64 bytes: {payload[:min(64, len(payload))].hex()}")
+            print(f"  Raw first 64 bytes: {payload[: min(64, len(payload))].hex()}")
 
             # Re-examine: with 1111 prefix stripped, the header is:
             # The captured login (offset after 1111):
@@ -132,7 +133,7 @@ with open(PCAP_FILE, "rb") as f:
             #   offset 2: pad  = 0x00
             #   offset 3: ver  = 0x01
             #   offset 4: cmdVer = 0x01000004 (LE u32) = cmd 0x00010004
-            # 
+            #
             # Actually, let me re-read from the previous disassembly analysis.
             # The login buffer built at r14 (252 bytes = 0xfc):
             #   r14[0:2]  = 0x0004 (cmd low = 4)
@@ -143,10 +144,10 @@ with open(PCAP_FILE, "rb") as f:
             #   r14[12:16] = 0x000000ec (236 = data len)
             #   r14[16:16+236] = login data (zeroed, then filled)
             #
-            # With 1111 prefix, total = 4 + 252 = 256, but we got 260 bytes. 
+            # With 1111 prefix, total = 4 + 252 = 256, but we got 260 bytes.
             # Let me just look at the first 4+16+36 bytes:
-            
-            hdr = payload[off:off+16]
+
+            hdr = payload[off : off + 16]
             if len(hdr) >= 16:
                 # Try to parse as: cmd_low(2) pad(1) ver(1) cmd_high(4) cmdVer(4) dataLen(4)
                 cmd_low = struct.unpack_from("<H", hdr, 0)[0]
@@ -154,9 +155,11 @@ with open(PCAP_FILE, "rb") as f:
                 cmd_hi = struct.unpack_from("<I", hdr, 4)[0]
                 cmd_ver = struct.unpack_from("<I", hdr, 8)[0]
                 data_len = struct.unpack_from("<I", hdr, 12)[0]
-                print(f"  Header: cmd_low=0x{cmd_low:04x} ver={ver} cmd_hi=0x{cmd_hi:08x} cmdVer={cmd_ver} dataLen={data_len}")
-                
-                login_data = payload[off+16:]
+                print(
+                    f"  Header: cmd_low=0x{cmd_low:04x} ver={ver} cmd_hi=0x{cmd_hi:08x} cmdVer={cmd_ver} dataLen={data_len}"
+                )
+
+                login_data = payload[off + 16 :]
                 if cmd_low == 0x0004 or cmd_hi == 0x00000101:
                     print("  ** LOGIN PACKET **")
                     if len(login_data) >= 120:
@@ -166,34 +169,36 @@ with open(PCAP_FILE, "rb") as f:
                         username_raw = login_data[36:100]
                         # Password at offset 100 (0x64), claimed 20 bytes for SHA1
                         password_raw = login_data[100:120]
-                        
+
                         print(f"  connectType={conn_type}")
                         print(f"  username raw @36: {username_raw[:32].hex()}...")
                         print(f"  password raw @100 (20 bytes): {password_raw.hex()}")
-                        
+
                         # Also dump some key offsets
                         if len(login_data) >= 208:
                             rand_field = struct.unpack_from("<I", login_data, 204)[0]
                             print(f"  rand field @204: {rand_field}")
-                        
+
                         # Full hex dump of the data portion
                         print(f"  Login data hex ({len(login_data)} bytes):")
                         for i in range(0, min(len(login_data), 240), 16):
-                            chunk = login_data[i:i+16]
-                            hexstr = ' '.join(f'{b:02x}' for b in chunk)
-                            ascii_str = ''.join(chr(b) if 32 <= b < 127 else '.' for b in chunk)
+                            chunk = login_data[i : i + 16]
+                            hexstr = " ".join(f"{b:02x}" for b in chunk)
+                            ascii_str = "".join(chr(b) if 32 <= b < 127 else "." for b in chunk)
                             print(f"    {i:04x}: {hexstr:<48s} {ascii_str}")
 
                         # Verify password encryption if we have init nonce
                         if init_nonce is not None:
-                            import hashlib, os
+                            import hashlib
+                            import os
+
                             pw = os.environ.get("TVT_PASSWORD", "")
                             md5_upper = hashlib.md5(pw.encode()).hexdigest().upper()
                             print(f"\n  Verification (password='{pw}'):")
                             print(f"  MD5 upper: {md5_upper}")
                             for fmt_name, combined in [
                                 ("%08d", md5_upper + f"{init_nonce:08d}"),
-                                ("%d",   md5_upper + str(init_nonce)),
+                                ("%d", md5_upper + str(init_nonce)),
                                 ("%07d", md5_upper + f"{init_nonce:07d}"),
                             ]:
                                 sha1 = hashlib.sha1(combined.encode()).digest()
@@ -201,4 +206,4 @@ with open(PCAP_FILE, "rb") as f:
                                 print(f"    SHA1(MD5upper+nonce{fmt_name}) = {sha1.hex()}{match}")
 
         else:
-            print(f"  First 32 bytes: {payload[:min(32, len(payload))].hex()}")
+            print(f"  First 32 bytes: {payload[: min(32, len(payload))].hex()}")

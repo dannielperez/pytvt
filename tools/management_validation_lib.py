@@ -13,28 +13,25 @@ Maintenance note:
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict, is_dataclass
-from datetime import datetime, timezone
 import json
 import os
-from pathlib import Path
 import re
 import time
 import traceback
-from typing import Any, Callable
+from collections.abc import Callable
+from dataclasses import asdict, is_dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
 
 import dotenv
-
 from manifest_resolver import (
-    ManifestNotFoundError,
-    InvalidManifestError,
-    SDKBinaryNotFoundError,
     extract_artifact_metadata,
     resolve_manifest,
 )
 
-from pytvt.platform_sdk import AlarmSubscription, CapabilityNotAvailable, ManagementClient
 from pytvt.device_sdk.loader import LEGACY_SDK_PATH_ENV_VAR, SDK_PATH_ENV_VAR
+from pytvt.platform_sdk import AlarmSubscription, ManagementClient
 
 ERROR_CODE_RE = re.compile(r"error_code=(\d+)")
 
@@ -54,36 +51,32 @@ def load_env(env_file: str | None) -> None:
 
 def resolve_sdk_path(args: argparse.Namespace) -> tuple[str, dict[str, Any]]:
     """Resolve SDK path and return (sdk_path, artifact_metadata).
-    
+
     If --sdk-manifest-id is provided, use manifest resolver.
     Otherwise, fall back to --sdk-path argument.
-    
+
     Returns:
         (sdk_path, artifact_metadata) where artifact_metadata is empty dict if no manifest.
-    
+
     Raises:
         ManifestNotFoundError, InvalidManifestError, SDKBinaryNotFoundError
     """
     artifact_metadata: dict[str, Any] = {}
 
     if getattr(args, "compare_sdk_manifests", None):
-        raise ValueError(
-            "resolve_sdk_path cannot be used with --compare-sdk-manifests"
-        )
-    
+        raise ValueError("resolve_sdk_path cannot be used with --compare-sdk-manifests")
+
     if args.sdk_manifest_id:
         # Resolve via manifest
         inventory_root = args.sdk_inventory_root or None
         resolution = resolve_manifest(args.sdk_manifest_id, inventory_root)
         artifact_metadata = extract_artifact_metadata(resolution["manifest"])
         return resolution["sdk_path"], artifact_metadata
-    
+
     # Fall back to direct path
     if not args.sdk_path:
-        raise ValueError(
-            "Must provide either --sdk-manifest-id or --sdk-path"
-        )
-    
+        raise ValueError("Must provide either --sdk-manifest-id or --sdk-path")
+
     return args.sdk_path, artifact_metadata
 
 
@@ -150,18 +143,12 @@ def build_parser(description: str) -> argparse.ArgumentParser:
     parser.add_argument(
         "--dump-sdk-symbols",
         action="store_true",
-        help=(
-            "Emit SDK symbol inventory, parity report, capability evidence, and "
-            "normalized context, then exit."
-        ),
+        help=("Emit SDK symbol inventory, parity report, capability evidence, and normalized context, then exit."),
     )
     parser.add_argument(
         "--sdk-device-id",
         default=None,
-        help=(
-            "Optional NET_SDK_LoginEx deviceSN/UID argument. "
-            "Use an empty string to send empty bytes explicitly."
-        ),
+        help=("Optional NET_SDK_LoginEx deviceSN/UID argument. Use an empty string to send empty bytes explicitly."),
     )
     parser.add_argument("--prefer-sdk", action="store_true", default=True)
     parser.add_argument("--no-prefer-sdk", dest="prefer_sdk", action="store_false")
@@ -326,16 +313,16 @@ def attach_backend_diagnostics(
     artifact_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Attach backend diagnostics and normalized SDK context to a report.
-    
+
     optionally includes artifact metadata from manifest resolution.
     """
     diagnostics = client.get_backend_diagnostics()
     report[key] = diagnostics
-    
+
     # Attach artifact metadata if provided
     if artifact_metadata:
         report["artifact"] = artifact_metadata
-    
+
     report["backend_context"] = diagnostics.get(
         "context",
         {
