@@ -691,6 +691,26 @@ def test_typed_platform_inventory_rejects_missing_fetch_status() -> None:
         Client().get_platform_inventory("nvms.example", "operator", "secret")
 
 
+@pytest.mark.parametrize("areas", [[], [{"guid": "branch", "parent_guid": "org", "area_path": "Caridad / Bayamon"}]])
+def test_typed_platform_inventory_preserves_explicit_areas(areas) -> None:
+    class Client(SyncRuntimeClient):
+        def execute(self, _job, **_kwargs):
+            return {**_platform_snapshot(), "areas": areas}
+
+    result = Client().get_platform_inventory("nvms.example", "operator", "secret")
+    assert result.as_dict()["areas"] == areas
+
+
+@pytest.mark.parametrize("areas", [None, {}, ["invalid"]])
+def test_typed_platform_inventory_rejects_malformed_areas(areas) -> None:
+    class Client(SyncRuntimeClient):
+        def execute(self, _job, **_kwargs):
+            return {**_platform_snapshot(), "areas": areas}
+
+    with pytest.raises(RuntimeClientError, match="invalid platform inventory"):
+        Client().get_platform_inventory("nvms.example", "operator", "secret")
+
+
 def test_typed_platform_authority_owns_job_schema_and_validates_result() -> None:
     captured: dict = {}
     snapshot = {

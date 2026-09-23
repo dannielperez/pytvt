@@ -51,9 +51,28 @@ def _safe_call_status(fn: Any, default: Any) -> tuple[Any, str]:
         return default, "failed"
 
 
-def _resource_payload(resource: PlatformResource) -> dict[str, Any]:
+def _resource_payload(
+    resource: PlatformResource,
+    by_node_id: dict[int, PlatformResource] | None = None,
+) -> dict[str, Any]:
     payload = resource.as_dict()
+    parent = (by_node_id or {}).get(resource.parent_id)
+    if not payload["parent_guid"] and parent is not None:
+        payload["parent_guid"] = parent.guid
     payload["classification"] = classify_resource(resource)
+    return payload
+
+
+def _area_payload(resource: PlatformResource, by_node_id: dict[int, PlatformResource]) -> dict[str, Any]:
+    payload = _resource_payload(resource, by_node_id)
+    names: list[str] = []
+    seen: set[int] = set()
+    current: PlatformResource | None = resource
+    while current is not None and current.node_type == 1 and current.node_id not in seen:
+        seen.add(current.node_id)
+        names.append(current.name)
+        current = by_node_id.get(current.parent_id)
+    payload["area_path"] = " / ".join(reversed(names))
     return payload
 
 
@@ -80,6 +99,7 @@ def get_platform_inventory_snapshot(client: Any) -> dict[str, Any]:
     alarm_zones, st_alarm_zones = _safe_call_status(getattr(client, "list_alarm_zones", lambda: []), [])
     alarm_events_raw, st_alarm_events = _safe_call_status(getattr(client, "list_alarm_events", lambda: []), [])
     resources = resources or []
+    by_node_id = {resource.node_id: resource for resource in resources}
     servers = servers or []
     alarm_zones = alarm_zones or []
     alarm_events_raw = alarm_events_raw or []
@@ -99,12 +119,12 @@ def get_platform_inventory_snapshot(client: Any) -> dict[str, Any]:
     health = compute_device_health(resources, servers, alarm_events)
 
     devices = [
-        _resource_payload(r)
+        _resource_payload(r, by_node_id)
         for r in resources
         if r.node_type == 2  # NODETYPE_DEVICE
     ]
     channels = [
-        _resource_payload(r)
+        _resource_payload(r, by_node_id)
         for r in resources
         if r.node_type == 3  # NODETYPE_CHANNEL
     ]
@@ -138,6 +158,7 @@ def get_platform_inventory_snapshot(client: Any) -> dict[str, Any]:
             "alarm_events": st_alarm_events,
         },
         "sites": [s.as_dict() for s in sites],
+        "areas": [_area_payload(r, by_node_id) for r in resources if r.node_type == 1],
         "devices": devices,
         "channels": channels,
         "servers": [_server_payload(s) for s in servers],

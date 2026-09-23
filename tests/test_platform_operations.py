@@ -433,6 +433,32 @@ def test_inventory_snapshot_structure(small_tree: list[PlatformResource]) -> Non
     assert intrusion and intrusion[0]["site_id"] != "orphans"
 
 
+def test_inventory_preserves_nested_area_guids_and_paths() -> None:
+    resources = [
+        _area(1, 0, "Comercio", guid="root-guid"),
+        _area(2, 1, "Caridad", guid="org-guid"),
+        _area(3, 2, "Bayamon", guid="branch-guid"),
+        _device(10, 3, "Recorder"),
+        _channel(100, 10, "Entrance"),
+    ]
+    snap = get_platform_inventory_snapshot(_SnapshotClient(resources))
+    assert [(a["guid"], a["parent_guid"], a["area_path"]) for a in snap["areas"]] == [
+        ("root-guid", "", "Comercio"),
+        ("org-guid", "root-guid", "Comercio / Caridad"),
+        ("branch-guid", "org-guid", "Comercio / Caridad / Bayamon"),
+    ]
+    assert snap["devices"][0]["parent_guid"] == "branch-guid"
+    assert snap["channels"][0]["parent_guid"] == "dev-0000000a"
+    assert all("raw_data" not in area for area in snap["areas"])
+
+
+@pytest.mark.parametrize("parents", [(1, 1), (2, 1), (99, 0)])
+def test_inventory_area_paths_terminate_for_cycles_and_missing_parents(parents) -> None:
+    snap = get_platform_inventory_snapshot(_SnapshotClient([_area(1, parents[0], "One"), _area(2, parents[1], "Two")]))
+    assert len(snap["areas"]) == 2
+    assert all(len(area["area_path"].split(" / ")) <= 2 for area in snap["areas"])
+
+
 def test_inventory_snapshot_exposes_typed_resource_guids_without_raw_payload(
     small_tree: list[PlatformResource],
 ) -> None:
