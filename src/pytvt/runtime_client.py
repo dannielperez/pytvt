@@ -267,10 +267,11 @@ class RuntimePlatformInventoryResult:
     alarm_events: tuple[dict[str, Any], ...]
     health: tuple[dict[str, Any], ...]
     summary: dict[str, int]
+    areas: tuple[dict[str, Any], ...] | None = None
 
     def as_dict(self) -> dict[str, Any]:
         """Return the established JSON snapshot shape for existing consumers."""
-        return {
+        result = {
             "capabilities": dict(self.capabilities),
             "fetch_status": dict(self.fetch_status),
             "sites": list(self.sites),
@@ -282,6 +283,9 @@ class RuntimePlatformInventoryResult:
             "health": list(self.health),
             "summary": dict(self.summary),
         }
+        if self.areas is not None:
+            result["areas"] = list(self.areas)
+        return result
 
 
 @dataclass(frozen=True)
@@ -1825,6 +1829,9 @@ def _parse_platform_inventory(result: Any) -> RuntimePlatformInventoryResult:
             if not isinstance(value, list) or any(not isinstance(item, dict) for item in value):
                 raise TypeError
             lists[name] = tuple(value)
+        areas = result.get("areas")
+        if "areas" in result and (not isinstance(areas, list) or any(not isinstance(item, dict) for item in areas)):
+            raise TypeError
     except (KeyError, TypeError, ValueError):
         raise RuntimeClientError("runtime returned an invalid platform inventory snapshot") from None
     return RuntimePlatformInventoryResult(
@@ -1838,6 +1845,7 @@ def _parse_platform_inventory(result: Any) -> RuntimePlatformInventoryResult:
         alarm_events=lists["alarm_events"],
         health=lists["health"],
         summary=dict(summary),
+        areas=tuple(areas) if areas is not None else None,
     )
 
 
