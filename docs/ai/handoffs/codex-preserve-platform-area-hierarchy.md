@@ -6,7 +6,7 @@
 - Tests cover nested areas, recorder/channel parents, cyclic or missing ancestors, legacy omission, explicit empty lists and malformed runtime area rows.
 
 ## Evidence and validation
-- Owner-authorized NVMS2 inspection on 2026-09-23 showed Comercio > Caridad > branches. The old snapshot exported only root sites, discarding those branches.
+- Native NVMS2 inspection confirmed nested customer branches. The old snapshot exported only root sites, discarding those branches.
 - Regression failed before the change with `KeyError: areas`.
 - Targeted SDK tests: 108 passed. Repository Ruff check and format check passed (153 files).
 - Independent SDK-boundary and stability reviews: OK. No model or migration changes.
@@ -14,5 +14,5 @@
 
 ## Limits / next steps
 - Does not certify monitoring-center video, repair all-offline state reporting, discover transfer servers, or map vendor branches to canonical customer sites.
-- Same-day native totals matched the fresh snapshot: 250 recorders and 5,395 channels. Native status was 228 recorders online; channel status fluctuated around 4,346 online / 1,049 offline. Channel totals include zero/unassigned channels and must not replace the manual 827/1,103 camera assessment.
+- Channel totals can include zero/unassigned channels and must not be represented as a physical installed-camera census.
 - Owner merges and deploys SDK/runtime/application changes; then rerun authorized sync and verify hierarchy before issuing a final camera report. No deployment or merge performed.
