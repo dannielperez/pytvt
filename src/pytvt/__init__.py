@@ -40,7 +40,7 @@ no longer depends on Node.js or any bridge scripts.
 __version__ = "1.3.4"
 
 from . import workflows  # Provisional — technician-facing workflow orchestrations.
-from .alarm_protocol import ParsedAlarmFrame, parse_alarm_frame
+from .alarm_protocol import ParsedAlarmFrame, parse_alarm_frame, split_alarm_frame
 from .alarm_server import AlarmServer, AlarmServerCapacityError
 from .config import load_config
 from .connection_pool import ConnectionPool, PoolStats, SessionMetrics, SessionResult, connect_many
@@ -142,6 +142,7 @@ __all__ = [
     # Alarm-server wire protocol
     "ParsedAlarmFrame",
     "parse_alarm_frame",
+    "split_alarm_frame",
     "AlarmServer",
     "AlarmServerCapacityError",
     # Constants / enums

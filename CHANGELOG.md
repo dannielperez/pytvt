@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Alarm-server XML push parsing** (`alarm_protocol.py`). `parse_alarm_frame` now
+  recognises the **documented** TVTAPI v1.9 (IP media device) push: `POST
+  /SendAlarmStatus` with a `<config xmlns="http://www.ipc.com/ver10">` body carrying
+  `<alarmStatusInfo>`, `<dataTime>` and `<deviceInfo>`, and the `<deviceInfo>`-only
+  heartbeat. New `parse_format` values `xml` / `http_xml`; active alarms are listed in
+  `parsed["active_alarms"]` (element name, raw `id`, code), with `device_id` = serial
+  (or MAC). New `split_alarm_frame()` yields one frame per active alarm. Not
+  interpreted because the document does not specify them: whether `id` is a channel,
+  the `dataTime` timezone, and whether a cleared alarm is pushed as `false`. Any other
+  XML document (including the not-yet-captured NVR / NVMS-9000 push dialect) is returned
+  as `unknown` with diagnostics. DOCTYPE/ENTITY declarations and oversized bodies are
+  refused. Fixtures are the vendor's documented examples (`tests/fixtures/alarm_server/`).
+
 
 - `DeviceSession.query_platform_access()` — read the recorder's Platform Access
   (auto-report) settings over the NetSDK session via `NET_SDK_ApiInterface`
