@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<config version="1.0" xmlns="http://www.ipc.com/ver10">
+     <alarmStatusInfo>
+            <motionAlarm type="boolean" id="1">false</motionAlarm>
+            <motionAlarm type="boolean" id="2">true</motionAlarm>
+            <sensorAlarmIn type="list" count="4">
+                <itemType type="boolean"/>
+                <item id="1">false</item>
+                <item id="2">false</item>
+                <item id="3">true</item>
+                <item id="4">false</item>
+            </sensorAlarmIn>
+            <perimeterAlarm type="boolean">false</perimeterAlarm>
+            <tripwireAlarm type="boolean">true</tripwireAlarm>
+            <cpcAlarm type="boolean">false</cpcAlarm>
+            <oscAlarm type="boolean">false</oscAlarm>
+            <cddAlarm type="boolean">false</cddAlarm>
+            <ipdAlarm type="boolean">false</ipdAlarm>
+            <vfdAlarm type="boolean">false</vfdAlarm>
+            <avdAlarm type="boolean">false</avdAlarm>
+     </alarmStatusInfo>
+     <dataTime><![CDATA[2017-06-20 10:30:21]]></dataTime>
+     <deviceInfo>
+            <sn><![CDATA[N563F0159MNK]]></sn>
+     </deviceInfo>
+</config>

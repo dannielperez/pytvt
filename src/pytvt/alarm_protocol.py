@@ -18,7 +18,8 @@ from __future__ import annotations
 
 import json
 import struct
-from dataclasses import dataclass, field
+import xml.etree.ElementTree as ET
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 __all__ = [
@@ -27,6 +28,7 @@ __all__ = [
     "MAX_FRAME_SIZE",
     "ParsedAlarmFrame",
     "parse_alarm_frame",
+    "split_alarm_frame",
 ]
 
 # Binary frame magic: ASCII "TVT" + NUL.
@@ -92,7 +94,8 @@ class ParsedAlarmFrame:
     Carries only what the *frame* tells us; transport metadata (source address,
     receive time, raw bytes) belongs to the caller, not the protocol layer.
 
-    ``parse_format`` is one of ``json`` | ``http`` | ``binary`` | ``unknown``.
+    ``parse_format`` is one of ``json`` | ``http`` | ``binary`` | ``xml`` |
+    ``http_xml`` | ``unknown``.
     ``event_type`` is a coarse category (``heartbeat`` | ``alarm`` | ``exception``
     | ``status_change`` | ``network`` | ``disk_error`` | ``video_loss`` | ``other``).
     ``parsed`` holds the format-specific detail (decoded JSON, or binary
@@ -118,15 +121,22 @@ def parse_alarm_frame(data: bytes) -> ParsedAlarmFrame:
     """
     event = ParsedAlarmFrame()
 
-    # HTTP POST wrapper (some firmware posts JSON over HTTP).
+    # HTTP POST wrapper (some firmware posts JSON over HTTP; the documented
+    # IPC "SendAlarmStatus" push posts XML).
     http_body = _extract_http_body(data)
     if http_body is not None:
+        if _looks_like_xml(http_body):
+            return _parse_xml_payload(http_body, event, parse_format="http_xml")
         return _parse_json_payload(http_body, event, parse_format="http")
 
     # Bare JSON.
     stripped = data.strip()
     if stripped and stripped[0:1] in (b"{", b"["):
         return _parse_json_payload(stripped, event, parse_format="json")
+
+    # Bare XML.
+    if _looks_like_xml(data):
+        return _parse_xml_payload(data, event, parse_format="xml")
 
     # Binary TVT frame (magic + length + struct payload).
     if data[:4] == TVT_BINARY_MAGIC and len(data) >= _FRAME_HEADER_LEN:
@@ -154,6 +164,165 @@ def parse_alarm_frame(data: bytes) -> ParsedAlarmFrame:
         "printable": all(b in _PRINTABLE_ASCII or b in (9, 10, 13) for b in data),
     }
     return event
+
+
+# ---------------------------------------------------------------------------
+# XML: TVTAPI v1.9 (IP media device) alarm-server push
+# ---------------------------------------------------------------------------
+#
+# DOCUMENTED source: "TVTAPI v1.9 - Draft, For IP Media Device", §5.3.1-5.3.4.
+# The device POSTs to ``/SendAlarmStatus`` a ``<config xmlns=".../ver10">`` body
+# carrying ``<alarmStatusInfo>`` (the "whole alarmStatusInfo element" of
+# GetAlarmStatus), ``<dataTime>`` and ``<deviceInfo>``; a heartbeat carries only
+# ``<deviceInfo>``. NOT documented, therefore NOT interpreted here:
+#   * whether the ``id`` attribute is a recorder channel (it is preserved as-is);
+#   * the timezone of ``dataTime`` (preserved as the raw string);
+#   * whether a cleared alarm is pushed as ``false`` (reported, not called a
+#     recovery);
+#   * the NVR (NVMS-9000) push body, which uses a different XML dialect and has
+#     not been captured — any other document is returned as ``unknown``.
+
+# Element name -> alarm code. Element names and their meanings are from the
+# document's action-name table (ipd = Intruding People Detection, osc = Object
+# Status Change, perimeter = Perimeter Environment Assurance, vfd = Video Face
+# Detection, avd = Abnormal Video Diagnosis, cdd = Crowd Density Detection,
+# cpc = Cross-line People Counting); the codes are the existing
+# ``TVT_ALARM_CODES`` names for the same analytics.
+XML_STATUS_ELEMENT_CODES: dict[str, str] = {
+    "motionAlarm": "motion",
+    "perimeterAlarm": "perimeter_intrusion",
+    "tripwireAlarm": "tripwire",
+    "ipdAlarm": "people_intrusion",
+    "oscAlarm": "object_removed_left",
+    "cddAlarm": "crowd_density",
+    "cpcAlarm": "people_counting",
+    "vfdAlarm": "face_detect",
+    "avdAlarm": "video_abnormal",
+    "sensorAlarmIn": "sensor",
+}
+_DEVICE_INFO_FIELDS = {
+    "deviceName": "device_name",
+    "deviceNo.": "device_no",
+    "sn": "sn",
+    "ipAddress": "ip_address",
+    "macAddress": "mac_address",
+}
+_CATEGORY_BY_CODE = {name: category for name, category in TVT_ALARM_CODES.values()}
+
+
+def _looks_like_xml(data: bytes) -> bool:
+    return data.lstrip(b"\xef\xbb\xbf \t\r\n").startswith(b"<")
+
+
+def _local(tag: str) -> str:
+    """Element name without its ``{namespace}`` prefix."""
+    return tag.rsplit("}", 1)[-1]
+
+
+def _xml_unknown(raw: bytes, event: ParsedAlarmFrame, reason: str, root: str = "") -> ParsedAlarmFrame:
+    event.parse_format = "unknown"
+    event.event_type = "other"
+    event.event_code = ""
+    event.parsed = {
+        "unknown_reason": reason,
+        "xml_root": root,
+        "hex": raw[:MAX_FRAME_SIZE].hex(),
+        "length": len(raw),
+    }
+    return event
+
+
+def _parse_xml_payload(raw: bytes, event: ParsedAlarmFrame, *, parse_format: str) -> ParsedAlarmFrame:
+    """Parse a documented alarm-server XML push; anything else is ``unknown``.
+
+    Never raises. Namespace-agnostic and independent of element order.
+    """
+    if len(raw) > MAX_FRAME_SIZE:
+        return _xml_unknown(raw, event, "xml_too_large")
+    # Entity/DTD declarations have no place in a device push and are the vector
+    # for entity-expansion attacks: refuse rather than rely on parser limits.
+    if b"<!DOCTYPE" in raw or b"<!ENTITY" in raw:
+        return _xml_unknown(raw, event, "xml_doctype_refused")
+    try:
+        root = ET.fromstring(raw)
+    except (ET.ParseError, LookupError, ValueError):
+        return _xml_unknown(raw, event, "malformed_xml")
+
+    root_name = _local(root.tag)
+    namespace = root.tag[1:].split("}", 1)[0] if root.tag.startswith("{") else ""
+    children = {_local(child.tag): child for child in root}
+    status = children.get("alarmStatusInfo")
+    device_info_el = children.get("deviceInfo")
+    if root_name != "config" or (status is None and device_info_el is None):
+        return _xml_unknown(raw, event, "unrecognized_xml_document", root_name)
+
+    device_info: dict[str, str] = {}
+    if device_info_el is not None:
+        for child in device_info_el:
+            key = _DEVICE_INFO_FIELDS.get(_local(child.tag))
+            if key:
+                device_info[key] = (child.text or "").strip()
+    data_time_el = children.get("dataTime")
+    parsed: dict[str, Any] = {
+        "xml_root": root_name,
+        "xml_namespace": namespace,
+        "device_info": device_info,
+        "data_time": (data_time_el.text or "").strip() if data_time_el is not None else "",
+        "active_alarms": [],
+        "inactive_count": 0,
+    }
+    event.parse_format = parse_format
+    event.device_id = device_info.get("sn") or device_info.get("mac_address", "")
+    event.parsed = parsed
+
+    if status is None:
+        event.event_type = "heartbeat"
+        event.event_code = "heartbeat"
+        return event
+
+    active: list[dict[str, str]] = parsed["active_alarms"]
+    for element in status:
+        name = _local(element.tag)
+        code = XML_STATUS_ELEMENT_CODES.get(name, f"xml_{name}")
+        items = [item for item in element if _local(item.tag) == "item"]
+        for node in items or [element]:
+            if (node.text or "").strip().lower() == "true":
+                active.append({"element": name, "id": node.get("id", ""), "code": code})
+            else:
+                parsed["inactive_count"] += 1
+
+    if not active:
+        event.event_type = "status_change"
+        event.event_code = "alarm_status_inactive"
+        return event
+    event.event_code = active[0]["code"]
+    event.event_type = _CATEGORY_BY_CODE.get(event.event_code, "alarm")
+    return event
+
+
+def split_alarm_frame(frame: ParsedAlarmFrame) -> list[ParsedAlarmFrame]:
+    """One frame per active alarm in an XML status push; other frames as-is.
+
+    A documented SendAlarmStatus body can report several active alarms at once,
+    while ``ParsedAlarmFrame`` describes one. Consumers that ingest per alarm
+    call this; ``parse_alarm_frame`` keeps its single-frame contract.
+    """
+    active = frame.parsed.get("active_alarms") if frame.parse_format in ("xml", "http_xml") else None
+    if not active or len(active) < 2:
+        return [frame]
+    frames = []
+    for alarm in active:
+        parsed = dict(frame.parsed)
+        parsed["active_alarms"] = [alarm]
+        frames.append(
+            replace(
+                frame,
+                event_code=alarm["code"],
+                event_type=_CATEGORY_BY_CODE.get(alarm["code"], "alarm"),
+                parsed=parsed,
+            )
+        )
+    return frames
 
 
 def _extract_http_body(data: bytes) -> bytes | None:

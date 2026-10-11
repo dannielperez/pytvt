@@ -1,0 +1,9 @@
+<config version="1.0" xmlns="http://www.ipc.com/ver10">
+     <deviceInfo>
+            <deviceName><![CDATA[Device Name]]></deviceName>
+            <deviceNo.><![CDATA[1]]></deviceNo.>
+            <sn><![CDATA[N563F0159MNK]]></sn>
+            <ipAddress><![CDATA[192.168.3.100]]></ipAddress>
+            <macAddress><![CDATA[78-24-AF-44-89-01]]></macAddress>
+     </deviceInfo>
+</config>
