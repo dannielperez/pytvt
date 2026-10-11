@@ -21,7 +21,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as `unknown` with diagnostics. DOCTYPE/ENTITY declarations and oversized bodies are
   refused. Fixtures are the vendor's documented examples (`tests/fixtures/alarm_server/`).
 
-### Added
 
 - `DeviceSession.query_platform_access()` — read the recorder's Platform Access
   (auto-report) settings over the NetSDK session via `NET_SDK_ApiInterface`
