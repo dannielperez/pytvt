@@ -200,12 +200,14 @@ XML_STATUS_ELEMENT_CODES: dict[str, str] = {
     "avdAlarm": "video_abnormal",
     "sensorAlarmIn": "sensor",
 }
+# Matched case-insensitively: the documented IPC body uses ``deviceName``/``sn``
+# while a CAPTURED NVR heartbeat (2026-10-12) uses ``DeviceName``/``SN``.
 _DEVICE_INFO_FIELDS = {
-    "deviceName": "device_name",
-    "deviceNo.": "device_no",
+    "devicename": "device_name",
+    "deviceno.": "device_no",
     "sn": "sn",
-    "ipAddress": "ip_address",
-    "macAddress": "mac_address",
+    "ipaddress": "ip_address",
+    "macaddress": "mac_address",
 }
 _CATEGORY_BY_CODE = {name: category for name, category in TVT_ALARM_CODES.values()}
 
@@ -251,15 +253,23 @@ def _parse_xml_payload(raw: bytes, event: ParsedAlarmFrame, *, parse_format: str
     root_name = _local(root.tag)
     namespace = root.tag[1:].split("}", 1)[0] if root.tag.startswith("{") else ""
     children = {_local(child.tag): child for child in root}
-    status = children.get("alarmStatusInfo")
-    device_info_el = children.get("deviceInfo")
-    if root_name != "config" or (status is None and device_info_el is None):
+    # CAPTURED NVR heartbeat (2026-10-12): the <DeviceInfo> element IS the root,
+    # with no <config> wrapper. Only a heartbeat has this shape; an NVR alarm
+    # body has not been captured and must never be inferred from it.
+    if root_name.lower() == "deviceinfo":
+        status, device_info_el = None, root
+    elif root_name == "config":
+        status = children.get("alarmStatusInfo")
+        device_info_el = children.get("deviceInfo")
+    else:
+        status = device_info_el = None
+    if status is None and device_info_el is None:
         return _xml_unknown(raw, event, "unrecognized_xml_document", root_name)
 
     device_info: dict[str, str] = {}
     if device_info_el is not None:
         for child in device_info_el:
-            key = _DEVICE_INFO_FIELDS.get(_local(child.tag))
+            key = _DEVICE_INFO_FIELDS.get(_local(child.tag).lower())
             if key:
                 device_info[key] = (child.text or "").strip()
     data_time_el = children.get("dataTime")

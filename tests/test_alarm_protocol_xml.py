@@ -218,3 +218,40 @@ def test_json_path_is_unchanged():
     assert frame.parse_format == "json"
     assert frame.event_code == "tripwire"
     assert split_alarm_frame(frame) == [frame]
+
+
+# ---------------------------------------------------------------------------
+# NVR push — CAPTURED (live, 2026-10-12): heartbeat only
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "fixture",
+    ["nvr_captured_heartbeat_http.bin", "nvr_captured_heartbeat_decl_http.bin"],
+)
+def test_captured_nvr_heartbeat_is_a_heartbeat(fixture):
+    """Real NVR heartbeat: <DeviceInfo> root, no <config>, DeviceName/SN casing."""
+    frame = parse_alarm_frame(_fixture(fixture))
+
+    assert frame.parse_format == "http_xml"
+    assert frame.event_type == "heartbeat"
+    assert frame.event_code == "heartbeat"
+    assert frame.device_id == "TESTSERIAL0"
+    assert frame.parsed["xml_root"] == "DeviceInfo"
+    assert frame.parsed["device_info"] == {
+        "device_name": "Example NVR",
+        "device_no": "1",
+        "sn": "TESTSERIAL0",
+        "ip_address": "192.0.2.10",
+        "mac_address": "00:00:5E:00:53:01",
+    }
+    assert frame.parsed["active_alarms"] == []
+
+
+def test_device_info_with_unexpected_children_is_still_only_a_heartbeat():
+    """A <DeviceInfo> root never yields an alarm — alarm bodies are uncaptured."""
+    frame = parse_alarm_frame(
+        b"<DeviceInfo><SN>X</SN><motionAlarm>true</motionAlarm></DeviceInfo>",
+    )
+    assert frame.event_type == "heartbeat"
+    assert frame.parsed["active_alarms"] == []
