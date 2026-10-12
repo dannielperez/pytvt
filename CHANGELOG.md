@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **`NvrClient.set_alarm_server` reset the schedule to "none" (CAPTURED live, 2026-10-12).**
+  `queryAlarmServerParam` reports the schedule as a GUID, but `editAlarmServerParam` takes the
+  schedule **name**, as the shipped web client does (`app/AlarmCfg/alarmServer.js`). A GUID written
+  back verbatim was not recognised: the recorder stored the null schedule `{00000000-…}` and kept
+  sending heartbeats but no alarms. A GUID is now resolved to its name through `queryScheduleList`
+  (case-insensitive). An unknown GUID raises `NvrApiError` before anything is written. The null
+  GUID and plain names pass through unchanged.
+
 ### Added
 - **NVR Alarm Server heartbeat (CAPTURED live, 2026-10-12)** (`alarm_protocol.py`). A real TVT NVR
   heartbeat is `<DeviceInfo>` at the XML root, with no `<config>` wrapper or namespace and an optional
