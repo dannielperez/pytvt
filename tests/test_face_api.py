@@ -579,7 +579,7 @@ class TestAlarmServerConfig:
                 address="10.0.0.5",
                 port=9010,
                 data_format="XML",
-                schedule_id="{SCHED}",
+                schedule_id="24x7",
                 alarm_types=[1, 16],
                 heartbeat_enabled=True,
                 heartbeat_interval=15,
@@ -590,6 +590,7 @@ class TestAlarmServerConfig:
         assert "<port>9010</port>" in sent["body"]
         assert "<alarmServerAlarmTypes>1,16</alarmServerAlarmTypes>" in sent["body"]
         assert "<interval>15</interval>" in sent["body"]
+        assert "<alarmServerSchedule>24x7</alarmServerSchedule>" in sent["body"]
         # JSON format omits the XML-only alarm-types element
         client.set_alarm_server(AlarmServerConfig(enabled=False, data_format="JSON", alarm_types=[1, 16]))
         assert "alarmServerAlarmTypes" not in sent["body"]

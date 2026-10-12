@@ -1914,6 +1914,7 @@ class NvrClient:
         web client). CGI endpoint: ``editAlarmServerParam``.
         """
         self._require_login()
+        schedule = self._alarm_server_schedule_name(config.schedule_id)
         parts = [
             "<content>",
             f"<address>{escape(config.address)}</address>",
@@ -1921,7 +1922,7 @@ class NvrClient:
             f"<switch>{'true' if config.enabled else 'false'}</switch>",
             f"<dataFormat>{escape(config.data_format)}</dataFormat>",
             f"<port>{int(config.port)}</port>",
-            f"<alarmServerSchedule>{escape(config.schedule_id)}</alarmServerSchedule>",
+            f"<alarmServerSchedule>{escape(schedule)}</alarmServerSchedule>",
         ]
         if config.data_format == "XML":
             parts.append(
@@ -1936,6 +1937,29 @@ class NvrClient:
         parts.append("</content>")
         data = self._post("editAlarmServerParam", self._build_request_with_content("".join(parts)))
         self._check_response(data, "editAlarmServerParam")
+
+    _NULL_SCHEDULE = "{00000000-0000-0000-0000-000000000000}"
+
+    def _alarm_server_schedule_name(self, schedule: str) -> str:
+        """Return the value ``editAlarmServerParam`` expects for the schedule.
+
+        ``queryAlarmServerParam`` reports the schedule as a GUID, but the edit
+        takes the schedule's **name**: the shipped web client
+        (``app/AlarmCfg/alarmServer.js``) sends the selected option's text. A GUID
+        sent back verbatim is not recognised and the recorder falls to the null
+        schedule, which pushes no alarms (CAPTURED live 2026-10-12). A GUID is
+        therefore resolved through ``queryScheduleList``. An unknown GUID raises,
+        rather than silently disabling alarm pushes. The null GUID and plain
+        names pass through unchanged.
+        """
+        if not (schedule.startswith("{") and schedule.endswith("}")) or schedule == self._NULL_SCHEDULE:
+            return schedule
+        data = self._post("queryScheduleList", self._build_request())
+        self._check_response(data, "queryScheduleList")
+        for guid, name in re.findall(r'<item id="([^"]+)">(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?</item>', data):
+            if guid.lower() == schedule.lower():
+                return name
+        raise NvrApiError(f"alarm server schedule {schedule} not found in the recorder's schedule list")
 
 
 def _maybe_b64(value: str) -> bytes:
