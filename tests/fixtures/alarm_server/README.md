@@ -17,3 +17,13 @@ capitalisation and a colon-separated MAC, and is posted as
 stays `unknown`.
 | `nvr_captured_heartbeat_http.bin` | **Live capture** 2026-10-12 from a TVT NVR's Alarm Server push (UniqueOS receiver). Full HTTP request. Values sanitised (device name, serial, IP, MAC replaced with placeholder / RFC 5737 / RFC 7042 documentation values); structure, header set, tabs and CDATA preserved verbatim. | **CAPTURED** |
 | `nvr_captured_heartbeat_decl_http.bin` | Same NVR, second captured heartbeat variant: identical body preceded by an `<?xml version="1.0" encoding="UTF-8"?>` declaration and trailing newline. | **CAPTURED** |
+| `nvr_captured_motion_raise_http.bin` | **Live capture** 2026-10-12, same NVR: alarm push `<config><alarmStatusInfo><motionAlarm type="boolean" id="5" name="IP Camera">true…`, `<DataTime>`, nested `<DeviceInfo>`. Device identity sanitised; element names, attributes, camera name, ids, timestamps and whitespace verbatim. | **CAPTURED** |
+| `nvr_captured_motion_clear_http.bin` | Same NVR: `motionAlarm id="12" name="LPR Entrada"` **false** (explicit clear) | **CAPTURED** |
+| `nvr_captured_front_offline_raise_http.bin` | Same NVR: `frontOfflineAlarm id="12" name="LPR Entrada"` **true** (element not in the IPC document) | **CAPTURED** |
+
+**Channel numbering (CAPTURED, 2026-10-12):** in the NVR dialect the `id`
+attribute is the **1-based channel shown in the NVR UI**. Verified against the
+recorder's own inventory: `id="12" name="LPR Entrada"` is channel 12 "LPR
+Entrada" (NetSDK index 11), and `id="13" name="LPR PORTON SALIDA"` is channel 13.
+`DataTime` matched neither UTC nor local receipt time on the capture (recorder
+clock or timezone unknown), so it is kept raw.
