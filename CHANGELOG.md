@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **NVR Alarm Server alarm push (CAPTURED live, 2026-10-12)** (`alarm_protocol.py`). The NVR alarm body is
+  `<config>` (no namespace) with `<alarmStatusInfo>`, a `<DataTime>` and a nested `<DeviceInfo>`. Each
+  alarm element carries `id` (the **1-based channel shown in the NVR UI**, verified against the
+  recorder's inventory) and `name` (the camera's name); `true` raises and `false` **explicitly clears**.
+  Parsed as `parsed["dialect"] = "nvr"` with `name`, `channel_display` and `channel_index` per alarm,
+  `parsed["cleared_alarms"]`, and `ParsedAlarmFrame.channel` = the **0-based** index (UI channel − 1),
+  consistent with the binary frame. Elements outside the IPC document (e.g. `frontOfflineAlarm`) stay
+  `xml_<name>`. The documented IPC dialect still does not interpret `id`.
 - **NVR Alarm Server heartbeat (CAPTURED live, 2026-10-12)** (`alarm_protocol.py`). A real TVT NVR
   heartbeat is `<DeviceInfo>` at the XML root, with no `<config>` wrapper or namespace and an optional
   XML declaration, using `DeviceName`/`SN` capitalisation and a colon MAC, posted to

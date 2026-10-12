@@ -1,0 +1,19 @@
+POST /SendAlarmStatus HTTP/1.1
+Content-Type: application/soap+xml; charset=utf-8
+Host: 192.0.2.50
+Content-Length: 433
+Connection: close
+Accept-Encoding: gzip, deflate
+
+<?xml version="1.0" encoding="UTF-8"?>
+<config><alarmStatusInfo><frontOfflineAlarm type="boolean" id="12" name="LPR Entrada">true</frontOfflineAlarm>
+	</alarmStatusInfo>
+	<DataTime>2026-10-12 12:37:19</DataTime>
+	<DeviceInfo>
+		<DeviceName>Example NVR</DeviceName>
+		<DeviceNo.>1</DeviceNo.>
+		<SN><![CDATA[TESTSERIAL0]]></SN>
+		<ipAddress>192.0.2.10</ipAddress>
+		<macAddress>00:00:5E:00:53:01</macAddress>
+	</DeviceInfo>
+</config>

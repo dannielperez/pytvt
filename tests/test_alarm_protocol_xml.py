@@ -255,3 +255,110 @@ def test_device_info_with_unexpected_children_is_still_only_a_heartbeat():
     )
     assert frame.event_type == "heartbeat"
     assert frame.parsed["active_alarms"] == []
+
+
+# ---------------------------------------------------------------------------
+# NVR alarm push — CAPTURED (live, 2026-10-12)
+# ---------------------------------------------------------------------------
+
+
+def test_captured_nvr_alarm_raise_is_parsed_with_its_camera():
+    frame = parse_alarm_frame(_fixture("nvr_captured_motion_raise_http.bin"))
+
+    assert frame.parse_format == "http_xml"
+    assert frame.event_type == "alarm"
+    assert frame.event_code == "motion"
+    assert frame.device_id == "TESTSERIAL0"
+    assert frame.parsed["dialect"] == "nvr"
+    assert frame.parsed["data_time"] == "2026-10-12 12:37:00"
+    assert frame.parsed["active_alarms"] == [
+        {
+            "element": "motionAlarm",
+            "id": "5",
+            "code": "motion",
+            "name": "IP Camera",
+            "channel_display": 5,
+            "channel_index": 4,
+        },
+    ]
+
+
+def test_nvr_channel_is_the_zero_based_index_of_the_one_based_ui_channel():
+    """CAPTURED: id="12" name="LPR Entrada" is the recorder's UI channel 12
+    (NetSDK index 11). ParsedAlarmFrame.channel is the 0-based index across
+    every format, so consumers that add 1 for the UI channel stay correct."""
+    frame = parse_alarm_frame(_fixture("nvr_captured_front_offline_raise_http.bin"))
+
+    assert frame.channel == 11
+    assert frame.parsed["active_alarms"][0]["channel_display"] == 12
+    assert frame.parsed["active_alarms"][0]["name"] == "LPR Entrada"
+
+
+def test_captured_nvr_clear_is_reported_as_a_clear_of_that_channel():
+    frame = parse_alarm_frame(_fixture("nvr_captured_motion_clear_http.bin"))
+
+    assert frame.event_type == "status_change"
+    assert frame.event_code == "alarm_status_inactive"
+    assert frame.parsed["active_alarms"] == []
+    assert frame.parsed["cleared_alarms"] == [
+        {
+            "element": "motionAlarm",
+            "id": "12",
+            "code": "motion",
+            "name": "LPR Entrada",
+            "channel_display": 12,
+            "channel_index": 11,
+        },
+    ]
+    assert frame.channel == 11
+
+
+def test_unmapped_nvr_element_is_kept_verbatim_not_guessed():
+    """frontOfflineAlarm is not in the IPC document: its code is not inferred
+    from its name."""
+    frame = parse_alarm_frame(_fixture("nvr_captured_front_offline_raise_http.bin"))
+
+    assert frame.event_code == "xml_frontOfflineAlarm"
+    assert frame.event_type == "alarm"
+
+
+def test_nvr_alarm_with_non_numeric_id_has_no_channel():
+    body = (
+        b'<config><alarmStatusInfo><motionAlarm type="boolean" id="x" name="Cam">true'
+        b"</motionAlarm></alarmStatusInfo><DeviceInfo><SN>S</SN></DeviceInfo></config>"
+    )
+    frame = parse_alarm_frame(body)
+    assert frame.parsed["dialect"] == "nvr"
+    assert frame.channel is None
+    assert frame.parsed["active_alarms"][0]["channel_index"] is None
+
+
+def test_nvr_alarm_with_missing_id_has_no_channel():
+    body = (
+        b"<config><alarmStatusInfo><motionAlarm>true</motionAlarm></alarmStatusInfo>"
+        b"<DeviceInfo><SN>S</SN></DeviceInfo></config>"
+    )
+    frame = parse_alarm_frame(body)
+    assert frame.event_code == "motion"
+    assert frame.channel is None
+
+
+def test_documented_ipc_dialect_still_does_not_interpret_the_id():
+    """The ipc.com/ver10 document never says id is a channel — unchanged."""
+    frame = parse_alarm_frame(_fixture("ipc_v1_9_send_alarm_status_motion.xml"))
+    assert frame.parsed["dialect"] == "ipc"
+    assert frame.channel is None
+    assert "channel_index" not in frame.parsed["active_alarms"][0]
+
+
+def test_split_nvr_frame_carries_each_alarms_own_channel():
+    body = (
+        b'<config><alarmStatusInfo><motionAlarm id="3" name="A">true</motionAlarm>'
+        b'<motionAlarm id="7" name="B">true</motionAlarm></alarmStatusInfo>'
+        b"<DeviceInfo><SN>S</SN></DeviceInfo></config>"
+    )
+    frames = split_alarm_frame(parse_alarm_frame(body))
+    assert [(f.channel, f.parsed["active_alarms"][0]["name"]) for f in frames] == [
+        (2, "A"),
+        (6, "B"),
+    ]

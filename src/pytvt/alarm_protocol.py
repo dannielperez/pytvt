@@ -256,11 +256,17 @@ def _parse_xml_payload(raw: bytes, event: ParsedAlarmFrame, *, parse_format: str
     # CAPTURED NVR heartbeat (2026-10-12): the <DeviceInfo> element IS the root,
     # with no <config> wrapper. Only a heartbeat has this shape; an NVR alarm
     # body has not been captured and must never be inferred from it.
+    # Dialects: "ipc" = the DOCUMENTED TVTAPI v1.9 body (ipc.com/ver10,
+    # deviceInfo/dataTime); "nvr" = the CAPTURED NVR body (no namespace,
+    # DeviceInfo/DataTime, and per-alarm id + camera name attributes).
+    dialect = "ipc"
     if root_name.lower() == "deviceinfo":
-        status, device_info_el = None, root
+        status, device_info_el, dialect = None, root, "nvr"
     elif root_name == "config":
         status = children.get("alarmStatusInfo")
         device_info_el = children.get("deviceInfo")
+        if device_info_el is None and "DeviceInfo" in children:
+            device_info_el, dialect = children["DeviceInfo"], "nvr"
     else:
         status = device_info_el = None
     if status is None and device_info_el is None:
@@ -273,7 +279,10 @@ def _parse_xml_payload(raw: bytes, event: ParsedAlarmFrame, *, parse_format: str
             if key:
                 device_info[key] = (child.text or "").strip()
     data_time_el = children.get("dataTime")
+    if data_time_el is None:
+        data_time_el = children.get("DataTime")
     parsed: dict[str, Any] = {
+        "dialect": dialect,
         "xml_root": root_name,
         "xml_namespace": namespace,
         "device_info": device_info,
@@ -290,24 +299,55 @@ def _parse_xml_payload(raw: bytes, event: ParsedAlarmFrame, *, parse_format: str
         event.event_code = "heartbeat"
         return event
 
-    active: list[dict[str, str]] = parsed["active_alarms"]
+    active: list[dict[str, Any]] = parsed["active_alarms"]
+    cleared: list[dict[str, Any]] = []
     for element in status:
         name = _local(element.tag)
         code = XML_STATUS_ELEMENT_CODES.get(name, f"xml_{name}")
         items = [item for item in element if _local(item.tag) == "item"]
         for node in items or [element]:
+            entry = _status_entry(name, code, node, dialect)
             if (node.text or "").strip().lower() == "true":
-                active.append({"element": name, "id": node.get("id", ""), "code": code})
+                active.append(entry)
             else:
                 parsed["inactive_count"] += 1
+                cleared.append(entry)
+    if dialect == "nvr":
+        # CAPTURED: the NVR pushes a single element with "false" when that
+        # channel's alarm ends — an explicit clear, attributed to its channel.
+        parsed["cleared_alarms"] = cleared
 
     if not active:
         event.event_type = "status_change"
         event.event_code = "alarm_status_inactive"
+        if dialect == "nvr" and cleared:
+            event.channel = cleared[0]["channel_index"]
         return event
     event.event_code = active[0]["code"]
     event.event_type = _CATEGORY_BY_CODE.get(event.event_code, "alarm")
+    if dialect == "nvr":
+        event.channel = active[0]["channel_index"]
     return event
+
+
+def _status_entry(element: str, code: str, node: ET.Element, dialect: str) -> dict[str, Any]:
+    """One alarm status entry; channel interpretation only for the NVR dialect.
+
+    CAPTURED 2026-10-12: in the NVR dialect ``id`` is the 1-based channel shown
+    in the recorder UI and ``name`` is that camera's name (verified against the
+    recorder inventory: id="12" name="LPR Entrada" is UI channel 12, NetSDK index
+    11). ``channel_index`` converts it to the 0-based index that
+    ``ParsedAlarmFrame.channel`` carries for every format. The documented IPC
+    dialect never says ``id`` is a channel, so it stays uninterpreted there.
+    """
+    raw_id = node.get("id", "")
+    entry: dict[str, Any] = {"element": element, "id": raw_id, "code": code}
+    if dialect == "nvr":
+        display = int(raw_id) if raw_id.isdigit() and int(raw_id) >= 1 else None
+        entry["name"] = node.get("name", "")
+        entry["channel_display"] = display
+        entry["channel_index"] = display - 1 if display is not None else None
+    return entry
 
 
 def split_alarm_frame(frame: ParsedAlarmFrame) -> list[ParsedAlarmFrame]:
@@ -329,6 +369,7 @@ def split_alarm_frame(frame: ParsedAlarmFrame) -> list[ParsedAlarmFrame]:
                 frame,
                 event_code=alarm["code"],
                 event_type=_CATEGORY_BY_CODE.get(alarm["code"], "alarm"),
+                channel=alarm.get("channel_index", frame.channel),
                 parsed=parsed,
             )
         )
