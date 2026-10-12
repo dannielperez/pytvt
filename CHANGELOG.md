@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **NVR Alarm Server heartbeat (CAPTURED live, 2026-10-12)** (`alarm_protocol.py`). A real TVT NVR
+  heartbeat is `<DeviceInfo>` at the XML root, with no `<config>` wrapper or namespace and an optional
+  XML declaration, using `DeviceName`/`SN` capitalisation and a colon MAC, posted to
+  `/SendAlarmStatus` as `application/soap+xml`. It is now parsed as `heartbeat` with `device_id` = SN.
+  `<DeviceInfo>` field names match case-insensitively. A `<DeviceInfo>` root never yields an alarm:
+  the NVR alarm body is still uncaptured and stays `unknown`. Fixtures are sanitised captures
+  (`tests/fixtures/alarm_server/nvr_captured_heartbeat*_http.bin`).
 - **Alarm-server XML push parsing** (`alarm_protocol.py`). `parse_alarm_frame` now
   recognises the **documented** TVTAPI v1.9 (IP media device) push: `POST
   /SendAlarmStatus` with a `<config xmlns="http://www.ipc.com/ver10">` body carrying
