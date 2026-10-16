@@ -42,7 +42,9 @@ def _key16(key: str | bytes) -> bytes:
 
 def _md5_hex(text: str) -> str:
     # MD5 is mandated by the vendor web-login protocol; not a security choice.
-    return hashlib.md5(text.encode("utf-8"), usedforsecurity=False).hexdigest()
+    # Installed NVMS SparkMD5.hash returns uppercase hex. Case affects both
+    # the SHA-256 login proof and the ASCII AES key for the returned auth ID.
+    return hashlib.md5(text.encode("utf-8"), usedforsecurity=False).hexdigest().upper()
 
 
 def aes_ecb_pkcs7_encrypt(plaintext: str | bytes, key: str | bytes) -> str:

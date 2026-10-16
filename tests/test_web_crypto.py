@@ -94,11 +94,11 @@ class TestAesEcbPkcs7:
 class TestLoginHash:
     def test_md5_step_matches_known_vector(self):
         # md5("password") is a well-known constant.
-        assert web_crypto._md5_hex("password") == "5f4dcc3b5aa765d61d8327deb882cf99"
+        assert web_crypto._md5_hex("password") == "5F4DCC3B5AA765D61D8327DEB882CF99"
 
     def test_login_password_hash_formula(self):
         pw, nonce = "secret", "NONCE123"
-        md5_hex = hashlib.md5(pw.encode("utf-8"), usedforsecurity=False).hexdigest()
+        md5_hex = hashlib.md5(pw.encode("utf-8"), usedforsecurity=False).hexdigest().upper()
         expected = hashlib.sha256((md5_hex + nonce).encode("utf-8")).hexdigest()
         assert web_crypto.login_password_hash(pw, nonce) == expected
 
@@ -157,3 +157,16 @@ class TestBackendFallback:
 
         with pytest.raises(RuntimeError, match="backend unavailable"):
             _crypto.aes_ecb_raw(b"\x00" * 16, b"k" * 16, decrypt=False)
+
+
+def test_nvms_uppercase_login_known_answer():
+    # Fixed vector derived from installed spark-md5.js uppercase output.
+    assert (
+        web_crypto.login_password_hash("password", "NONCE123")
+        == "b8dfc4e32a80d563a58705009f37fcbb407b9a1a2846073a9bf9d04b32818bdc"
+    )
+
+
+def test_nvms_auth_id_uppercase_ascii_key_known_answer():
+    # Independent AES fixture; avoids producing and consuming the same wrong key.
+    assert web_crypto.decrypt_auth_id("Fnwo+esLiWA9ExZPznP6IA==", "password") == "auth-id-vector"
