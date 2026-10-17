@@ -179,7 +179,7 @@ def test_list_operation_logs_tolerates_unrecognized_item_shape() -> None:
     logs = backend.list_operation_logs()
 
     assert len(logs) == 1
-    assert logs[0].log_id == "0"
+    assert len(logs[0].log_id) == 64
     assert logs[0].log_type == ""
     assert logs[0].message == ""
     assert logs[0].raw_data == {"unexpectedField": "mystery"}
@@ -260,3 +260,12 @@ def test_session_encodes_repeated_types_and_language_cookie() -> None:
 
     session = WebSession("nvms.example", "test", "test", transport=Transport())
     session._post("/test", {"types[]": ["LOGIN", "CONFIG"]})
+
+
+def test_log_identity_is_stable_across_page_positions() -> None:
+    item = {"time": "2026-10-17 12:00:00", "logType": "OFFLINE", "node": "server-a"}
+    first = WebManagementBackend._log_entry_from_item(item, 0, {})
+    later = WebManagementBackend._log_entry_from_item(item, 9, {})
+    assert first.log_id == later.log_id
+    assert WebManagementBackend._log_entry_from_item({**item, "node": "server-b"}, 0, {}).log_id != first.log_id
+    assert WebManagementBackend._log_entry_from_item({**item, "logKey": "vendor-id"}, 0, {}).log_id == "vendor-id"

@@ -15,6 +15,8 @@ Every other read method (device/channel enumeration) raises
 
 from __future__ import annotations
 
+import hashlib
+import json
 import platform
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -91,7 +93,7 @@ _AUTH_GROUP_LIST_PATH = "/service/User/getAuthGroupList"
 # Item field names are NOT field-verified live for the log endpoints (see the KB doc) —
 # try each candidate in order and fall back to "" so a shape surprise degrades to an
 # empty field rather than a KeyError.
-_LOG_ID_KEYS = ("id", "logId", "no", "serialNo", "seq")
+_LOG_ID_KEYS = ("logKey", "id", "logId", "no", "serialNo", "seq")
 _LOG_TYPE_KEYS = ("type", "logType", "eventType")
 _LOG_MESSAGE_KEYS = ("content", "desc", "description", "message", "detail")
 _LOG_TIME_KEYS = ("time", "logTime", "occurTime", "operateTime")
@@ -406,7 +408,10 @@ class WebManagementBackend(BaseManagementBackend):
 
     @staticmethod
     def _log_entry_from_item(item: dict[str, str], index: int, event_dictionary: dict[str, str]) -> PlatformLogEntry:
-        log_id = _first_present(item, _LOG_ID_KEYS) or str(index)
+        log_id = (
+            _first_present(item, _LOG_ID_KEYS)
+            or hashlib.sha256(json.dumps(item, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+        )
         log_type_code = _first_present(item, _LOG_TYPE_KEYS)
         return PlatformLogEntry(
             log_id=log_id,
