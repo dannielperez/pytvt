@@ -422,7 +422,9 @@ class WebManagementBackend(BaseManagementBackend):
             else:
                 # Installed UI converts these UTC values to browser local time.
                 occurred_at = (
-                    timestamp.replace(tzinfo=timezone.utc).isoformat() if timestamp.tzinfo is None else timestamp.isoformat()
+                    timestamp.replace(tzinfo=timezone.utc).isoformat()
+                    if timestamp.tzinfo is None
+                    else timestamp.isoformat()
                 )
         return PlatformLogEntry(
             log_id=log_id,
