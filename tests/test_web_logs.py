@@ -125,7 +125,7 @@ def test_list_operation_logs_maps_sanitized_envelope_to_dtos() -> None:
     assert [entry.log_id for entry in logs] == ["1", "2"]
     assert logs[0].log_type == "Login"
     assert logs[0].message == "admin logged in"
-    assert logs[0].occurred_at == "2026-07-07 10:00:00"
+    assert logs[0].occurred_at == "2026-07-07T10:00:00+00:00"
     assert logs[0].operator == "admin"
     assert logs[1].log_type == "ConfigChange"
     assert logs[0].raw_data["id"] == "1"
@@ -210,7 +210,7 @@ def test_list_status_logs_maps_sanitized_envelope_to_dtos() -> None:
     assert len(logs) == 1
     assert logs[0].log_id == "9"
     assert logs[0].log_type == "state"
-    assert logs[0].occurred_at == "2026-07-07 11:00:00"
+    assert logs[0].occurred_at == "2026-07-07T11:00:00+00:00"
 
 
 def test_list_status_logs_sends_pagination() -> None:

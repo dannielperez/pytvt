@@ -413,11 +413,22 @@ class WebManagementBackend(BaseManagementBackend):
             or hashlib.sha256(json.dumps(item, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
         )
         log_type_code = _first_present(item, _LOG_TYPE_KEYS)
+        occurred_at = _first_present(item, _LOG_TIME_KEYS)
+        if occurred_at:
+            try:
+                timestamp = datetime.fromisoformat(occurred_at)
+            except ValueError:
+                pass
+            else:
+                # Installed UI converts these UTC values to browser local time.
+                occurred_at = (
+                    timestamp.replace(tzinfo=UTC).isoformat() if timestamp.tzinfo is None else timestamp.isoformat()
+                )
         return PlatformLogEntry(
             log_id=log_id,
             log_type=event_dictionary.get(log_type_code, log_type_code),
             message=_first_present(item, _LOG_MESSAGE_KEYS),
-            occurred_at=_first_present(item, _LOG_TIME_KEYS),
+            occurred_at=occurred_at,
             operator=_first_present(item, _LOG_OPERATOR_KEYS),
             raw_data=dict(item),
         )
