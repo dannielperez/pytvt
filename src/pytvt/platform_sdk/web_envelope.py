@@ -50,6 +50,7 @@ class WebEnvelope:
     items: list[dict[str, str]]
 
     log_types: list[str] = field(default_factory=list)
+    content_attributes: dict[str, str] = field(default_factory=dict)
 
     @property
     def ok(self) -> bool:
@@ -110,7 +111,10 @@ def parse_envelope(payload: str | bytes) -> WebEnvelope:
         content = {
             child.tag: (child.text or "").strip() for child in content_node if child.tag != "item" and len(child) == 0
         }
-        items = [_flatten(item) for item in content_node.findall("item")]
+        items = [
+            {**_flatten(item), **{k: v for k, v in item.attrib.items() if k in {"id", "pId"}}}
+            for item in content_node.findall("item")
+        ]
 
     return WebEnvelope(
         ret_code=ret_code,
@@ -119,6 +123,7 @@ def parse_envelope(payload: str | bytes) -> WebEnvelope:
         error_code=error_code,
         content=content,
         items=items,
+        content_attributes=dict(content_node.attrib) if content_node is not None else {},
         log_types=list(
             dict.fromkeys(
                 item.attrib["type"]

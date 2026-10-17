@@ -64,6 +64,8 @@ class DeviceStatus:
     last_seen_at: datetime | None = None
     raw_data: dict[str, Any] = field(default_factory=dict)
 
+    name: str = ""
+
     # TODO: add recording_state, alarm_state once status payload is validated
 
 

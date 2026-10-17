@@ -18,6 +18,7 @@ from __future__ import annotations
 import hashlib
 import json
 import platform
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -560,19 +561,101 @@ class WebManagementBackend(BaseManagementBackend):
         raise CapabilityNotAvailable(_READS_NOT_IMPLEMENTED_MSG)
 
     def get_device_statuses(self) -> list[DeviceStatus]:
-        """List managed-device statuses (``SystemStatus/getDeviceStatusList``)."""
-        statuses = []
-        for index, item in enumerate(self._list_statuses(_DEVICE_STATUS_PATH)):
-            device_id = _first_present(item, _DEVICE_ID_KEYS) or str(index)
-            statuses.append(
-                DeviceStatus(
-                    device_id=device_id,
-                    online=_derive_online(item, _STATE_KEYS),
-                    last_seen_at=_parse_timestamp(_first_present(item, _LAST_SEEN_KEYS)),
-                    raw_data=dict(item),
+        """Read all authorized root areas; fail explicitly on incomplete coverage.
+
+        The installed UI requires an area ID and pages by content/@total.
+        Blank area IDs return a misleading successful empty response.
+        """
+        session = self._require_session()
+        deadline = time.monotonic() + 60
+        tree = session.request("/service/OrgRes/getOrganizationTree")
+        if not tree.ok or not tree.items:
+            raise ProtocolError("device status organization scope unavailable")
+        nodes = {item.get("id", ""): item for item in tree.items}
+        if "" in nodes or len(nodes) != len(tree.items):
+            raise ProtocolError("device status organization identity invalid")
+        roots = [key for key, item in nodes.items() if item.get("pId") not in nodes]
+        for key in nodes:
+            visited = set()
+            while key in nodes:
+                if key in visited:
+                    raise ProtocolError("device status organization cycle")
+                visited.add(key)
+                key = nodes[key].get("pId", "")
+        statuses: dict[str, DeviceStatus] = {}
+        requests = 0
+        # Deliberate allowlist: device status responses also contain passwords.
+        safe_fields = {
+            "id",
+            "deviceId",
+            "guid",
+            "name",
+            "ip",
+            "domain",
+            "port",
+            "protocolType",
+            "manufacturer",
+            "productModel",
+            "chlCount",
+            "stateType",
+            "state",
+            "status",
+            "lastOnLineTime",
+            "lastOffLineTime",
+            "lastSeenTime",
+            "area",
+            "mediaServer",
+            "storageServer",
+        }
+        for area_id in roots:
+            seen: set[str] = set()
+            expected_total = None
+            for page in range(1, 101):
+                if requests >= 100 or time.monotonic() >= deadline:
+                    raise ProtocolError("device status collection budget exceeded; coverage incomplete")
+                requests += 1
+                envelope = session.request(
+                    _DEVICE_STATUS_PATH,
+                    form={
+                        "pageIndex": str(page),
+                        "pageSize": "100",
+                        "name": "",
+                        "areaId": area_id,
+                        "stateType": "ALL",
+                        "protocolType": "ABSTRACT_DEVICE,ONVIF,HIKVISION_DVR,DAHUA_DVR",
+                    },
                 )
-            )
-        return statuses
+                if not envelope.ok:
+                    raise ProtocolError("device status page failed; coverage incomplete")
+                try:
+                    total = int(envelope.content_attributes["total"])
+                except (KeyError, ValueError) as exc:
+                    raise ProtocolError("device status total missing or invalid") from exc
+                if total < 0 or (expected_total is not None and total != expected_total):
+                    raise ProtocolError("device status total changed; retry collection")
+                expected_total = total
+                for item in envelope.items:
+                    device_id = _first_present(item, _DEVICE_ID_KEYS)
+                    if not device_id or device_id in seen:
+                        raise ProtocolError("device status identity missing or repeated; coverage incomplete")
+                    seen.add(device_id)
+                    last_seen = _parse_timestamp(_first_present(item, _LAST_SEEN_KEYS))
+                    if last_seen is not None and last_seen.tzinfo is None:
+                        last_seen = last_seen.replace(tzinfo=timezone.utc)
+                    statuses[device_id] = DeviceStatus(
+                        device_id=device_id,
+                        name=item.get("name", ""),
+                        online=_derive_online(item, _STATE_KEYS),
+                        last_seen_at=last_seen,
+                        raw_data={key: value for key, value in item.items() if key in safe_fields},
+                    )
+                if len(seen) > total or (not envelope.items and len(seen) < total):
+                    raise ProtocolError("device status count inconsistent; coverage incomplete")
+                if len(seen) == total:
+                    break
+            else:
+                raise ProtocolError("device status page limit exceeded; coverage incomplete")
+        return list(statuses.values())
 
     def subscribe_alarms(self) -> AlarmSubscription:
         raise CapabilityNotAvailable(_READS_NOT_IMPLEMENTED_MSG)

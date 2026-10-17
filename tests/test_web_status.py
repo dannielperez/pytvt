@@ -13,13 +13,13 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
+from urllib.parse import parse_qs
 
 import pytest
 
 from pytvt.platform_sdk import web_crypto
 from pytvt.platform_sdk.exceptions import ManagementNotAuthenticatedError, ProtocolError
-from pytvt.platform_sdk.models import DeviceStatus
 from pytvt.platform_sdk.web_backend import WebManagementBackend
 from pytvt.platform_sdk.web_models import PlatformAcsStatus, PlatformAcsSystem, PlatformServerStatus
 from pytvt.platform_sdk.web_session import WebHttpResponse
@@ -46,6 +46,7 @@ class FakeTransport:
     """Replays a scripted list of responses."""
 
     script: list[WebHttpResponse] = field(default_factory=list)
+    calls: list[tuple[str, bytes | None]] = field(default_factory=list)
 
     def request(
         self,
@@ -56,7 +57,8 @@ class FakeTransport:
         body: bytes | None,
         timeout: float,
     ) -> WebHttpResponse:
-        del method, url, headers, body, timeout
+        self.calls.append((url, body))
+        del method, headers, timeout
         if not self.script:
             raise AssertionError("unexpected request beyond script")
         return self.script.pop(0)
@@ -152,52 +154,77 @@ def test_get_server_statuses_raises_protocol_error_on_failure_status() -> None:
         backend.get_server_statuses()
 
 
-# ── device statuses (unverified field set, tolerant mapping) ──────────
+# Device status responses follow the installed UI contract.
+def org_response():
+    return ok_response(status_list_xml('<item id="root" pId="zero"><name>Root</name></item>'))
 
 
-def test_get_device_statuses_maps_tolerant_fields_to_dtos() -> None:
+def device_page(items, total):
+    return ok_response(f'<response><status>success</status><content total="{total}">{items}</content></response>')
+
+
+def test_device_status_pages_all_roots_and_redacts_credentials():
     transport = FakeTransport()
     backend = logged_in_backend(transport)
-    items_xml = (
-        "<item><deviceId>dev-1</deviceId><state>online</state>"
-        "<lastOnLineTime>2026-07-07 08:30:00</lastOnLineTime></item>"
-    )
-    transport.script = [ok_response(status_list_xml(items_xml))]
-
+    transport.script = [
+        ok_response(status_list_xml('<item id="r1" pId="zero"/><item id="child" pId="r1"/><item id="r2" pId="zero"/>')),
+        device_page(
+            '<item id="a"><stateType>ONLINE</stateType><password>secret</password><userName>admin</userName><unknownSecret>hidden</unknownSecret><lastOnLineTime>2026-07-07 08:30:00</lastOnLineTime></item>',
+            2,
+        ),
+        device_page('<item id="b"><stateType>OFFLINE</stateType></item>', 2),
+        device_page('<item id="c"><stateType>unknown</stateType></item>', 1),
+    ]
     statuses = backend.get_device_statuses()
+    assert [s.device_id for s in statuses] == ["a", "b", "c"]
+    assert [s.online for s in statuses] == [True, False, None]
+    assert statuses[0].last_seen_at == datetime(2026, 7, 7, 8, 30, tzinfo=timezone.utc)
+    assert not {"password", "userName", "unknownSecret"} & statuses[0].raw_data.keys()
+    assert transport.script == []
+    forms = [
+        parse_qs(body.decode(), keep_blank_values=True)
+        for url, body in transport.calls
+        if url.endswith("getDeviceStatusList")
+    ]
+    assert [form["areaId"] for form in forms] == [["r1"], ["r1"], ["r2"]]
+    assert [form["pageIndex"] for form in forms] == [["1"], ["2"], ["1"]]
+    assert all(form["stateType"] == ["ALL"] for form in forms)
 
-    assert len(statuses) == 1
-    entry = statuses[0]
-    assert isinstance(entry, DeviceStatus)
-    assert entry.device_id == "dev-1"
-    assert entry.online is True
-    assert entry.last_seen_at == datetime(2026, 7, 7, 8, 30, 0)
-    assert entry.raw_data["deviceId"] == "dev-1"
 
-
-def test_get_device_statuses_tolerates_unrecognized_item_shape() -> None:
+@pytest.mark.parametrize(
+    "pages",
+    [
+        [device_page("<item/>", 1)],
+        [device_page("", 1)],
+        [device_page('<item id="a"/>', 2), device_page('<item id="a"/>', 2)],
+        [device_page('<item id="a"/>', 2), device_page('<item id="b"/>', 3)],
+        [device_page('<item id="a"/>', 0)],
+        [ok_response(status_list_xml('<item id="a"/>'))],
+        [ok_response(fail_xml())],
+    ],
+)
+def test_device_status_incomplete_coverage_fails(pages):
     transport = FakeTransport()
     backend = logged_in_backend(transport)
-    items_xml = "<item><unexpectedField>mystery</unexpectedField></item>"
-    transport.script = [ok_response(status_list_xml(items_xml))]
-
-    statuses = backend.get_device_statuses()
-
-    assert len(statuses) == 1
-    assert statuses[0].device_id == "0"
-    assert statuses[0].online is None
-    assert statuses[0].last_seen_at is None
+    transport.script = [org_response(), *pages]
+    with pytest.raises(ProtocolError):
+        backend.get_device_statuses()
 
 
-def test_get_device_statuses_unparseable_timestamp_is_none() -> None:
+@pytest.mark.parametrize("tree", ["", "<item/>", '<item id="a" pId="b"/><item id="b" pId="a"/>'])
+def test_device_status_invalid_scope_fails(tree):
     transport = FakeTransport()
     backend = logged_in_backend(transport)
-    items_xml = "<item><id>dev-2</id><lastSeenTime>not-a-timestamp</lastSeenTime></item>"
-    transport.script = [ok_response(status_list_xml(items_xml))]
+    transport.script = [ok_response(status_list_xml(tree))]
+    with pytest.raises(ProtocolError):
+        backend.get_device_statuses()
 
-    statuses = backend.get_device_statuses()
 
-    assert statuses[0].last_seen_at is None
+def test_device_status_empty_authorized_area():
+    transport = FakeTransport()
+    backend = logged_in_backend(transport)
+    transport.script = [org_response(), device_page("", 0)]
+    assert backend.get_device_statuses() == []
 
 
 # ── ACS statuses (unverified field set, tolerant mapping) ─────────────
@@ -258,3 +285,21 @@ def test_list_acs_systems_requires_login() -> None:
     backend = WebManagementBackend("nvms.example")
     with pytest.raises(ManagementNotAuthenticatedError):
         backend.list_acs_systems()
+
+
+def test_device_status_request_budget_is_bounded():
+    transport = FakeTransport()
+    backend = logged_in_backend(transport)
+    transport.script = [org_response()] + [device_page(f'<item id="{i}"/>', 101) for i in range(100)]
+    with pytest.raises(ProtocolError, match=r"limit|budget"):
+        backend.get_device_statuses()
+
+
+def test_device_status_elapsed_budget_is_bounded(monkeypatch):
+    transport = FakeTransport()
+    backend = logged_in_backend(transport)
+    transport.script = [org_response()]
+    ticks = iter([0, 61])
+    monkeypatch.setattr("pytvt.platform_sdk.web_backend.time.monotonic", lambda: next(ticks))
+    with pytest.raises(ProtocolError, match="budget"):
+        backend.get_device_statuses()
