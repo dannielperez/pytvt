@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import json
 import xml.etree.ElementTree as ET
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from pytvt.platform_sdk.exceptions import ProtocolError
 
@@ -48,6 +48,8 @@ class WebEnvelope:
     error_code: str | None
     content: dict[str, str]
     items: list[dict[str, str]]
+
+    log_types: list[str] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
@@ -117,4 +119,12 @@ def parse_envelope(payload: str | bytes) -> WebEnvelope:
         error_code=error_code,
         content=content,
         items=items,
+        log_types=list(
+            dict.fromkeys(
+                item.attrib["type"]
+                for section in ("alarmLog", "operateLog", "configLog", "exceptionLog")
+                for item in root.findall(f"content/{section}/item")
+                if item.attrib.get("type")
+            )
+        ),
     )

@@ -15,8 +15,10 @@ Every other read method (device/channel enumeration) raises
 
 from __future__ import annotations
 
+import hashlib
+import json
 import platform
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .base import BaseManagementBackend
@@ -91,7 +93,7 @@ _AUTH_GROUP_LIST_PATH = "/service/User/getAuthGroupList"
 # Item field names are NOT field-verified live for the log endpoints (see the KB doc) —
 # try each candidate in order and fall back to "" so a shape surprise degrades to an
 # empty field rather than a KeyError.
-_LOG_ID_KEYS = ("id", "logId", "no", "serialNo", "seq")
+_LOG_ID_KEYS = ("logKey", "id", "logId", "no", "serialNo", "seq")
 _LOG_TYPE_KEYS = ("type", "logType", "eventType")
 _LOG_MESSAGE_KEYS = ("content", "desc", "description", "message", "detail")
 _LOG_TIME_KEYS = ("time", "logTime", "occurTime", "operateTime")
@@ -406,13 +408,29 @@ class WebManagementBackend(BaseManagementBackend):
 
     @staticmethod
     def _log_entry_from_item(item: dict[str, str], index: int, event_dictionary: dict[str, str]) -> PlatformLogEntry:
-        log_id = _first_present(item, _LOG_ID_KEYS) or str(index)
+        log_id = (
+            _first_present(item, _LOG_ID_KEYS)
+            or hashlib.sha256(json.dumps(item, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+        )
         log_type_code = _first_present(item, _LOG_TYPE_KEYS)
+        occurred_at = _first_present(item, _LOG_TIME_KEYS)
+        if occurred_at:
+            try:
+                timestamp = datetime.fromisoformat(occurred_at)
+            except ValueError:
+                pass
+            else:
+                # Installed UI converts these UTC values to browser local time.
+                occurred_at = (
+                    timestamp.replace(tzinfo=timezone.utc).isoformat()
+                    if timestamp.tzinfo is None
+                    else timestamp.isoformat()
+                )
         return PlatformLogEntry(
             log_id=log_id,
             log_type=event_dictionary.get(log_type_code, log_type_code),
             message=_first_present(item, _LOG_MESSAGE_KEYS),
-            occurred_at=_first_present(item, _LOG_TIME_KEYS),
+            occurred_at=occurred_at,
             operator=_first_present(item, _LOG_OPERATOR_KEYS),
             raw_data=dict(item),
         )
@@ -427,11 +445,17 @@ class WebManagementBackend(BaseManagementBackend):
         page_size: int,
     ) -> list[PlatformLogEntry]:
         session = self._require_session()
-        form = {"pageIndex": str(page_index), "pageSize": str(page_size)}
-        if start_time:
-            form["startTime"] = start_time
-        if end_time:
-            form["endTime"] = end_time
+        form: dict[str, str | list[str]] = {"pageIndex": str(page_index), "pageSize": str(page_size)}
+        if path == _STATUS_LOG_PATH:
+            form["types[]"] = ["LOG_STATE_ALL"]
+        else:
+            dictionary = session.request(_LOG_EVENT_DICTIONARY_PATH)
+            if not dictionary.ok or not dictionary.log_types:
+                raise ProtocolError("management log dictionary contains no supported event types")
+            form["types[]"] = dictionary.log_types
+        now = datetime.now(timezone.utc)
+        form["startTime"] = start_time or (now - timedelta(minutes=15)).strftime("%Y-%m-%d %H:%M:%S")
+        form["endTime"] = end_time or now.strftime("%Y-%m-%d %H:%M:%S")
         envelope = session.request(path, form=form)
         if not envelope.ok:
             raise ProtocolError(f"{path} failed: status={envelope.status!r} errorCode={envelope.error_code!r}")
