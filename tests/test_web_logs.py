@@ -43,6 +43,7 @@ class RecordingTransport:
 
     script: list[WebHttpResponse] = field(default_factory=list)
     requests: list[tuple[str, dict[str, str]]] = field(default_factory=list)
+    dictionary_discovered: bool = False
 
     def request(
         self,
@@ -55,6 +56,9 @@ class RecordingTransport:
     ) -> WebHttpResponse:
         del method, headers, timeout
         form = dict(urllib.parse.parse_qsl(body.decode("utf-8"))) if body else {}
+        if url.endswith("/getLogEventDictionary") and not self.dictionary_discovered:
+            self.dictionary_discovered = True
+            return ok_response(log_list_xml('<operateLog><item type="LOG_OPERATE_LOGIN"/></operateLog>'))
         self.requests.append((url, form))
         if not self.script:
             raise AssertionError("unexpected request beyond script")
@@ -141,10 +145,11 @@ def test_list_operation_logs_sends_pagination_and_date_range() -> None:
         "pageSize": "50",
         "startTime": "2026-07-01",
         "endTime": "2026-07-07",
+        "types[]": "LOG_OPERATE_LOGIN",
     }
 
 
-def test_list_operation_logs_defaults_omit_date_range() -> None:
+def test_list_operation_logs_defaults_bound_utc_date_range() -> None:
     transport = RecordingTransport()
     backend = logged_in_backend(transport)
     transport.script = [ok_response(log_list_xml("")), ok_response(log_list_xml(""))]
@@ -152,7 +157,8 @@ def test_list_operation_logs_defaults_omit_date_range() -> None:
     backend.list_operation_logs()
 
     (_url, form), _dictionary_call = transport.requests
-    assert form == {"pageIndex": "1", "pageSize": "100"}
+    assert form.pop("startTime") < form.pop("endTime")
+    assert form == {"pageIndex": "1", "pageSize": "100", "types[]": "LOG_OPERATE_LOGIN"}
 
 
 def test_list_operation_logs_raises_protocol_error_on_failure_status() -> None:
@@ -212,8 +218,45 @@ def test_list_status_logs_sends_pagination() -> None:
     backend = logged_in_backend(transport)
     transport.script = [ok_response(log_list_xml("")), ok_response(log_list_xml(""))]
 
+    transport.dictionary_discovered = True
     backend.list_status_logs(page_index=3, page_size=25)
 
     (url, form), _dictionary_call = transport.requests
     assert url.endswith("/service/SystemStatus/getStateLog")
-    assert form == {"pageIndex": "3", "pageSize": "25"}
+    assert form.pop("startTime") < form.pop("endTime")
+    assert form == {"pageIndex": "3", "pageSize": "25", "types[]": "LOG_STATE_ALL"}
+
+
+def test_operation_log_missing_type_dictionary_fails_before_log_request() -> None:
+    transport = RecordingTransport()
+    backend = logged_in_backend(transport)
+    transport.dictionary_discovered = True
+    transport.script = [ok_response(log_list_xml(""))]
+    with pytest.raises(ProtocolError, match="no supported event types"):
+        backend.list_operation_logs()
+    assert len(transport.requests) == 1
+    assert transport.requests[0][0].endswith("/getLogEventDictionary")
+
+
+def test_dictionary_collects_only_supported_sections_and_deduplicates() -> None:
+    from pytvt.platform_sdk.web_envelope import parse_envelope
+
+    xml = log_list_xml(
+        '<operateLog><item type="LOGIN"/><item type="LOGIN"/></operateLog>'
+        '<configLog><item type="CONFIG"/></configLog>'
+        '<infoLog><item type="UNSUPPORTED"/></infoLog>'
+    )
+    assert parse_envelope(envelope_body(xml)).log_types == ["LOGIN", "CONFIG"]
+
+
+def test_session_encodes_repeated_types_and_language_cookie() -> None:
+    from pytvt.platform_sdk.web_session import WebSession
+
+    class Transport:
+        def request(self, method, url, *, headers, body, timeout):
+            assert urllib.parse.parse_qs(body.decode()) == {"types[]": ["LOGIN", "CONFIG"]}
+            assert "lang_id=0x0409" in headers["Cookie"]
+            return ok_response(log_list_xml(""))
+
+    session = WebSession("nvms.example", "test", "test", transport=Transport())
+    session._post("/test", {"types[]": ["LOGIN", "CONFIG"]})

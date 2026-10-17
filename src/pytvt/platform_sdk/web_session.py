@@ -250,7 +250,7 @@ class WebSession:
         )
         self._user_id = do_env.content.get("userId") or None
 
-    def request(self, path: str, form: dict[str, str] | None = None) -> WebEnvelope:
+    def request(self, path: str, form: dict[str, str | list[str]] | None = None) -> WebEnvelope:
         """POST an authenticated ``/service/*`` request and parse the envelope.
 
         On HTTP 408 (session expired) the session re-runs the handshake once
@@ -296,12 +296,13 @@ class WebSession:
         headers = {"Content-Type": _FORM_CONTENT_TYPE}
         if self._token is not None:
             headers["token"] = self._token
-        if self._cookies:
-            headers["Cookie"] = "; ".join(f"{k}={v}" for k, v in self._cookies.items())
+        # The installed log controllers require the browser language cookie.
+        cookies = {"lang_id": "0x0409", **self._cookies}
+        headers["Cookie"] = "; ".join(f"{k}={v}" for k, v in cookies.items())
         return headers
 
-    def _post(self, path: str, form: dict[str, str] | None) -> WebHttpResponse:
-        body = urllib.parse.urlencode(form).encode("utf-8") if form else b""
+    def _post(self, path: str, form: dict[str, str | list[str]] | None) -> WebHttpResponse:
+        body = urllib.parse.urlencode(form, doseq=True).encode("utf-8") if form else b""
         response = self._transport.request(
             "POST",
             self._url(path),
@@ -319,7 +320,7 @@ class WebSession:
             if sep and name.strip():
                 self._cookies[name.strip()] = value.strip()
 
-    def _exchange(self, path: str, form: dict[str, str] | None) -> WebEnvelope:
+    def _exchange(self, path: str, form: dict[str, str | list[str]] | None) -> WebEnvelope:
         """POST (unauthenticated-capable) and parse; no 408 retry here."""
         return self._parse_http(path, self._post(path, form))
 
