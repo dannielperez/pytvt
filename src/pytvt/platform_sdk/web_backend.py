@@ -18,7 +18,7 @@ from __future__ import annotations
 import hashlib
 import json
 import platform
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .base import BaseManagementBackend
@@ -422,7 +422,7 @@ class WebManagementBackend(BaseManagementBackend):
             else:
                 # Installed UI converts these UTC values to browser local time.
                 occurred_at = (
-                    timestamp.replace(tzinfo=UTC).isoformat() if timestamp.tzinfo is None else timestamp.isoformat()
+                    timestamp.replace(tzinfo=timezone.utc).isoformat() if timestamp.tzinfo is None else timestamp.isoformat()
                 )
         return PlatformLogEntry(
             log_id=log_id,
@@ -451,7 +451,7 @@ class WebManagementBackend(BaseManagementBackend):
             if not dictionary.ok or not dictionary.log_types:
                 raise ProtocolError("management log dictionary contains no supported event types")
             form["types[]"] = dictionary.log_types
-        now = datetime.now(UTC)
+        now = datetime.now(timezone.utc)
         form["startTime"] = start_time or (now - timedelta(minutes=15)).strftime("%Y-%m-%d %H:%M:%S")
         form["endTime"] = end_time or now.strftime("%Y-%m-%d %H:%M:%S")
         envelope = session.request(path, form=form)
