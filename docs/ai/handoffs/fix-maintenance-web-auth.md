@@ -15,3 +15,9 @@ rejected attempts reached lockout, so no credential/hash fallback is appropriate
 Related, independent work: pytvt #113 adds resource samples. This correction is
 not included there as inspected on October 18. Preserve both changes during
 integration. No deployment or server configuration changes are included.
+
+Implementation continuation: incorporated existing PR #113 resource sampling and
+added memory-size/uptime normalization, with unsupported values kept unknown.
+48 maintenance/web-crypto tests pass. These typed values support UniqueOS capture
+policy without putting vendor parsing in Django. No live credential proof has
+been claimed from offline tests.

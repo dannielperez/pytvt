@@ -33,6 +33,8 @@ class MaintenanceResourceSample:
     cpu_percent: float | None
     memory_percent: float | None
     uptime: str
+    memory_mib: float | None = None
+    uptime_seconds: int | None = None
 
 
 def _percentage(value, *, require_unit=False):
@@ -44,6 +46,22 @@ def _percentage(value, *, require_unit=False):
     except ValueError:
         return None
     return number if math.isfinite(number) and 0 <= number <= 100 else None
+
+
+def _memory_mib(value):
+    match = re.fullmatch(r"(\d+(?:\.\d+)?)\s*(M|MB|MiB|G|GB|GiB)", str(value).strip(), re.I)
+    if not match:
+        return None
+    number = float(match[1]) * (1024 if match[2].upper().startswith("G") else 1)
+    return number if math.isfinite(number) else None
+
+
+def _uptime_seconds(value):
+    match = re.fullmatch(r"(\d{2}):([0-5]\d):([0-5]\d),(\d+)Days?", str(value).strip(), re.I)
+    if not match or int(match[1]) > 23:
+        return None
+    hours, minutes, seconds, days = map(int, match.groups())
+    return days * 86400 + hours * 3600 + minutes * 60 + seconds
 
 
 class MaintenanceError(Exception):
@@ -148,6 +166,8 @@ class MaintenanceClient:
             cpu_percent=_percentage(fields.get("cpu", "")),
             memory_percent=_percentage(fields.get("memory", ""), require_unit=True),
             uptime=str(fields.get("serverRunTime", ""))[:160],
+            memory_mib=_memory_mib(fields.get("memory", "")),
+            uptime_seconds=_uptime_seconds(fields.get("serverRunTime", "")),
         )
 
     def download(self, target, *, max_bytes=1_000_000_000, deadline_seconds=900):
