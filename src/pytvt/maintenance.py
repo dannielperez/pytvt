@@ -13,20 +13,45 @@ from __future__ import annotations
 import hashlib
 import http.client
 import json
+import math
 import re
 import tempfile
 import time
 import xml.etree.ElementTree as ET
 import zipfile
 from collections import Counter
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from urllib.parse import urljoin, urlsplit
 from xml.sax.saxutils import escape
 from zoneinfo import ZoneInfo
 
 
+@dataclass(frozen=True)
+class MaintenanceResourceSample:
+    captured_at: str
+    cpu_percent: float | None
+    memory_percent: float | None
+    uptime: str
+
+
+def _percentage(value, *, require_unit=False):
+    text = str(value).strip()
+    if require_unit and not text.endswith("%"):
+        return None
+    try:
+        number = float(text.rstrip("%"))
+    except ValueError:
+        return None
+    return number if math.isfinite(number) and 0 <= number <= 100 else None
+
+
 class MaintenanceError(Exception):
     """Bounded, credential-free failure."""
+
+
+class MaintenanceAuthenticationError(MaintenanceError):
+    """Appliance rejected authentication; callers must not retry automatically."""
 
 
 class MaintenanceClient:
@@ -69,6 +94,8 @@ class MaintenanceClient:
                 raise MaintenanceError("Invalid appliance XML")
             root = ET.fromstring(payload)
             if root.findtext("status") != "success":
+                if endpoint in {"reqLogin", "doLogin"}:
+                    raise MaintenanceAuthenticationError("Appliance rejected authentication; no retry attempted")
                 raise MaintenanceError("Appliance rejected request; no retry attempted")
             return root
         except (ET.ParseError, OSError):
@@ -108,6 +135,20 @@ class MaintenanceClient:
         return {field: (root.findtext("content/" + field) or "")[:160] for field in fields} | {
             "collected_at": datetime.now(timezone.utc).isoformat()
         }
+
+    def resource_sample(self) -> MaintenanceResourceSample:
+        """Read current resources without requesting log compression/export.
+
+        Unknown memory units stay unknown; absence is never interpreted as zero.
+        The caller owns a single authenticated session and logout.
+        """
+        fields = self.system_info()
+        return MaintenanceResourceSample(
+            captured_at=fields["collected_at"],
+            cpu_percent=_percentage(fields.get("cpu", "")),
+            memory_percent=_percentage(fields.get("memory", ""), require_unit=True),
+            uptime=str(fields.get("serverRunTime", ""))[:160],
+        )
 
     def download(self, target, *, max_bytes=1_000_000_000, deadline_seconds=900):
         deadline = time.monotonic() + deadline_seconds

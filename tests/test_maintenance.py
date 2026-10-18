@@ -5,7 +5,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from pytvt.maintenance import MaintenanceClient, MaintenanceError, analyze_archive
+from pytvt.maintenance import MaintenanceAuthenticationError, MaintenanceClient, MaintenanceError, analyze_archive
 
 
 def archive(lines, name="opt/NVMS/DeviceWeb/operationsLog/IntelligentAnalysisServer_log/IntelligentAnalysisServer.log"):
@@ -136,3 +136,51 @@ def test_resource_samples_use_collection_clock_and_cleanup():
     assert len(result["observations"]) == 2
     assert result["observations"][0]["window_end"] == "2026-09-15T19:00:00+00:00"
     client.logout.assert_called_once()
+
+
+def test_resource_sample_never_downloads_or_guesses_unknown_units(monkeypatch):
+    client = MaintenanceClient("example.test", "operator", "fixture")
+    monkeypatch.setattr(
+        client,
+        "system_info",
+        lambda: {
+            "cpu": "99.5%",
+            "memory": "2048MB",
+            "serverRunTime": "3 days",
+            "collected_at": "2026-10-18T12:00:00+00:00",
+        },
+    )
+    monkeypatch.setattr(client, "download", lambda *a, **k: pytest.fail("must not export logs"))
+    result = client.resource_sample()
+    assert result.cpu_percent == 99.5
+    assert result.memory_percent is None
+    assert result.uptime == "3 days"
+
+
+@pytest.mark.parametrize("value", ["", "nan", "inf", "-1", "101%", "unavailable"])
+def test_resource_sample_invalid_percentage_is_unknown(monkeypatch, value):
+    client = MaintenanceClient("example.test", "operator", "fixture")
+    monkeypatch.setattr(
+        client,
+        "system_info",
+        lambda: {
+            "cpu": value,
+            "memory": value,
+            "collected_at": "2026-10-18T12:00:00+00:00",
+        },
+    )
+    assert client.resource_sample().cpu_percent is None
+    assert client.resource_sample().memory_percent is None
+
+
+@pytest.mark.parametrize("endpoint", ["reqLogin", "doLogin"])
+def test_authentication_rejection_is_typed_and_not_retried(endpoint):
+    client = MaintenanceClient("example.test", "operator", "fixture")
+    connection = Mock()
+    response = Mock()
+    response.read.return_value = b"<response><status>failed</status></response>"
+    client._request = Mock(return_value=(connection, response))
+    with pytest.raises(MaintenanceAuthenticationError):
+        client._post(endpoint)
+    client._request.assert_called_once()
+    connection.close.assert_called_once()
