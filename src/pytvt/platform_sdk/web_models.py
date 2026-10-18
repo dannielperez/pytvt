@@ -55,12 +55,19 @@ class PlatformServerStatus:
     online: bool | None = None
     raw_data: dict[str, Any] = field(default_factory=dict)
 
+    ip: str = ""
+    port: int | None = None
+    vendor_kind: str = ""
+
     def as_dict(self) -> dict[str, Any]:
         return {
             "guid": self.guid,
             "name": self.name,
             "kind": self.kind,
             "online": self.online,
+            "ip": self.ip,
+            "port": self.port,
+            "vendor_kind": self.vendor_kind,
         }
 
 
