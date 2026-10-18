@@ -184,3 +184,20 @@ def test_authentication_rejection_is_typed_and_not_retried(endpoint):
         client._post(endpoint)
     client._request.assert_called_once()
     connection.close.assert_called_once()
+
+
+@pytest.mark.parametrize(("text", "expected"), [("4195M", 4195), ("4GiB", 4096), ("bad", None), ("95%", None)])
+def test_memory_size_keeps_units_separate_from_percentage(text, expected):
+    from pytvt.maintenance import _memory_mib
+
+    assert _memory_mib(text) == expected
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [("06:23:57,3Days", 282237), ("00:00:00,0Days", 0), ("25:00:00,1Days", None), ("unknown", None)],
+)
+def test_runtime_normalization(text, expected):
+    from pytvt.maintenance import _uptime_seconds
+
+    assert _uptime_seconds(text) == expected
