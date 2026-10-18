@@ -198,6 +198,8 @@ class WebManagementBackend(BaseManagementBackend):
         self.verify_tls = verify_tls
         self.transport = transport
         self._session: WebSession | None = None
+        self._log_types: list[str] | None = None
+        self._log_names: dict[str, str] | None = None
 
     @staticmethod
     def _os_family() -> str:
@@ -285,6 +287,8 @@ class WebManagementBackend(BaseManagementBackend):
 
     def login(self, username: str, password: str, device_id: str | None = None) -> bool:
         del device_id
+        self._log_types = None
+        self._log_names = None
         session = WebSession(
             self.host,
             username,
@@ -393,6 +397,8 @@ class WebManagementBackend(BaseManagementBackend):
         This is an enrichment lookup, not the primary read — a vendor server
         that rejects or omits this endpoint must not break log listing itself.
         """
+        if self._log_names is not None:
+            return self._log_names
         try:
             envelope = session.request(_LOG_EVENT_DICTIONARY_PATH)
         except (TransportError, ProtocolError, SessionExpired):
@@ -405,6 +411,7 @@ class WebManagementBackend(BaseManagementBackend):
             text = _first_present(item, _DICTIONARY_TEXT_KEYS)
             if code and text:
                 dictionary[code] = text
+        self._log_names = dictionary
         return dictionary
 
     @staticmethod
@@ -450,10 +457,12 @@ class WebManagementBackend(BaseManagementBackend):
         if path == _STATUS_LOG_PATH:
             form["types[]"] = ["LOG_STATE_ALL"]
         else:
-            dictionary = session.request(_LOG_EVENT_DICTIONARY_PATH)
-            if not dictionary.ok or not dictionary.log_types:
-                raise ProtocolError("management log dictionary contains no supported event types")
-            form["types[]"] = dictionary.log_types
+            if self._log_types is None:
+                dictionary = session.request(_LOG_EVENT_DICTIONARY_PATH)
+                if not dictionary.ok or not dictionary.log_types:
+                    raise ProtocolError("management log dictionary contains no supported event types")
+                self._log_types = list(dictionary.log_types)
+            form["types[]"] = list(self._log_types)
         now = datetime.now(timezone.utc)
         form["startTime"] = start_time or (now - timedelta(minutes=15)).strftime("%Y-%m-%d %H:%M:%S")
         form["endTime"] = end_time or now.strftime("%Y-%m-%d %H:%M:%S")

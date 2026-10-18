@@ -269,3 +269,40 @@ def test_log_identity_is_stable_across_page_positions() -> None:
     assert first.log_id == later.log_id
     assert WebManagementBackend._log_entry_from_item({**item, "node": "server-b"}, 0, {}).log_id != first.log_id
     assert WebManagementBackend._log_entry_from_item({**item, "logKey": "vendor-id"}, 0, {}).log_id == "vendor-id"
+
+
+def test_log_dictionaries_are_reused_across_pages_in_one_session():
+    transport = RecordingTransport()
+    backend = logged_in_backend(transport)
+    transport.script = [
+        ok_response(log_list_xml("<item><id>first</id><type>LOGIN</type></item>")),
+        ok_response(log_list_xml("<item><type>LOGIN</type><name>Login</name></item>")),
+        ok_response(log_list_xml("<item><id>second</id><type>LOGIN</type></item>")),
+    ]
+    assert backend.list_operation_logs()[0].log_type == "Login"
+    assert backend.list_operation_logs(page_index=2)[0].log_type == "Login"
+    assert len(transport.requests) == 3
+    assert transport.requests[-1][0].endswith("/getLog")
+    assert transport.requests[-1][1]["types[]"] == "LOG_OPERATE_LOGIN"
+
+
+def test_log_dictionary_caches_reset_for_new_login(monkeypatch):
+    from pytvt.platform_sdk import web_backend
+
+    backend = WebManagementBackend("nvms.example")
+    backend._log_types = ["OLD"]
+    backend._log_names = {"OLD": "old"}
+
+    class Session:
+        authenticated = True
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def login(self):
+            pass
+
+    monkeypatch.setattr(web_backend, "WebSession", Session)
+    assert backend.login("different-account", "fixture")
+    assert backend._log_types is None
+    assert backend._log_names is None
