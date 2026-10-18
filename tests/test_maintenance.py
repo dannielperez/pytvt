@@ -84,6 +84,29 @@ def test_login_rejection_is_not_retried():
     assert client._post.call_count == 2
 
 
+def test_login_matches_deviceweb_challenge_and_management_web_proof():
+    import xml.etree.ElementTree as ET
+
+    from pytvt.platform_sdk.web_crypto import login_password_hash
+
+    # Non-secret vector: DeviceWeb SparkMD5.hash("test") returns uppercase
+    # 098F6BCD4621D373CADE4E832627B4F6; CryptoJS hashes that string + nonce.
+    expected = "b67d6792845d8fe500e3c205c6d6a887a135203154cf8464bb1d2892efd94115"
+    client = MaintenanceClient("10.0.0.1", "admin", "test")
+    challenge = ET.fromstring(
+        "<response><content><token>a</token><nonce>b</nonce><sessionId>{c}</sessionId></content></response>"
+    )
+    client._post = Mock(side_effect=[challenge, ET.fromstring("<response/>")])
+    client.login()
+    endpoint, content = client._post.call_args.args
+    request = ET.fromstring("<request>" + content + "</request>")
+    assert endpoint == "doLogin"
+    assert request.findtext("content/password") == expected
+    assert login_password_hash("test", "b") == expected
+    assert client.session == "c"
+    assert client._post.call_count == 2
+
+
 def test_archive_limits_checked_before_read():
     target = io.BytesIO()
     with zipfile.ZipFile(target, "w") as z:
