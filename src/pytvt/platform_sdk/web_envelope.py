@@ -26,6 +26,22 @@ from dataclasses import dataclass, field
 from pytvt.platform_sdk.exceptions import ProtocolError
 
 _TRANSPORT_OK = "1"
+# Confirmed attribute-shaped server status rows. Keep credentials/session
+# attributes out of the envelope rather than copying arbitrary attributes.
+_ITEM_ATTRIBUTES = frozenset(
+    {
+        "id",
+        "pId",
+        "name",
+        "ip",
+        "port",
+        "type",
+        "state",
+        "stateType",
+        "lastOnLineTime",
+        "lastOffLineTime",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -112,7 +128,7 @@ def parse_envelope(payload: str | bytes) -> WebEnvelope:
             child.tag: (child.text or "").strip() for child in content_node if child.tag != "item" and len(child) == 0
         }
         items = [
-            {**_flatten(item), **{k: v for k, v in item.attrib.items() if k in {"id", "pId"}}}
+            {**_flatten(item), **{k: v for k, v in item.attrib.items() if k in _ITEM_ATTRIBUTES}}
             for item in content_node.findall("item")
         ]
 

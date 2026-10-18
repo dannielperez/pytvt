@@ -303,3 +303,59 @@ def test_device_status_elapsed_budget_is_bounded(monkeypatch):
     monkeypatch.setattr("pytvt.platform_sdk.web_backend.time.monotonic", lambda: next(ticks))
     with pytest.raises(ProtocolError, match="budget"):
         backend.get_device_statuses()
+
+
+def test_attribute_server_status_retains_operational_fields_without_secrets():
+    transport = FakeTransport()
+    backend = logged_in_backend(transport)
+    transport.script = [
+        ok_response(
+            status_list_xml(
+                '<item id="server-guid" name="Transfer 2" ip="10.0.0.12" port="6006" '
+                'type="MDU" state="true" password="not-exported" token="not-exported" '
+                'lastOnLineTime="2026-10-18 17:19:38"/>'
+            )
+        )
+    ]
+    row = backend.get_server_statuses()[0]
+    assert row.as_dict() == dict(
+        guid="server-guid",
+        name="Transfer 2",
+        kind="transfer",
+        online=True,
+        ip="10.0.0.12",
+        port=6006,
+        vendor_kind="MDU",
+    )
+    assert "password" not in row.raw_data
+    assert "token" not in row.raw_data
+    assert row.raw_data["lastOnLineTime"] == "2026-10-18 17:19:38"
+
+
+@pytest.mark.parametrize(
+    "kind, expected",
+    [
+        ("RSU", "management"),
+        ("ADU", "alarm_host"),
+        ("TVW", "tv_wall"),
+        ("JSU", "access"),
+        ("ANS", "ai"),
+        ("NEW_ROLE", "new_role"),
+    ],
+)
+def test_attribute_server_kind_mapping(kind, expected):
+    transport = FakeTransport()
+    backend = logged_in_backend(transport)
+    transport.script = [ok_response(status_list_xml(f'<item id="id-1" type="{kind}" state="false" port="99999"/>'))]
+    row = backend.get_server_statuses()[0]
+    assert row.kind == expected
+    assert row.online is False
+    assert row.port is None
+
+
+def test_anonymous_server_status_does_not_invent_positional_identity():
+    transport = FakeTransport()
+    backend = logged_in_backend(transport)
+    transport.script = [ok_response(status_list_xml('<item state="true"/>'))]
+    with pytest.raises(ProtocolError, match="stable identity"):
+        backend.get_server_statuses()

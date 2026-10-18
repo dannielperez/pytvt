@@ -68,11 +68,16 @@ _DEVICE_STATUS_PATH = "/service/SystemStatus/getDeviceStatusList"
 _ACS_STATUS_PATH = "/service/SystemStatus/getAcsSystemStatusList"
 _ACS_SYSTEM_LIST_PATH = "/service/OrgRes/getAcsSystemList"
 
-# Server-status fields ARE confirmed (name/ip/port/type/stateType/last*Time), but no
-# `guid`-shaped field was observed — the guid/name lookup below falls back tolerantly.
-# Device/ACS-status item field names are NOT field-verified live (see the KB doc) —
-# try each candidate in order and fall back to "" so a shape surprise degrades to an
-# empty field rather than a KeyError.
+# Server status is observed in both child-element and attribute forms. Legacy
+# element rows may use their name as identity; anonymous rows must fail closed.
+_SERVER_KINDS = {
+    "RSU": "management",
+    "MDU": "transfer",
+    "ADU": "alarm_host",
+    "TVW": "tv_wall",
+    "JSU": "access",
+    "ANS": "ai",
+}
 _GUID_KEYS = ("guid", "id", "serverGuid", "deviceGuid", "acsGuid")
 _NAME_KEYS = ("name",)
 _KIND_KEYS = ("type", "kind")
@@ -346,14 +351,21 @@ class WebManagementBackend(BaseManagementBackend):
     def get_server_statuses(self) -> list[PlatformServerStatus]:
         """List management-server/sub-server statuses (``SystemStatus/getServerStatusList``)."""
         statuses = []
-        for index, item in enumerate(self._list_statuses(_SERVER_STATUS_PATH)):
-            guid = _first_present(item, _GUID_KEYS) or _first_present(item, _NAME_KEYS) or str(index)
+        for item in self._list_statuses(_SERVER_STATUS_PATH):
+            guid = _first_present(item, _GUID_KEYS) or _first_present(item, _NAME_KEYS)
+            if not guid:
+                raise ProtocolError("management server status has no stable identity")
+            raw_kind = _first_present(item, _KIND_KEYS)
+            port = _parse_int(_first_present(item, _PORT_KEYS))
             statuses.append(
                 PlatformServerStatus(
                     guid=guid,
                     name=_first_present(item, _NAME_KEYS),
-                    kind=_first_present(item, _KIND_KEYS),
+                    kind=_SERVER_KINDS.get(raw_kind.upper(), raw_kind.lower()),
                     online=_derive_online(item, _STATE_KEYS),
+                    ip=_first_present(item, _IP_KEYS),
+                    port=port if 0 < port <= 65535 else None,
+                    vendor_kind=raw_kind,
                     raw_data=dict(item),
                 )
             )
