@@ -2,6 +2,9 @@
 
 The export endpoint compresses logs on the appliance. Do not run frequently.
 Protocol follows A510 DeviceWeb login, querySystemInfo and operationsLogDownLoad.
+This is an HTTP web-interface adapter, not the native PlatformSDK login API.
+Supply the plaintext password for the maintenance account; this adapter alone
+derives the web challenge proof. Do not supply a pre-hashed SDK credential.
 No raw log lines, credentials, license payloads or sessions leave this module.
 """
 
@@ -80,7 +83,9 @@ class MaintenanceClient:
         nonce = challenge.findtext("content/nonce") or ""
         if not self.token or not self.session or not nonce or any(c in self.session + self.token for c in "\r\n"):
             raise MaintenanceError("Incomplete appliance challenge")
-        password_hash = hashlib.md5(self.password.encode(), usedforsecurity=False).hexdigest()
+        # DeviceWeb's shipped SparkMD5.hash returns uppercase hex. Hash casing
+        # is part of the challenge input, not a cosmetic representation.
+        password_hash = hashlib.md5(self.password.encode(), usedforsecurity=False).hexdigest().upper()
         digest = hashlib.sha256((password_hash + nonce).encode()).hexdigest()
         # DeviceWeb sends the token twice on doLogin.
         self._post(
