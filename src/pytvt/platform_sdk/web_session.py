@@ -23,6 +23,7 @@ import ssl
 import urllib.error
 import urllib.parse
 import urllib.request
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -272,6 +273,25 @@ class WebSession:
             if response.status == _HTTP_SESSION_EXPIRED:
                 raise SessionExpired(f"session still expired after re-authentication ({path})")
         return self._parse_http(path, response)
+
+    def request_xml(self, path: str, request: ET.Element) -> WebEnvelope:
+        """Post a read request with the current token in XML, including on retry."""
+        if not self.authenticated:
+            raise ManagementNotAuthenticatedError("call login() before issuing requests")
+        for attempt in range(2):
+            # Clone: callers must never retain the authenticated payload.
+            root = ET.fromstring(ET.tostring(request))
+            for old in root.findall("token"):
+                root.remove(old)
+            ET.SubElement(root, "token").text = self._token
+            response = self._post(path, {"requestXml": ET.tostring(root, encoding="unicode")})
+            if response.status != _HTTP_SESSION_EXPIRED:
+                return self._parse_http(path, response)
+            if attempt:
+                raise SessionExpired("session still expired after XML re-authentication")
+            self._reset()
+            self.login()
+        raise SessionExpired("XML request authentication failed")  # pragma: no cover
 
     def heartbeat(self) -> WebEnvelope:
         """Keep the session alive (``/service/login/heartBeat``)."""

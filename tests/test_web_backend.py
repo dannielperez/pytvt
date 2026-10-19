@@ -16,7 +16,7 @@ import pytest
 
 from pytvt.platform_sdk import web_crypto
 from pytvt.platform_sdk.base import BaseManagementBackend
-from pytvt.platform_sdk.exceptions import CapabilityNotAvailable, ManagementAuthError
+from pytvt.platform_sdk.exceptions import CapabilityNotAvailable, ManagementAuthError, ManagementNotAuthenticatedError
 from pytvt.platform_sdk.web_backend import WebManagementBackend
 from pytvt.platform_sdk.web_models import (
     PlatformAcsStatus,
@@ -162,7 +162,7 @@ def test_unimplemented_reads_raise_capability_not_available() -> None:
         backend.get_server_info()
     with pytest.raises(CapabilityNotAvailable):
         backend.list_devices()
-    with pytest.raises(CapabilityNotAvailable):
+    with pytest.raises(ManagementNotAuthenticatedError):
         backend.list_channels()
     with pytest.raises(CapabilityNotAvailable):
         backend.subscribe_alarms()

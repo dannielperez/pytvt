@@ -8,7 +8,8 @@ implemented; ``list_alarm_events``/``list_active_alarms`` (TVT-5),
 ``list_acs_systems`` (TVT-14),
 ``list_operation_logs``/``list_status_logs`` (TVT-9), and
 ``list_users``/``list_roles``/``list_permission_groups`` (TVT-8) are implemented.
-Every other read method (device/channel enumeration) raises
+Channel inventory/connection status uses the verified live-client tree and offline set.
+Other unimplemented read methods (including device inventory enumeration) raise
 :class:`CapabilityNotAvailable` until its own PR (TVT-8, TVT-10, see
 ``docs/ai/backlog/tvt-mgmt-integration.md``) maps the real endpoint response.
 """
@@ -19,6 +20,7 @@ import hashlib
 import json
 import platform
 import time
+import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -579,7 +581,56 @@ class WebManagementBackend(BaseManagementBackend):
         raise CapabilityNotAvailable(_READS_NOT_IMPLEMENTED_MSG)
 
     def list_channels(self) -> list[ManagedChannel]:
-        raise CapabilityNotAvailable(_READS_NOT_IMPLEMENTED_MSG)
+        """Complete channel tree plus offline set, as used by installed live.jsp.js.
+
+        The vendor exposes no recorder GUID in this response. Do not fabricate
+        parent links from names or IPs. A partial or inconsistent pair fails closed.
+        """
+        session = self._require_session()
+        request = ET.Element("request", version="1.0", systemType="NVMS-5000", clientType="WEB")
+        types = ET.SubElement(ET.SubElement(request, "types"), "nodeType")
+        for value in ("chls", "sensors", "alarmOuts"):
+            ET.SubElement(types, "enum").text = value
+        ET.SubElement(request, "nodeType", type="nodeType").text = "chls"
+        fields = ET.SubElement(request, "requireField")
+        for name in ("areaId", "name", "chlIndex", "chlType", "onlineType"):
+            ET.SubElement(fields, name)
+        inventory = session.request_xml("/service/Common/getNodeList", request)
+        total = inventory.content_attributes.get("total", "")
+        if not inventory.ok or not total.isdigit() or not 0 < int(total) <= 100_000:
+            raise ProtocolError("channel inventory total unavailable or outside collection bounds")
+        if len(inventory.items) != int(total):
+            raise ProtocolError("channel inventory incomplete")
+
+        def key(row):
+            return str(row.get("id", "")).strip().strip("{}").lower()
+
+        identities = [key(row) for row in inventory.items]
+        if not all(identities) or len(set(identities)) != len(identities):
+            raise ProtocolError("channel inventory identity missing or duplicated")
+        offline = session.request("/service/OrgRes/getOfflineChlList")
+        offline_ids = [key(row) for row in offline.items]
+        offline_total = offline.content_attributes.get("total")
+        if offline_total is not None and (not offline_total.isdigit() or int(offline_total) != len(offline.items)):
+            raise ProtocolError("channel offline snapshot count incomplete")
+        if (
+            not offline.ok
+            or not all(offline_ids)
+            or len(set(offline_ids)) != len(offline_ids)
+            or not set(offline_ids).issubset(identities)
+        ):
+            raise ProtocolError("channel offline snapshot incomplete or inconsistent")
+        offline_set = set(offline_ids)
+        return [
+            ManagedChannel(
+                channel_id=row["id"],
+                device_id="",
+                name=row.get("name", ""),
+                status="OFFLINE" if key(row) in offline_set else "ONLINE",
+                raw_data={field: row[field] for field in ("area", "ip", "port") if field in row},
+            )
+            for row in inventory.items
+        ]
 
     def get_device_statuses(self) -> list[DeviceStatus]:
         """Read all authorized root areas; fail explicitly on incomplete coverage.
