@@ -8,7 +8,8 @@ implemented; ``list_alarm_events``/``list_active_alarms`` (TVT-5),
 ``list_acs_systems`` (TVT-14),
 ``list_operation_logs``/``list_status_logs`` (TVT-9), and
 ``list_users``/``list_roles``/``list_permission_groups`` (TVT-8) are implemented.
-Every other read method (device/channel enumeration) raises
+Channel inventory/connection status uses the verified live-client tree and offline set.
+Other unimplemented read methods (including device inventory enumeration) raise
 :class:`CapabilityNotAvailable` until its own PR (TVT-8, TVT-10, see
 ``docs/ai/backlog/tvt-mgmt-integration.md``) maps the real endpoint response.
 """
@@ -609,6 +610,9 @@ class WebManagementBackend(BaseManagementBackend):
             raise ProtocolError("channel inventory identity missing or duplicated")
         offline = session.request("/service/OrgRes/getOfflineChlList")
         offline_ids = [key(row) for row in offline.items]
+        offline_total = offline.content_attributes.get("total")
+        if offline_total is not None and (not offline_total.isdigit() or int(offline_total) != len(offline.items)):
+            raise ProtocolError("channel offline snapshot count incomplete")
         if (
             not offline.ok
             or not all(offline_ids)

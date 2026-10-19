@@ -24,6 +24,7 @@ def backend(items=None, offline=None, total="2"):
     )
     b._session.request.return_value = SimpleNamespace(
         ok=True,
+        content_attributes={},
         items=offline if offline is not None else [{"id": "{BBB}"}],
     )
     return b
@@ -72,3 +73,10 @@ def test_xml_retry_refreshes_token_without_mutating_callers_payload():
     tokens = [ET.fromstring(c.args[1]["requestXml"]).findtext("token") for c in s._post.call_args_list]
     assert tokens == ["old", "new"]
     assert request.find("token") is None
+
+
+def test_truncated_offline_count_is_not_all_online():
+    b = backend(offline=[])
+    b._session.request.return_value.content_attributes = {"total": "3"}
+    with pytest.raises(ProtocolError, match="count incomplete"):
+        b.list_channels()
