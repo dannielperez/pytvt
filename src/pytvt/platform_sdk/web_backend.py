@@ -68,11 +68,16 @@ _DEVICE_STATUS_PATH = "/service/SystemStatus/getDeviceStatusList"
 _ACS_STATUS_PATH = "/service/SystemStatus/getAcsSystemStatusList"
 _ACS_SYSTEM_LIST_PATH = "/service/OrgRes/getAcsSystemList"
 
-# Server-status fields ARE confirmed (name/ip/port/type/stateType/last*Time), but no
-# `guid`-shaped field was observed — the guid/name lookup below falls back tolerantly.
-# Device/ACS-status item field names are NOT field-verified live (see the KB doc) —
-# try each candidate in order and fall back to "" so a shape surprise degrades to an
-# empty field rather than a KeyError.
+# Server status is observed in both child-element and attribute forms. Legacy
+# element rows may use their name as identity; anonymous rows must fail closed.
+_SERVER_KINDS = {
+    "RSU": "management",
+    "MDU": "transfer",
+    "ADU": "alarm_host",
+    "TVW": "tv_wall",
+    "JSU": "access",
+    "ANS": "ai",
+}
 _GUID_KEYS = ("guid", "id", "serverGuid", "deviceGuid", "acsGuid")
 _NAME_KEYS = ("name",)
 _KIND_KEYS = ("type", "kind")
@@ -198,6 +203,8 @@ class WebManagementBackend(BaseManagementBackend):
         self.verify_tls = verify_tls
         self.transport = transport
         self._session: WebSession | None = None
+        self._log_types: list[str] | None = None
+        self._log_names: dict[str, str] | None = None
 
     @staticmethod
     def _os_family() -> str:
@@ -285,6 +292,8 @@ class WebManagementBackend(BaseManagementBackend):
 
     def login(self, username: str, password: str, device_id: str | None = None) -> bool:
         del device_id
+        self._log_types = None
+        self._log_names = None
         session = WebSession(
             self.host,
             username,
@@ -342,14 +351,21 @@ class WebManagementBackend(BaseManagementBackend):
     def get_server_statuses(self) -> list[PlatformServerStatus]:
         """List management-server/sub-server statuses (``SystemStatus/getServerStatusList``)."""
         statuses = []
-        for index, item in enumerate(self._list_statuses(_SERVER_STATUS_PATH)):
-            guid = _first_present(item, _GUID_KEYS) or _first_present(item, _NAME_KEYS) or str(index)
+        for item in self._list_statuses(_SERVER_STATUS_PATH):
+            guid = _first_present(item, _GUID_KEYS) or _first_present(item, _NAME_KEYS)
+            if not guid:
+                raise ProtocolError("management server status has no stable identity")
+            raw_kind = _first_present(item, _KIND_KEYS)
+            port = _parse_int(_first_present(item, _PORT_KEYS))
             statuses.append(
                 PlatformServerStatus(
                     guid=guid,
                     name=_first_present(item, _NAME_KEYS),
-                    kind=_first_present(item, _KIND_KEYS),
+                    kind=_SERVER_KINDS.get(raw_kind.upper(), raw_kind.lower()),
                     online=_derive_online(item, _STATE_KEYS),
+                    ip=_first_present(item, _IP_KEYS),
+                    port=port if 0 < port <= 65535 else None,
+                    vendor_kind=raw_kind,
                     raw_data=dict(item),
                 )
             )
@@ -393,6 +409,8 @@ class WebManagementBackend(BaseManagementBackend):
         This is an enrichment lookup, not the primary read — a vendor server
         that rejects or omits this endpoint must not break log listing itself.
         """
+        if self._log_names is not None:
+            return self._log_names
         try:
             envelope = session.request(_LOG_EVENT_DICTIONARY_PATH)
         except (TransportError, ProtocolError, SessionExpired):
@@ -405,6 +423,7 @@ class WebManagementBackend(BaseManagementBackend):
             text = _first_present(item, _DICTIONARY_TEXT_KEYS)
             if code and text:
                 dictionary[code] = text
+        self._log_names = dictionary
         return dictionary
 
     @staticmethod
@@ -450,10 +469,12 @@ class WebManagementBackend(BaseManagementBackend):
         if path == _STATUS_LOG_PATH:
             form["types[]"] = ["LOG_STATE_ALL"]
         else:
-            dictionary = session.request(_LOG_EVENT_DICTIONARY_PATH)
-            if not dictionary.ok or not dictionary.log_types:
-                raise ProtocolError("management log dictionary contains no supported event types")
-            form["types[]"] = dictionary.log_types
+            if self._log_types is None:
+                dictionary = session.request(_LOG_EVENT_DICTIONARY_PATH)
+                if not dictionary.ok or not dictionary.log_types:
+                    raise ProtocolError("management log dictionary contains no supported event types")
+                self._log_types = list(dictionary.log_types)
+            form["types[]"] = list(self._log_types)
         now = datetime.now(timezone.utc)
         form["startTime"] = start_time or (now - timedelta(minutes=15)).strftime("%Y-%m-%d %H:%M:%S")
         form["endTime"] = end_time or now.strftime("%Y-%m-%d %H:%M:%S")
