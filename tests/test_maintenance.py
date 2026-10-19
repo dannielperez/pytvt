@@ -186,7 +186,10 @@ def test_authentication_rejection_is_typed_and_not_retried(endpoint):
     connection.close.assert_called_once()
 
 
-@pytest.mark.parametrize(("text", "expected"), [("4195M", 4195), ("4GiB", 4096), ("bad", None), ("95%", None)])
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [("4195M", 4195), ("4059", 4059), ("4GiB", 4096), ("bad", None), ("95%", None), ("-1", None), ("nan", None)],
+)
 def test_memory_size_keeps_units_separate_from_percentage(text, expected):
     from pytvt.maintenance import _memory_mib
 
@@ -201,3 +204,21 @@ def test_runtime_normalization(text, expected):
     from pytvt.maintenance import _uptime_seconds
 
     assert _uptime_seconds(text) == expected
+
+
+def test_resource_sample_vendor_bare_memory_is_size_not_percent(monkeypatch):
+    client = MaintenanceClient("example.test", "operator", "fixture")
+    monkeypatch.setattr(
+        client,
+        "system_info",
+        lambda: {
+            "cpu": "93.67%",
+            "memory": "4059",
+            "serverRunTime": "12:21:18,3Days",
+            "collected_at": "2026-10-19T03:18:26+00:00",
+        },
+    )
+    result = client.resource_sample()
+    assert result.memory_mib == 4059
+    assert result.memory_percent is None
+    assert result.uptime_seconds == 303678

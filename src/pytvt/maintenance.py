@@ -49,10 +49,11 @@ def _percentage(value, *, require_unit=False):
 
 
 def _memory_mib(value):
-    match = re.fullmatch(r"(\d+(?:\.\d+)?)\s*(M|MB|MiB|G|GB|GiB)", str(value).strip(), re.I)
+    # querySystemInfo returns bare MiB; the vendor devBasicInfo.js appends "M".
+    match = re.fullmatch(r"(\d+(?:\.\d+)?)\s*(M|MB|MiB|G|GB|GiB)?", str(value).strip(), re.I)
     if not match:
         return None
-    number = float(match[1]) * (1024 if match[2].upper().startswith("G") else 1)
+    number = float(match[1]) * (1024 if (match[2] or "M").upper().startswith("G") else 1)
     return number if math.isfinite(number) else None
 
 
