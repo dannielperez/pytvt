@@ -9,3 +9,6 @@ Validation: full tests: 1600 passed, two packaging tests initially failed from e
 Risk: web callers previously receiving false historical records now receive an explicit unavailable exception. UI/native observation does not validate a production web login. Audio OFF was observed for pilot native-client intrusion rows despite duplicate stored audio entries; do not equate duplicates with audible alarms or guaranteed CPU savings.
 
 Next: independent review, merge SDK before consuming gitlink. Verify complete native read/write/restore before any repair feature. Current SDK main has an unrelated memory-unit fix after this branch point; no overlap with this change.
+
+## Continuation
+CI exposed formatting drift in the new web backend method. Applied formatter and reran all SDK tests with public-index build dependencies: 1602 passed. Repository-wide SDK Ruff check and format check pass. No behavior or production changes in this follow-up.

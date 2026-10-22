@@ -340,8 +340,9 @@ class WebManagementBackend(BaseManagementBackend):
             "Use the validated native alarm-log capability for historical events."
         )
 
-    def list_alarm_configuration(self, *, alarm_type: str, page_index: int = 1,
-                                 page_size: int = 25, area_id: str = "") -> dict:
+    def list_alarm_configuration(
+        self, *, alarm_type: str, page_index: int = 1, page_size: int = 25, area_id: str = ""
+    ) -> dict:
         from .alarm_configuration import ALARM_CONFIGURATION_TYPES
 
         if alarm_type not in ALARM_CONFIGURATION_TYPES:
@@ -352,10 +353,15 @@ class WebManagementBackend(BaseManagementBackend):
             raise ValueError("page_size must be between 1 and 25")
         if not isinstance(area_id, str) or len(area_id) > 128:
             raise ValueError("invalid area_id")
-        env = self._require_session().request(_ALARM_LIST_PATH, form={
-            "type": alarm_type, "pageIndex": str(page_index),
-            "pageSize": str(page_size), "areaId": area_id,
-        })
+        env = self._require_session().request(
+            _ALARM_LIST_PATH,
+            form={
+                "type": alarm_type,
+                "pageIndex": str(page_index),
+                "pageSize": str(page_size),
+                "areaId": area_id,
+            },
+        )
         if not env.ok:
             raise ProtocolError("Alarm configuration query failed")
         rows = env.alarm_configurations
@@ -368,13 +374,19 @@ class WebManagementBackend(BaseManagementBackend):
         expected = max(0, min(page_size, total - (page_index - 1) * page_size))
         if len(rows) != expected or len({r["channel_id"] for r in rows}) != len(rows):
             raise ProtocolError("Inconsistent alarm configuration total")
-        return {"alarm_type": alarm_type, "page_index": page_index,
-                "page_size": page_size, "area_id": area_id, "total": total,
-                "rows": rows, "write_supported": False,
-                "duplicate_audio_count": None,
-                "coverage": "configuration_projection",
-                "limitation": "Audio is a scalar; duplicate rows and SOP preservation cannot be verified. "
-                              "This response is not a lossless backup or a safe write payload."}
+        return {
+            "alarm_type": alarm_type,
+            "page_index": page_index,
+            "page_size": page_size,
+            "area_id": area_id,
+            "total": total,
+            "rows": rows,
+            "write_supported": False,
+            "duplicate_audio_count": None,
+            "coverage": "configuration_projection",
+            "limitation": "Audio is a scalar; duplicate rows and SOP preservation cannot be verified. "
+            "This response is not a lossless backup or a safe write payload.",
+        }
 
     def list_active_alarms(self) -> list[PlatformAlarmRecord]:
         """List currently-active alarm nodes/zones (``Alarm/getNodeList``)."""
