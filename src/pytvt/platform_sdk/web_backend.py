@@ -3,7 +3,7 @@
 Wires :class:`~pytvt.platform_sdk.web_session.WebSession` (TVT-2, the real
 reqLogin/doLogin handshake) into the :class:`BaseManagementBackend` contract.
 ``login``/``diagnostics``/``get_context``/``load_sdk``/``close`` are fully
-implemented; ``list_alarm_events``/``list_active_alarms`` (TVT-5),
+implemented; ``list_alarm_configuration``/``list_active_alarms``,
 ``get_server_statuses``/``get_device_statuses``/``get_acs_statuses`` (TVT-6),
 ``list_acs_systems`` (TVT-14),
 ``list_operation_logs``/``list_status_logs`` (TVT-9), and
@@ -52,9 +52,7 @@ _READS_NOT_IMPLEMENTED_MSG = (
 
 # Endpoints confirmed in docs/ai/knowledge/vendor-boundaries/tvt-nvms-web-service-api.md.
 _ALARM_LIST_PATH = "/service/Alarm/getAlarmInfoList"
-# The KB endpoint catalog pairs getNodeList with "active alarms" (vs. getAlarmInfoList
-# for the historical event log) — the node/zone list is the closest documented match
-# for "what's currently alarming" and is unpaginated (a live snapshot, not a log).
+# getAlarmInfoList is linkage configuration; it is not historical alarm data.
 _ALARM_NODE_LIST_PATH = "/service/Alarm/getNodeList"
 
 # Item field names are NOT field-verified live for the alarm endpoints (see the KB
@@ -242,7 +240,7 @@ class WebManagementBackend(BaseManagementBackend):
             ),
             notes=[
                 "Web backend authenticates via the documented reqLogin/doLogin handshake (TVT-1/TVT-2).",
-                "Alarm reads are implemented (TVT-5).",
+                "Alarm configuration projection is readable; historical event reads are unavailable on this web endpoint.",
                 "Server/device/ACS status reads are implemented (TVT-6).",
                 "Operation/status log reads are implemented (TVT-9).",
                 "Users/roles/permission-group reads are implemented (TVT-8); credentials are never returned.",
@@ -335,9 +333,48 @@ class WebManagementBackend(BaseManagementBackend):
         return [self._alarm_record_from_item(item, index) for index, item in enumerate(envelope.items)]
 
     def list_alarm_events(self, *, page_index: int = 1, page_size: int = 100) -> list[PlatformAlarmRecord]:
-        """List historical alarm events (``Alarm/getAlarmInfoList``), paginated."""
-        form = {"pageIndex": str(page_index), "pageSize": str(page_size)}
-        return self._list_alarm_records(_ALARM_LIST_PATH, form=form)
+        """Configuration rows must never masquerade as historical alarm events."""
+        self._require_session()
+        raise CapabilityNotAvailable(
+            "Alarm/getAlarmInfoList returns linkage configuration, not alarm history. "
+            "Use the validated native alarm-log capability for historical events."
+        )
+
+    def list_alarm_configuration(self, *, alarm_type: str, page_index: int = 1,
+                                 page_size: int = 25, area_id: str = "") -> dict:
+        from .alarm_configuration import ALARM_CONFIGURATION_TYPES
+
+        if alarm_type not in ALARM_CONFIGURATION_TYPES:
+            raise ValueError("unsupported alarm configuration type")
+        if type(page_index) is not int or not 1 <= page_index <= 10000:
+            raise ValueError("page_index must be between 1 and 10000")
+        if type(page_size) is not int or not 1 <= page_size <= 25:
+            raise ValueError("page_size must be between 1 and 25")
+        if not isinstance(area_id, str) or len(area_id) > 128:
+            raise ValueError("invalid area_id")
+        env = self._require_session().request(_ALARM_LIST_PATH, form={
+            "type": alarm_type, "pageIndex": str(page_index),
+            "pageSize": str(page_size), "areaId": area_id,
+        })
+        if not env.ok:
+            raise ProtocolError("Alarm configuration query failed")
+        rows = env.alarm_configurations
+        if len(rows) != len(env.items) or len(rows) > page_size or any(not r["channel_id"] for r in rows):
+            raise ProtocolError("Incomplete or unexpected alarm configuration response")
+        raw_total = env.content_attributes.get("total", "")
+        if not raw_total.isdigit():
+            raise ProtocolError("Alarm configuration response lacks total count")
+        total = int(raw_total)
+        expected = max(0, min(page_size, total - (page_index - 1) * page_size))
+        if len(rows) != expected or len({r["channel_id"] for r in rows}) != len(rows):
+            raise ProtocolError("Inconsistent alarm configuration total")
+        return {"alarm_type": alarm_type, "page_index": page_index,
+                "page_size": page_size, "area_id": area_id, "total": total,
+                "rows": rows, "write_supported": False,
+                "duplicate_audio_count": None,
+                "coverage": "configuration_projection",
+                "limitation": "Audio is a scalar; duplicate rows and SOP preservation cannot be verified. "
+                              "This response is not a lossless backup or a safe write payload."}
 
     def list_active_alarms(self) -> list[PlatformAlarmRecord]:
         """List currently-active alarm nodes/zones (``Alarm/getNodeList``)."""

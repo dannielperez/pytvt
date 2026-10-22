@@ -1,12 +1,4 @@
-"""Tests for pytvt.platform_sdk.web_backend alarm reads (TVT-5).
-
-No network: a fake transport replays scripted envelopes. Covers
-``list_alarm_events``/``list_active_alarms`` mapping sanitized alarm
-envelopes to ``PlatformAlarmRecord`` DTOs, pagination form contents for the
-event list, an unpaginated request for the active-alarm node list, an empty
-list, tolerant field mapping on an unrecognized item shape, and that an
-unauthenticated call raises before any request is sent.
-"""
+"""Mocked configuration projection and active-alarm reads; configuration is not history."""
 
 from __future__ import annotations
 
@@ -17,7 +9,7 @@ from dataclasses import dataclass, field
 import pytest
 
 from pytvt.platform_sdk import web_crypto
-from pytvt.platform_sdk.exceptions import ManagementNotAuthenticatedError, ProtocolError
+from pytvt.platform_sdk.exceptions import CapabilityNotAvailable, ManagementNotAuthenticatedError, ProtocolError
 from pytvt.platform_sdk.web_backend import WebManagementBackend
 from pytvt.platform_sdk.web_models import PlatformAlarmRecord
 from pytvt.platform_sdk.web_session import WebHttpResponse
@@ -56,7 +48,7 @@ class RecordingTransport:
         timeout: float,
     ) -> WebHttpResponse:
         del method, headers, timeout
-        form = dict(urllib.parse.parse_qsl(body.decode("utf-8"))) if body else {}
+        form = dict(urllib.parse.parse_qsl(body.decode("utf-8"), keep_blank_values=True)) if body else {}
         self.requests.append((url, form))
         if not self.script:
             raise AssertionError("unexpected request beyond script")
@@ -101,81 +93,66 @@ def test_list_active_alarms_requires_login() -> None:
 # ── alarm events (Alarm/getAlarmInfoList) ─────────────────────────────
 
 
-def test_list_alarm_events_maps_sanitized_envelope_to_dtos() -> None:
+def test_configuration_is_not_alarm_history():
     transport = RecordingTransport()
     backend = logged_in_backend(transport)
-    items_xml = (
-        "<item><alarmId>1</alarmId><type>motion</type><deviceId>dev-1</deviceId>"
-        "<channelId>ch-1</channelId><time>2026-07-07 12:00:00</time></item>"
-        "<item><alarmId>2</alarmId><type>videoLoss</type><deviceId>dev-2</deviceId>"
-        "<channelId>ch-2</channelId><time>2026-07-07 12:05:00</time></item>"
-    )
-    transport.script = [ok_response(alarm_list_xml(items_xml))]
-
-    alarms = backend.list_alarm_events()
-
-    assert [entry.alarm_id for entry in alarms] == ["1", "2"]
-    assert isinstance(alarms[0], PlatformAlarmRecord)
-    assert alarms[0].alarm_type == "motion"
-    assert alarms[0].device_id == "dev-1"
-    assert alarms[0].channel_id == "ch-1"
-    assert alarms[0].occurred_at == "2026-07-07 12:00:00"
-    assert alarms[1].alarm_type == "videoLoss"
-    assert alarms[0].raw_data["alarmId"] == "1"
-
-
-def test_list_alarm_events_sends_pagination() -> None:
-    transport = RecordingTransport()
-    backend = logged_in_backend(transport)
-    transport.script = [ok_response(alarm_list_xml(""))]
-
-    backend.list_alarm_events(page_index=3, page_size=25)
-
-    (url, form) = transport.requests[0]
-    assert url.endswith("/service/Alarm/getAlarmInfoList")
-    assert form == {"pageIndex": "3", "pageSize": "25"}
-
-
-def test_list_alarm_events_defaults() -> None:
-    transport = RecordingTransport()
-    backend = logged_in_backend(transport)
-    transport.script = [ok_response(alarm_list_xml(""))]
-
-    backend.list_alarm_events()
-
-    (_url, form) = transport.requests[0]
-    assert form == {"pageIndex": "1", "pageSize": "100"}
-
-
-def test_list_alarm_events_empty_list() -> None:
-    transport = RecordingTransport()
-    backend = logged_in_backend(transport)
-    transport.script = [ok_response(alarm_list_xml(""))]
-
-    assert backend.list_alarm_events() == []
-
-
-def test_list_alarm_events_raises_protocol_error_on_failure_status() -> None:
-    transport = RecordingTransport()
-    backend = logged_in_backend(transport)
-    transport.script = [ok_response(fail_xml("536870955"))]
-
-    with pytest.raises(ProtocolError):
+    with pytest.raises(CapabilityNotAvailable, match="configuration"):
         backend.list_alarm_events()
+    assert transport.requests == []
 
 
-def test_list_alarm_events_tolerates_unrecognized_item_shape() -> None:
+def test_configuration_preserves_destinations_and_marks_lossy():
     transport = RecordingTransport()
     backend = logged_in_backend(transport)
-    items_xml = "<item><unexpectedField>mystery</unexpectedField></item>"
-    transport.script = [ok_response(alarm_list_xml(items_xml))]
+    transport.script = [
+        ok_response(
+            '<response><status>success</status><content total="1">'
+            '<item id="camera-1"><name>Front door</name><trigger>'
+            "<buzzerSwitch>true</buzzerSwitch><tvWall><switch>true</switch>"
+            '<item><chl id="wall-1">Main wall</chl></item></tvWall>'
+            "<SOP><secret>not-exposed</secret></SOP></trigger></item></content></response>"
+        )
+    ]
+    result = backend.list_alarm_configuration(alarm_type="perimeter")
+    assert result["total"] == 1
+    assert result["write_supported"] is False
+    assert result["duplicate_audio_count"] is None
+    row = result["rows"][0]
+    assert row["channel_id"] == "camera-1"
+    assert row["unexposed_fields"] == ["SOP"]
+    assert "wall-1" in str(row["actions"])
+    assert "not-exposed" not in str(result)
+    assert transport.requests[0][1] == {"type": "perimeter", "pageIndex": "1", "pageSize": "25", "areaId": ""}
 
-    alarms = backend.list_alarm_events()
 
-    assert len(alarms) == 1
-    assert alarms[0].alarm_id == "0"
-    assert alarms[0].alarm_type == ""
-    assert alarms[0].raw_data == {"unexpectedField": "mystery"}
+@pytest.mark.parametrize(
+    "content",
+    [
+        '<content total="1"><item id="x"><name>not a configuration</name></item></content>',
+        '<content><item id="x"><trigger/></item></content>',
+        '<content total="1"><item><trigger/></item></content>',
+        '<content total="1"></content>',
+        '<content total="2"><item id="x"><trigger/></item><item id="x"><trigger/></item></content>',
+    ],
+)
+def test_configuration_rejects_incomplete_response(content):
+    transport = RecordingTransport()
+    backend = logged_in_backend(transport)
+    transport.script = [ok_response("<response><status>success</status>" + content + "</response>")]
+    with pytest.raises(ProtocolError):
+        backend.list_alarm_configuration(alarm_type="motion")
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [{"alarm_type": "invalid"}, {"alarm_type": "motion", "page_size": 100}, {"alarm_type": "motion", "page_index": 0}],
+)
+def test_configuration_bounds_before_network(kwargs):
+    transport = RecordingTransport()
+    backend = logged_in_backend(transport)
+    with pytest.raises(ValueError):
+        backend.list_alarm_configuration(**kwargs)
+    assert not transport.requests
 
 
 # ── active alarms (Alarm/getNodeList) ─────────────────────────────────

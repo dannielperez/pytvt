@@ -405,6 +405,9 @@ class ManagementClient:
     def list_alarm_events(self, **kwargs: object) -> list[object]:
         return self._platform_call("list_alarm_events", **kwargs)  # type: ignore[return-value]
 
+    def list_alarm_configuration(self, **kwargs: object) -> dict:
+        return self._platform_call("list_alarm_configuration", **kwargs)
+
     def list_active_alarms(self) -> list[object]:
         return self._platform_call("list_active_alarms")  # type: ignore[return-value]
 

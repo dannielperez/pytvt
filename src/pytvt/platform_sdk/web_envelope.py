@@ -25,6 +25,8 @@ from dataclasses import dataclass, field
 
 from pytvt.platform_sdk.exceptions import ProtocolError
 
+from .alarm_configuration import configuration_items
+
 _TRANSPORT_OK = "1"
 # Confirmed attribute-shaped server status rows. Keep credentials/session
 # attributes out of the envelope rather than copying arbitrary attributes.
@@ -65,6 +67,7 @@ class WebEnvelope:
     content: dict[str, str]
     items: list[dict[str, str]]
 
+    alarm_configurations: list[dict] = field(default_factory=list)
     log_types: list[str] = field(default_factory=list)
     content_attributes: dict[str, str] = field(default_factory=dict)
 
@@ -132,6 +135,11 @@ def parse_envelope(payload: str | bytes) -> WebEnvelope:
             for item in content_node.findall("item")
         ]
 
+    try:
+        alarm_configurations = configuration_items(content_node)
+    except ValueError as exc:
+        raise ProtocolError("Alarm configuration exceeds projection limits") from exc
+
     return WebEnvelope(
         ret_code=ret_code,
         ret_msg=ret_msg,
@@ -139,6 +147,7 @@ def parse_envelope(payload: str | bytes) -> WebEnvelope:
         error_code=error_code,
         content=content,
         items=items,
+        alarm_configurations=alarm_configurations,
         content_attributes=dict(content_node.attrib) if content_node is not None else {},
         log_types=list(
             dict.fromkeys(
