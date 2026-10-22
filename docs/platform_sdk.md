@@ -149,3 +149,9 @@ decoders for:
 
 Unknown values always fall back to `"unknown"` (or `"unknown_<n>"` for
 server types) so downstream code never sees a bare integer.
+
+## Alarm linkage configuration
+
+`list_alarm_configuration(alarm_type="perimeter", page_index=1, page_size=25)` reads one web management configuration page. Types are motion, perimeter, and tripwire. The response contains channel identities, nested action destinations, total and page metadata, and explicit coverage limitations. It is not a lossless backup: audio is scalar and unexposed SOP actions cannot be restored from it. Writes and duplicate counts are deliberately unavailable. Native backends without this method report capability unavailable.
+
+`Alarm/getAlarmInfoList` is not historical alarm data. Web `list_alarm_events()` raises `CapabilityNotAvailable`; use a separately validated native history capability.
