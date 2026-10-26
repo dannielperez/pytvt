@@ -1,3 +1,4 @@
+import base64
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -76,3 +77,14 @@ def test_invalid_confidence_is_not_upgraded(confidence):
 def test_reject_unsupported_or_ambiguous_evidence(body):
     with pytest.raises(PlatePayloadError):
         decode(body)
+
+
+def test_jpeg_transport_trailer_is_removed_without_retaining_extra_bytes():
+    jpeg = b"\xff\xd8\xff\xd9"
+    encoded = base64.b64encode(jpeg + b"\x00\xa1\x7f").decode()
+    assert decode(payload(image=encoded))[0].plate_image == jpeg
+
+
+def test_jpeg_without_end_marker_is_rejected():
+    with pytest.raises(PlatePayloadError, match="JPEG framing"):
+        decode(payload(image="/9gAAA=="))
