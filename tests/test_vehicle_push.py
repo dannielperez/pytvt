@@ -88,3 +88,15 @@ def test_jpeg_transport_trailer_is_removed_without_retaining_extra_bytes():
 def test_jpeg_without_end_marker_is_rejected():
     with pytest.raises(PlatePayloadError, match="JPEG framing"):
         decode(payload(image="/9gAAA=="))
+
+
+@pytest.mark.parametrize("value", ["true", "false"])
+def test_vehicle_status_is_not_a_plate_arrival(value):
+    body = f'<config version="1.7"><alarmStatusInfo><vehiceAlarm>{value}</vehiceAlarm></alarmStatusInfo><dataTime>time</dataTime><deviceInfo/></config>'.encode()
+    assert decode(body) == ()
+
+
+def test_mixed_status_and_untyped_detection_is_not_silently_ignored():
+    body = b'<config version="1.7"><alarmStatusInfo><vehiceAlarm>true</vehiceAlarm></alarmStatusInfo><listInfo/></config>'
+    with pytest.raises(PlatePayloadError):
+        decode(body)

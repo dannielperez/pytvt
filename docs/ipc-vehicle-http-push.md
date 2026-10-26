@@ -12,7 +12,11 @@ transport trailers. Complete image integrity remains the consumer's job;
 framing alone must not be treated as image validation or authorization.
 
 Synthetic regression fixtures contain no real plates or images. Validation:
-48 tests in test_vehicle_push.py and test_plate_events.py passed. Live capture
+51 tests in test_vehicle_push.py and test_plate_events.py passed. Live capture
 accepted approach direction, confidence and capture timestamp after this fix.
 Camera clock synchronization must be independently checked; receipt time is
 never substituted for capture time.
+
+The subscription also sends alarmStatusInfo/vehiceAlarm boolean status frames.
+These decode to no observations so consumers can acknowledge them without
+inventing an arrival. Mixed status/untyped detection envelopes remain rejected.
