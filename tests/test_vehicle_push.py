@@ -97,6 +97,8 @@ def test_vehicle_status_is_not_a_plate_arrival(value):
 
 
 def test_mixed_status_and_untyped_detection_is_not_silently_ignored():
-    body = b'<config version="1.7"><alarmStatusInfo><vehiceAlarm>true</vehiceAlarm></alarmStatusInfo><listInfo/></config>'
+    body = (
+        b'<config version="1.7"><alarmStatusInfo><vehiceAlarm>true</vehiceAlarm></alarmStatusInfo><listInfo/></config>'
+    )
     with pytest.raises(PlatePayloadError):
         decode(body)
