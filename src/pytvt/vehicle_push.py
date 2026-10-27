@@ -44,9 +44,13 @@ def _jpeg(item: ET.Element) -> bytes | None:
         image = base64.b64decode(encoded, validate=True)
     except (ValueError, binascii.Error) as exc:
         raise PlatePayloadError("invalid vehicle push base64") from exc
-    if len(image) > MAX_IMAGE_BYTES or not image.startswith(b"\xff\xd8") or not image.endswith(b"\xff\xd9"):
+    end = image.rfind(b"\xff\xd9")
+    if len(image) > MAX_IMAGE_BYTES or not image.startswith(b"\xff\xd8") or end < 2:
         raise PlatePayloadError("invalid vehicle push JPEG framing")
-    return image
+    # Installed IPC firmware can append transport-buffer bytes after JPEG EOI.
+    # Discard that trailer rather than rejecting an otherwise valid crop. This
+    # remains a framing check: consumers must still validate the complete JPEG.
+    return image[: end + 2]
 
 
 def parse_ipc_vehicle_push(body: bytes, *, received_at: datetime, channel_id: int) -> tuple[PlateEvent, ...]:
@@ -75,7 +79,20 @@ def parse_ipc_vehicle_push(body: bytes, *, received_at: datetime, channel_id: in
         if node.tag.startswith("{") and not node.tag.startswith("{http://www.ipc.com/ver10}"):
             raise PlatePayloadError("unsupported vehicle push namespace")
         node.tag = node.tag.split("}")[-1]
-    if root.tag != "config" or root.get("version") != "1.7" or _text(root, "smartType") not in {"VEHICLE", "VEHICE"}:
+    if root.tag != "config" or root.get("version") != "1.7":
+        raise PlatePayloadError("unsupported vehicle push dialect")
+    status = _one(root, "alarmStatusInfo")
+    if (
+        status is not None
+        and {node.tag for node in root} <= {"alarmStatusInfo", "dataTime", "deviceInfo"}
+        and len(status) == 1
+        and _text(status, "vehiceAlarm") in {"true", "false"}
+    ):
+        # The same VEHICLE subscription emits status transitions, not plate
+        # detections. Acknowledge only the observed status shape, never invent
+        # an arrival from it or silently swallow a mixed plate/status message.
+        return ()
+    if _text(root, "smartType") not in {"VEHICLE", "VEHICE"}:
         raise PlatePayloadError("unsupported vehicle push dialect")
     container = _one(root, "listInfo")
     if container is None:
