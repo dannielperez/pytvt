@@ -290,7 +290,7 @@ def test_log_dictionary_caches_reset_for_new_login(monkeypatch):
     from pytvt.platform_sdk import web_backend
 
     backend = WebManagementBackend("nvms.example")
-    backend._log_types = ["OLD"]
+    backend._log_type_sections = {"operateLog": ["OLD"]}
     backend._log_names = {"OLD": "old"}
 
     class Session:
@@ -304,5 +304,132 @@ def test_log_dictionary_caches_reset_for_new_login(monkeypatch):
 
     monkeypatch.setattr(web_backend, "WebSession", Session)
     assert backend.login("different-account", "fixture")
-    assert backend._log_types is None
+    assert backend._log_type_sections is None
     assert backend._log_names is None
+
+
+# ── installed-NVMS shape quirks (UAT mirror evidence, 2026-10-29) ─────
+
+
+class SectionedDictionaryTransport(RecordingTransport):
+    """Dictionary exposing every section, like the installed NVMS controller."""
+
+    def request(self, method, url, *, headers, body, timeout):
+        if url.endswith("/getLogEventDictionary") and not self.dictionary_discovered:
+            self.dictionary_discovered = True
+            return ok_response(
+                log_list_xml(
+                    '<alarmLog><item type="LOG_ALARM_MOTION"/><item type="LOG_ALARM_SENSOR"/></alarmLog>'
+                    '<operateLog><item type="LOG_OPERATE_LOGIN"/></operateLog>'
+                    '<configLog><item type="LOG_CONFIG_CHANGE"/></configLog>'
+                    '<exceptionLog><item type="LOG_EXCEPTION_DISK"/></exceptionLog>'
+                )
+            )
+        return super().request(method, url, headers=headers, body=body, timeout=timeout)
+
+
+@dataclass
+class RawBodyTransport(SectionedDictionaryTransport):
+    """Also records the repeated ``types[]`` values, which ``RecordingTransport`` flattens."""
+
+    raw_bodies: list[tuple[str, dict[str, list[str]]]] = field(default_factory=list)
+
+    def request(self, method, url, *, headers, body, timeout):
+        self.raw_bodies.append((url, urllib.parse.parse_qs(body.decode("utf-8")) if body else {}))
+        return super().request(method, url, headers=headers, body=body, timeout=timeout)
+
+
+def _types_sent(transport: RawBodyTransport) -> list[str]:
+    return next(form["types[]"] for url, form in transport.raw_bodies if url.endswith("/getLog"))
+
+
+def test_operation_logs_exclude_alarm_log_section_by_default() -> None:
+    transport = RawBodyTransport()
+    backend = logged_in_backend(transport)
+    transport.script = [ok_response(log_list_xml("")), ok_response(log_list_xml(""))]
+
+    backend.list_operation_logs()
+
+    assert _types_sent(transport) == ["LOG_OPERATE_LOGIN", "LOG_CONFIG_CHANGE", "LOG_EXCEPTION_DISK"]
+
+
+def test_operation_logs_alarm_log_section_is_opt_in() -> None:
+    transport = RawBodyTransport()
+    backend = logged_in_backend(transport)
+    transport.script = [ok_response(log_list_xml("")), ok_response(log_list_xml(""))]
+
+    backend.list_operation_logs(include_alarm_log=True)
+
+    assert _types_sent(transport) == [
+        "LOG_OPERATE_LOGIN",
+        "LOG_CONFIG_CHANGE",
+        "LOG_EXCEPTION_DISK",
+        "LOG_ALARM_MOTION",
+        "LOG_ALARM_SENSOR",
+    ]
+
+
+def test_operation_logs_fail_when_dictionary_has_only_alarm_types() -> None:
+    transport = RecordingTransport()
+    backend = logged_in_backend(transport)
+    transport.dictionary_discovered = True
+    transport.script = [ok_response(log_list_xml('<alarmLog><item type="LOG_ALARM_MOTION"/></alarmLog>'))]
+
+    with pytest.raises(ProtocolError, match="no supported event types"):
+        backend.list_operation_logs()
+    assert not any(url.endswith("/getLog") for url, _form in transport.requests)
+
+
+def test_dictionary_groups_types_by_section() -> None:
+    from pytvt.platform_sdk.web_envelope import parse_envelope
+
+    xml = log_list_xml(
+        '<alarmLog><item type="MOTION"/></alarmLog><operateLog><item type="LOGIN"/><item type="LOGIN"/></operateLog>'
+    )
+    envelope = parse_envelope(envelope_body(xml))
+    assert envelope.log_type_sections == {
+        "alarmLog": ["MOTION"],
+        "operateLog": ["LOGIN"],
+        "configLog": [],
+        "exceptionLog": [],
+    }
+    assert envelope.log_types == ["MOTION", "LOGIN"]
+
+
+def test_literal_none_operator_and_message_are_absent() -> None:
+    item = {
+        "logKey": "13437658119516346",
+        "type": "1",
+        "time": "2026-10-28 10:00:00",
+        "user": "None",
+        "content": "None",
+    }
+
+    entry = WebManagementBackend._log_entry_from_item(item, 0, {})
+
+    assert entry.operator == ""
+    assert entry.message == ""
+    assert entry.log_id == "13437658119516346"
+    assert entry.raw_data["user"] == "None"  # raw evidence is preserved untouched
+
+
+def test_null_sentinel_falls_through_to_next_populated_field() -> None:
+    item = {"user": "None", "userName": "admin", "content": "null", "desc": "user login"}
+
+    entry = WebManagementBackend._log_entry_from_item(item, 0, {})
+
+    assert entry.operator == "admin"
+    assert entry.message == "user login"
+
+
+def test_placeholder_zero_log_id_does_not_collapse_distinct_operator_actions() -> None:
+    login = {"id": "0", "type": "4111", "time": "2026-10-28 10:00:00", "user": "admin", "content": "login"}
+    logout = {**login, "type": "4104", "time": "2026-10-28 10:05:00", "content": "logout"}
+
+    first = WebManagementBackend._log_entry_from_item(login, 0, {})
+    second = WebManagementBackend._log_entry_from_item(logout, 1, {})
+    refetched = WebManagementBackend._log_entry_from_item(dict(login), 7, {})
+
+    assert first.log_id != "0"
+    assert first.log_id != second.log_id
+    assert refetched.log_id == first.log_id  # stable across re-fetch / page position

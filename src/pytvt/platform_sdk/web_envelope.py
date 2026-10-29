@@ -28,6 +28,8 @@ from pytvt.platform_sdk.exceptions import ProtocolError
 from .alarm_configuration import configuration_items
 
 _TRANSPORT_OK = "1"
+# ``getLogEventDictionary`` sections that carry requestable log type codes.
+LOG_DICTIONARY_SECTIONS = ("alarmLog", "operateLog", "configLog", "exceptionLog")
 # Confirmed attribute-shaped server status rows. Keep credentials/session
 # attributes out of the envelope rather than copying arbitrary attributes.
 _ITEM_ATTRIBUTES = frozenset(
@@ -69,6 +71,10 @@ class WebEnvelope:
 
     alarm_configurations: list[dict] = field(default_factory=list)
     log_types: list[str] = field(default_factory=list)
+    # The same dictionary codes grouped by their ``getLogEventDictionary``
+    # section (``alarmLog``/``operateLog``/``configLog``/``exceptionLog``), so a
+    # caller can request one log family without sweeping in the others.
+    log_type_sections: dict[str, list[str]] = field(default_factory=dict)
     content_attributes: dict[str, str] = field(default_factory=dict)
 
     @property
@@ -140,6 +146,15 @@ def parse_envelope(payload: str | bytes) -> WebEnvelope:
     except ValueError as exc:
         raise ProtocolError("Alarm configuration exceeds projection limits") from exc
 
+    log_type_sections = {
+        section: list(
+            dict.fromkeys(
+                item.attrib["type"] for item in root.findall(f"content/{section}/item") if item.attrib.get("type")
+            )
+        )
+        for section in LOG_DICTIONARY_SECTIONS
+    }
+
     return WebEnvelope(
         ret_code=ret_code,
         ret_msg=ret_msg,
@@ -149,12 +164,6 @@ def parse_envelope(payload: str | bytes) -> WebEnvelope:
         items=items,
         alarm_configurations=alarm_configurations,
         content_attributes=dict(content_node.attrib) if content_node is not None else {},
-        log_types=list(
-            dict.fromkeys(
-                item.attrib["type"]
-                for section in ("alarmLog", "operateLog", "configLog", "exceptionLog")
-                for item in root.findall(f"content/{section}/item")
-                if item.attrib.get("type")
-            )
-        ),
+        log_types=list(dict.fromkeys(code for codes in log_type_sections.values() for code in codes)),
+        log_type_sections=log_type_sections,
     )
