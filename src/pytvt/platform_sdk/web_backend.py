@@ -104,6 +104,21 @@ _LOG_TYPE_KEYS = ("type", "logType", "eventType")
 _LOG_MESSAGE_KEYS = ("content", "desc", "description", "message", "detail")
 _LOG_TIME_KEYS = ("time", "logTime", "occurTime", "operateTime")
 _LOG_OPERATOR_KEYS = ("user", "userName", "operator", "account")
+# Installed NVMS emits the literal text ``None`` (a server-side null rendered as a
+# string) for log fields that have no value, e.g. the operator of a
+# system-generated entry. It is an absence marker, never a real value.
+_LOG_NULL_SENTINELS = frozenset({"none", "null"})
+# Operator-action entries carry the id ``0`` on installed NVMS (live UAT mirror,
+# 2026-10-29: every ``operateLog`` row shared it). A placeholder id is not an
+# identity — keying on it collapses every operator action onto one record.
+_LOG_ID_PLACEHOLDERS = frozenset({"0"})
+# ``getLogEventDictionary`` sections requested by ``list_operation_logs``. The
+# ``alarmLog`` section is excluded by default: it repeats every device alarm
+# (motion etc.) as a bare code + time with no operator or content, which buried
+# the operator/config/exception entries under ~99% alarm rows (UAT: ~0.7-2M
+# rows/day). Device alarms are read through ``list_alarm_events`` instead.
+_OPERATION_LOG_SECTIONS = ("operateLog", "configLog", "exceptionLog")
+_ALARM_LOG_SECTION = "alarmLog"
 _DICTIONARY_CODE_KEYS = ("type", "id", "code")
 _DICTIONARY_TEXT_KEYS = ("name", "desc", "description", "text")
 _USER_NAME_KEYS = ("userName", "username", "name", "account")
@@ -119,6 +134,15 @@ _GROUP_ID_KEYS = ("groupId", "roleId", "authGroupId", "id")
 _GROUP_NAME_KEYS = ("name", "groupName", "roleName", "authGroupName")
 _SYSTEM_PERMISSION_MASK_KEYS = ("systemAndOperateRright", "systemAndOperateRight", "systemPermission", "systemRight")
 _AREA_PERMISSION_MASK_KEYS = ("areaRight", "areaPermission", "areaPermissionMask")
+
+
+def _first_log_value(item: dict[str, str], keys: tuple[str, ...], *, skip: frozenset[str] = frozenset()) -> str:
+    """First populated log field, treating the vendor's null sentinels as absent."""
+    for key in keys:
+        value = item.get(key)
+        if value and value.strip().lower() not in _LOG_NULL_SENTINELS and value.strip() not in skip:
+            return value
+    return ""
 
 
 def _first_present(item: dict[str, str], keys: tuple[str, ...]) -> str:
@@ -203,7 +227,7 @@ class WebManagementBackend(BaseManagementBackend):
         self.verify_tls = verify_tls
         self.transport = transport
         self._session: WebSession | None = None
-        self._log_types: list[str] | None = None
+        self._log_type_sections: dict[str, list[str]] | None = None
         self._log_names: dict[str, str] | None = None
 
     @staticmethod
@@ -292,7 +316,7 @@ class WebManagementBackend(BaseManagementBackend):
 
     def login(self, username: str, password: str, device_id: str | None = None) -> bool:
         del device_id
-        self._log_types = None
+        self._log_type_sections = None
         self._log_names = None
         session = WebSession(
             self.host,
@@ -480,11 +504,11 @@ class WebManagementBackend(BaseManagementBackend):
     @staticmethod
     def _log_entry_from_item(item: dict[str, str], index: int, event_dictionary: dict[str, str]) -> PlatformLogEntry:
         log_id = (
-            _first_present(item, _LOG_ID_KEYS)
+            _first_log_value(item, _LOG_ID_KEYS, skip=_LOG_ID_PLACEHOLDERS)
             or hashlib.sha256(json.dumps(item, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
         )
-        log_type_code = _first_present(item, _LOG_TYPE_KEYS)
-        occurred_at = _first_present(item, _LOG_TIME_KEYS)
+        log_type_code = _first_log_value(item, _LOG_TYPE_KEYS)
+        occurred_at = _first_log_value(item, _LOG_TIME_KEYS)
         if occurred_at:
             try:
                 timestamp = datetime.fromisoformat(occurred_at)
@@ -500,9 +524,9 @@ class WebManagementBackend(BaseManagementBackend):
         return PlatformLogEntry(
             log_id=log_id,
             log_type=event_dictionary.get(log_type_code, log_type_code),
-            message=_first_present(item, _LOG_MESSAGE_KEYS),
+            message=_first_log_value(item, _LOG_MESSAGE_KEYS),
             occurred_at=occurred_at,
-            operator=_first_present(item, _LOG_OPERATOR_KEYS),
+            operator=_first_log_value(item, _LOG_OPERATOR_KEYS),
             raw_data=dict(item),
         )
 
@@ -514,18 +538,24 @@ class WebManagementBackend(BaseManagementBackend):
         end_time: str,
         page_index: int,
         page_size: int,
+        sections: tuple[str, ...] = _OPERATION_LOG_SECTIONS,
     ) -> list[PlatformLogEntry]:
         session = self._require_session()
         form: dict[str, str | list[str]] = {"pageIndex": str(page_index), "pageSize": str(page_size)}
         if path == _STATUS_LOG_PATH:
             form["types[]"] = ["LOG_STATE_ALL"]
         else:
-            if self._log_types is None:
+            if self._log_type_sections is None:
                 dictionary = session.request(_LOG_EVENT_DICTIONARY_PATH)
                 if not dictionary.ok or not dictionary.log_types:
                     raise ProtocolError("management log dictionary contains no supported event types")
-                self._log_types = list(dictionary.log_types)
-            form["types[]"] = list(self._log_types)
+                self._log_type_sections = {key: list(codes) for key, codes in dictionary.log_type_sections.items()}
+            types = list(
+                dict.fromkeys(code for section in sections for code in self._log_type_sections.get(section, []))
+            )
+            if not types:
+                raise ProtocolError("management log dictionary contains no supported event types")
+            form["types[]"] = types
         now = datetime.now(timezone.utc)
         form["startTime"] = start_time or (now - timedelta(minutes=15)).strftime("%Y-%m-%d %H:%M:%S")
         form["endTime"] = end_time or now.strftime("%Y-%m-%d %H:%M:%S")
@@ -542,14 +572,20 @@ class WebManagementBackend(BaseManagementBackend):
         end_time: str = "",
         page_index: int = 1,
         page_size: int = 100,
+        include_alarm_log: bool = False,
     ) -> list[PlatformLogEntry]:
-        """List operator/system maintenance log entries (``SystemMaintain/getLog``)."""
+        """List operator/config/exception log entries (``SystemMaintain/getLog``).
+
+        The dictionary's ``alarmLog`` section is requested only when
+        ``include_alarm_log`` is true; see ``_OPERATION_LOG_SECTIONS``.
+        """
         return self._list_logs(
             _OPERATION_LOG_PATH,
             start_time=start_time,
             end_time=end_time,
             page_index=page_index,
             page_size=page_size,
+            sections=(*_OPERATION_LOG_SECTIONS, _ALARM_LOG_SECTION) if include_alarm_log else _OPERATION_LOG_SECTIONS,
         )
 
     def list_status_logs(
