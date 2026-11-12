@@ -13,6 +13,7 @@ import uuid
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime
+from enum import Enum
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -77,6 +78,38 @@ class RuntimeClientError(RuntimeError):
     """The local runtime exchange or protocol validation failed."""
 
 
+class RuntimeErrorKind(str, Enum):
+    """Stable ``RuntimeRemoteError.kind`` values sent by pytvt-runtime.
+
+    Compare ``exc.kind`` with these members instead of string literals. A kind
+    added by a newer runtime still arrives as a plain string, so consumers must
+    treat unknown kinds as unclassified.
+    """
+
+    #: The recorder explicitly rejected the login credential.
+    LOGIN_CREDENTIAL = "login_credential"
+    #: Login failed for any other reason (connect error, timeout, wrong port...).
+    LOGIN_TRANSIENT = "login_transient"
+    #: Login was not attempted: the runtime is cooling down after a failure.
+    LOGIN_COOLDOWN = "login_cooldown"
+    #: The recorder answered an authenticated session but the operation failed.
+    OPERATION_ERROR = "operation_error"
+    #: The admitted native operation reached its deadline.
+    OPERATION_TIMEOUT = "operation_timeout"
+    UNSUPPORTED_OPERATION = "unsupported_operation"
+    CAPABILITY_UNAVAILABLE = "capability_unavailable"
+    #: Runtime-side admission and lifecycle outcomes (no recorder evidence).
+    BUSY = "busy"
+    QUEUE_TIMEOUT = "queue_timeout"
+    CLIENT_TIMEOUT = "client_timeout"
+    ABORTED = "aborted"
+    CLOSED = "closed"
+    WORKER_ERROR = "worker_error"
+    RUNTIME_ERROR = "runtime_error"
+    INVALID_REQUEST = "invalid_request"
+    PROTOCOL_MISMATCH = "protocol_mismatch"
+
+
 class RuntimeRemoteError(RuntimeClientError):
     """The runtime returned a typed operation failure."""
 
@@ -91,12 +124,17 @@ class RuntimeRemoteError(RuntimeClientError):
         self.retry_after_seconds = retry_after_seconds
         super().__init__(message)
 
+    @property
+    def credential_rejected(self) -> bool:
+        """Whether the recorder explicitly rejected the login credential."""
+        return self.kind == RuntimeErrorKind.LOGIN_CREDENTIAL
+
 
 class RuntimeOperationTimeoutError(RuntimeRemoteError):
     """The runtime stopped an admitted native operation at its deadline."""
 
     def __init__(self, message: str) -> None:
-        super().__init__("operation_timeout", message)
+        super().__init__(RuntimeErrorKind.OPERATION_TIMEOUT.value, message)
 
 
 @dataclass(frozen=True)
