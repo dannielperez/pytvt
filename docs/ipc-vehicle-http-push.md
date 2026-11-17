@@ -20,3 +20,8 @@ never substituted for capture time.
 The subscription also sends alarmStatusInfo/vehiceAlarm boolean status frames.
 These decode to no observations so consumers can acknowledge them without
 inventing an arrival. Mixed status/untyped detection envelopes remain rejected.
+
+To check where a camera pushes before enrolment, use the read-only
+`WebApiClient.query_http_post_config()`. See
+[ipc-http-post-config.md](ipc-http-post-config.md). It is DOC-derived and
+validated by unit tests only.
