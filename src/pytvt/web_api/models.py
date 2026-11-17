@@ -177,3 +177,59 @@ class NatConfig:
     nat_status: str = ""  # "Success", "Offline", etc.
     visit_address: str = ""  # e.g. "www.autonat.us"
     security_access: bool = False
+
+
+# ── IPC HTTP POST (alarm/smart-event push) configuration ─────────────
+#
+# DOC-derived from an OEM reference for ``GetHttpPostConfig`` (IPC, API 1.7),
+# not captured from an installed camera. See docs/ipc-http-post-config.md.
+# Credentials are never stored: only ``has_username`` / ``has_password``.
+
+
+@dataclass(frozen=True)
+class IpcHttpPostTarget:
+    """One push destination: the v1 ``httpPost`` block or a v2 ``urlList`` slot.
+
+    ``protocol`` is ``""`` for v1 (the block has no scheme field). ``path`` has
+    any query string removed (``has_query`` records that one was present) so a
+    token in a webhook URL never reaches ``repr``. ``unknown_fields`` holds
+    ``(relative_path, text)`` pairs for leaf elements this parser does not
+    model, bounded and with secret-looking keys dropped.
+    """
+
+    version: str  # "v1" (httpPost) or "v2" (httpPostV2 urlList item)
+    url_id: int | None
+    enabled: bool | None
+    protocol: str
+    host: str
+    port: int | None
+    path: str
+    authentication: str = ""
+    keepalive_seconds: int | None = None
+    heartbeat_enabled: bool | None = None
+    online: bool | None = None  # v1 onlineStatus (read-only on the device)
+    protocol_type: str = ""  # v1 protocolType (e.g. "API")
+    data_types: tuple[str, ...] = ()  # subscribeDateType / subDataType
+    events: tuple[str, ...] = ()  # subscriptionEvents
+    has_username: bool = False
+    has_password: bool = False
+    has_query: bool = False
+    unknown_fields: tuple[tuple[str, str], ...] = ()
+
+
+@dataclass(frozen=True)
+class IpcHttpPostConfig:
+    """From ``GetHttpPostConfig``: the v1 block and/or the v2 URL slots."""
+
+    v1: IpcHttpPostTarget | None = None
+    v2_targets: tuple[IpcHttpPostTarget, ...] = ()
+    v2_max_targets: int | None = None
+    unknown_fields: tuple[tuple[str, str], ...] = ()
+
+    @property
+    def targets(self) -> tuple[IpcHttpPostTarget, ...]:
+        return ((self.v1,) if self.v1 is not None else ()) + self.v2_targets
+
+    @property
+    def enabled_targets(self) -> tuple[IpcHttpPostTarget, ...]:
+        return tuple(t for t in self.targets if t.enabled is True)
