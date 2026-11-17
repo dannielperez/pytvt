@@ -17,6 +17,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   GUID and plain names pass through unchanged.
 
 ### Added
+- **IPC HTTP vehicle push metadata (DOC/UNIT-validated, not live-captured)** (`vehicle_push.py`).
+  `parse_ipc_vehicle_push` now also fills `declared_plate_char_count`, `plate_rect` (normalized
+  0–10000 corners), `plate_size`, `full_image_size`, `plate_color_code` and `edge_match`
+  (`whiteList`/`blackList` only). Fields whose meaning or vocabulary the OEM reference does not
+  document (`carAttr/*`, `carRect/*`, `plateStyle`, `vehiceColor`, `plateColorRate`, …) are kept
+  as raw strings in the new `PlateEvent.vendor_attributes`. Colour/type enums stay `UNKNOWN`. New
+  `PlateEvent.source_device` (`PlateSourceDevice`) carries the sender's self-reported name, MAC,
+  serial and IP for cross-checks only. The new fields are best-effort: a duplicated, conflicting,
+  out-of-range or over-128-character value is dropped and named under `("_dropped", field)` in
+  `vendor_attributes`, never raised and never added to `warnings`. Payloads accepted before decode
+  to identical values for every previously decoded field; `warnings` and `is_partial=False` are
+  unchanged. See `docs/ipc-vehicle-http-push.md`.
 - **NVR Alarm Server alarm push (CAPTURED live, 2026-10-12)** (`alarm_protocol.py`). The NVR alarm body is
   `<config>` (no namespace) with `<alarmStatusInfo>`, a `<DataTime>` and a nested `<DeviceInfo>`. Each
   alarm element carries `id` (the **1-based channel shown in the NVR UI**, verified against the
