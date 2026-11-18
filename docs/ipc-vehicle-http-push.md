@@ -70,3 +70,8 @@ before). A downstream consumer (UniqueOS vehicle arrival assessment) treats
 `is_partial` and `warnings` as deny signals, so marking missing evidence here as
 the NetSDK path does would change live arrival decisions. Changing it needs a
 coordinated consumer change.
+
+To check where a camera pushes before enrolment, use the read-only
+`WebApiClient.query_http_post_config()`. See
+[ipc-http-post-config.md](ipc-http-post-config.md). It is DOC-derived and
+validated by unit tests only.

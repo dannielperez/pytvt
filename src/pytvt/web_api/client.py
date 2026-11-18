@@ -37,6 +37,7 @@ from .errors import (
     WebApiError,
     raise_for_status,
 )
+from .http_post import parse_http_post_config
 from .models import (
     AudioStreamConfig,
     ChannelInfo,
@@ -45,6 +46,7 @@ from .models import (
     DiskInfo,
     ImageConfig,
     ImageOsdConfig,
+    IpcHttpPostConfig,
     NatConfig,
     RecordDateResult,
     RecordSegment,
@@ -719,6 +721,26 @@ class WebApiClient:
             channel_name_enabled=xml.find_bool(osd, "channelNameEnabled"),
             channel_name=xml.find_text(osd, "channelName"),
         )
+
+    # ── HTTP POST push config (IPC, read-only) ──────────────────
+
+    def query_http_post_config(self) -> IpcHttpPostConfig:
+        """Read the IPC's HTTP POST (alarm/smart-event push) destinations.
+
+        Sends ``GET /GetHttpPostConfig`` (flat TVTAPI path; the OEM reference
+        allows POST or GET, GET is used because this is a read). Command and
+        shape are DOC-derived, not captured — see
+        ``docs/ipc-http-post-config.md``. Deliberately read-only: there is no
+        Set counterpart. Firmware that does not list the command answers
+        HTTP 400 (:class:`WebApiError`).
+
+        Raises:
+            WebApiError: transport/auth failure or HTTP error status.
+            NvrApiResponseShapeError: the body is not a recognised config;
+                never reported as an empty or disabled config.
+        """
+        data, _content_type = self._get_raw_absolute("/GetHttpPostConfig", accept="application/xml")
+        return parse_http_post_config(data)
 
     # ── Snapshot (Section 3.2.5 / 3.2.6) ────────────────────────
 

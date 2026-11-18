@@ -29,6 +29,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `vendor_attributes`, never raised and never added to `warnings`. Payloads accepted before decode
   to identical values for every previously decoded field; `warnings` and `is_partial=False` are
   unchanged. See `docs/ipc-vehicle-http-push.md`.
+
+- **Read-only IPC HTTP POST config inspection (DOC-derived, UNIT-only)**
+  (`web_api/http_post.py`). `WebApiClient.query_http_post_config()` sends `GET /GetHttpPostConfig` and
+  returns a frozen `IpcHttpPostConfig`: the v1 `httpPost` block and the v2 `httpPostV2` `urlList` slots.
+  Each slot is an `IpcHttpPostTarget` with enabled/protocol/host/port/path/keepalive/heartbeat, data types
+  (`subscribeDateType` or `subDataType`) and subscribed events. Credentials are never stored; only
+  `has_username`/`has_password` are kept. A query string is removed from `path`. Unknown leaves are kept as
+  a bounded `unknown_fields` list with secret-looking keys dropped. An unrecognised shape raises
+  `NvrApiResponseShapeError`. Parsing is hardened: 256 KiB cap, DOCTYPE/ENTITY rejected, 2048-element cap.
+  Pure `http_post_target_matches()` reports `MATCH`/`DIFFERS` (with the fields that differ)/`THIRD_PARTY`/
+  `NOT_CONFIGURED`. The shape comes from an OEM reference, not from installed cameras. No Set/write method
+  is provided. See `docs/ipc-http-post-config.md`.
 - **NVR Alarm Server alarm push (CAPTURED live, 2026-10-12)** (`alarm_protocol.py`). The NVR alarm body is
   `<config>` (no namespace) with `<alarmStatusInfo>`, a `<DataTime>` and a nested `<DeviceInfo>`. Each
   alarm element carries `id` (the **1-based channel shown in the NVR UI**, verified against the
