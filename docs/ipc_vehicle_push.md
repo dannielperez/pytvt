@@ -7,7 +7,11 @@ No listener, network operation, authorization or relay action is added.
 
 The decoder separates the empty-plate overview item from plate items, accepts
 base64 whitespace, bounds bodies to 8 MiB and images to 4 MiB, rejects duplicate
-fields/unsupported namespaces/DTD/entities, and preserves unknown safety fields.
+fields/unsupported namespaces/DTD/entities, and ignores elements it does not read.
+A fixed set of fields with undocumented meaning is surfaced as raw strings in
+`vendor_attributes`; sender identity is reported in `source_device` (never used
+for authentication). These metadata fields are best-effort: an invalid or duplicated
+value is dropped, never rejected or warned. See docs/ipc-vehicle-http-push.md.
 JPEG framing is checked; full image integrity remains a consumer responsibility.
 Confidence uses the count attribute (0–10000) and is rounded down to percent.
 Capture timestamps are Unix microseconds, never replaced with receipt time.
@@ -20,4 +24,5 @@ https://videos.cctvcamerapros.com/developer/docs/applications/license-plate-reco
 This is not installed-firmware acceptance; verify clock/direction/image encoding
 with live camera events before enabling state-changing downstream actions.
 
-Validation: 22 decoder tests and 24 existing native plate-event tests pass.
+Validation: the decoder tests in tests/test_vehicle_push.py and the native
+plate-event tests pass; metadata fields are DOC/UNIT-validated only.

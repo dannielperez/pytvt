@@ -122,6 +122,16 @@ class DropPolicy(str, Enum):
 
 
 @dataclass(frozen=True, slots=True)
+class PlateSourceDevice:
+    """Identity the sending device reports about itself; evidence, never authentication."""
+
+    name: str | None = None
+    mac: str | None = None
+    serial: str | None = None
+    ip: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class PlateEvent:
     """Normalized license-plate observation copied from a TVT smart event."""
 
@@ -159,6 +169,10 @@ class PlateEvent:
     full_image_size: tuple[int, int] | None = None
     is_partial: bool = False
     warnings: tuple[str, ...] = ()
+    # Raw vendor strings without a documented typed meaning, as (field, value)
+    # pairs; set only by the IPC HTTP push decoder (pytvt.vehicle_push).
+    vendor_attributes: tuple[tuple[str, str], ...] = ()
+    source_device: PlateSourceDevice | None = None
 
 
 @dataclass(frozen=True, slots=True)
