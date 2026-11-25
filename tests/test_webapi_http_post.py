@@ -16,9 +16,11 @@ from pytvt.web_api.client import WebApiClient
 from pytvt.web_api.errors import WebApiError
 from pytvt.web_api.http_post import (
     MAX_CONFIG_BYTES,
+    WRITE_UNSUPPORTED_REASON,
     HttpPostMatchStatus,
     http_post_target_matches,
     parse_http_post_config,
+    summarize_http_post_capability,
 )
 from pytvt.web_api.models import IpcHttpPostConfig, IpcHttpPostTarget
 
@@ -417,3 +419,39 @@ class TestClient:
 
     def test_no_write_method_exposed(self):
         assert not any("set_http_post" in name or "SetHttpPost" in name for name in dir(WebApiClient))
+
+
+class TestCapability:
+    def test_v2_counts_unlisted_and_empty_slots(self):
+        cfg = parse_http_post_config(_doc(_v2_item(1), _v2_item(2, switch="false", domain="")))
+        cap = summarize_http_post_capability(cfg)
+        assert cap.schema == "v2"
+        assert cap.max_targets == 3
+        assert cap.listed_targets == 2
+        assert cap.enabled_targets == 1
+        assert cap.empty_slot_ids == (2,)
+        assert cap.unlisted_slots == 1
+        assert cap.free_slots == 2
+
+    def test_disabled_slot_with_host_is_not_free(self):
+        cfg = parse_http_post_config(_doc(_v2_item(1, switch="false"), _v2_item(2), _v2_item(3, domain="198.51.100.7")))
+        cap = summarize_http_post_capability(cfg)
+        assert cap.empty_slot_ids == ()
+        assert cap.free_slots == 0
+
+    def test_v1_and_v2(self):
+        cap = summarize_http_post_capability(parse_http_post_config(_doc(_v2_item(1), v1=V1)))
+        assert cap.schema == "v1+v2"
+        assert cap.listed_targets == 2
+
+    def test_v1_only(self):
+        cap = summarize_http_post_capability(IpcHttpPostConfig(v1=parse_http_post_config(_doc(v1=V1)).v1))
+        assert cap.schema == "v1"
+        assert cap.max_targets == 1
+        assert cap.free_slots == 0
+
+    def test_write_is_never_reported_supported(self):
+        cap = summarize_http_post_capability(parse_http_post_config(_doc(_v2_item(1))))
+        assert cap.write_supported is False
+        assert cap.write_blocked_reason == WRITE_UNSUPPORTED_REASON
+        assert "SetHttpPostConfig" in WRITE_UNSUPPORTED_REASON

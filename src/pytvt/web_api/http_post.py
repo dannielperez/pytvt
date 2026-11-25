@@ -2,7 +2,8 @@
 
 ``GetHttpPostConfig`` and its XML shape are DOC-derived from an OEM reference
 (IPC v1.9, firmware 5.1.4.0, API 1.7), not captured from an installed camera.
-Pure functions only: no network I/O, and no write/set counterpart on purpose.
+Pure functions only: no network I/O, and no write/set counterpart on purpose
+(:func:`summarize_http_post_capability` reports ``write_supported=False``).
 
 An unrecognised payload raises :class:`~pytvt.models.NvrApiResponseShapeError`
 rather than looking like an empty or disabled config. Credentials are never
@@ -332,3 +333,53 @@ def http_post_target_matches(
         return HttpPostTargetMatch(status, target, diffs, third_party)
     status = HttpPostMatchStatus.THIRD_PARTY if third_party else HttpPostMatchStatus.NOT_CONFIGURED
     return HttpPostTargetMatch(status, None, (), third_party)
+
+
+# ── Capability summary ───────────────────────────────────────────────
+
+# No SetHttpPostConfig wrapper exists: the OEM reference names the command but
+# pytvt has no documented request shape. Callers show this instead of a write.
+WRITE_UNSUPPORTED_REASON = "TVT has not documented SetHttpPostConfig"
+
+
+@dataclass(frozen=True)
+class HttpPostCapability:
+    """What a parsed ``GetHttpPostConfig`` says about the camera's push slots.
+
+    Derived only from the config already read; no extra device command.
+    ``empty_slot_ids`` are listed v2 slots with no host and not enabled.
+    ``unlisted_slots`` are slots ``maxCount`` allows but the device did not
+    list. ``write_supported`` is always ``False`` until a documented write exists.
+    """
+
+    schema: str  # "v1", "v2" or "v1+v2"
+    max_targets: int | None
+    listed_targets: int
+    enabled_targets: int
+    empty_slot_ids: tuple[int, ...] = ()
+    unlisted_slots: int = 0
+    write_supported: bool = False
+    write_blocked_reason: str = WRITE_UNSUPPORTED_REASON
+
+    @property
+    def free_slots(self) -> int:
+        return len(self.empty_slot_ids) + self.unlisted_slots
+
+
+def summarize_http_post_capability(config: IpcHttpPostConfig) -> HttpPostCapability:
+    """Summarise slot capacity from a parsed config. Pure; no network."""
+    has_v1, has_v2 = config.v1 is not None, bool(config.v2_targets) or config.v2_max_targets is not None
+    schema = "v1+v2" if has_v1 and has_v2 else ("v2" if has_v2 else "v1")
+    empty = tuple(
+        t.url_id for t in config.v2_targets if t.url_id is not None and not t.host.strip() and t.enabled is not True
+    )
+    max_targets = config.v2_max_targets if has_v2 else (1 if has_v1 else None)
+    unlisted = max(0, config.v2_max_targets - len(config.v2_targets)) if config.v2_max_targets is not None else 0
+    return HttpPostCapability(
+        schema=schema,
+        max_targets=max_targets,
+        listed_targets=len(config.targets),
+        enabled_targets=len(config.enabled_targets),
+        empty_slot_ids=empty,
+        unlisted_slots=unlisted,
+    )
