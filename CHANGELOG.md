@@ -17,6 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   GUID and plain names pass through unchanged.
 
 ### Added
+- **IPC HTTP POST capability summary (DOC/UNIT-validated, not live-captured)** (`web_api/http_post.py`).
+  `summarize_http_post_capability(config)` returns a frozen `HttpPostCapability` (schema v1/v2,
+  `max_targets`, listed/enabled counts, `empty_slot_ids`, `unlisted_slots`, `free_slots`) derived
+  only from an already-parsed `IpcHttpPostConfig`. No new device command is sent. `write_supported`
+  is always `False` with `WRITE_UNSUPPORTED_REASON` ("TVT has not documented SetHttpPostConfig"):
+  there is still no write wrapper, and the guard test asserting that is kept.
 - **IPC HTTP vehicle push metadata (DOC/UNIT-validated, not live-captured)** (`vehicle_push.py`).
   `parse_ipc_vehicle_push` now also fills `declared_plate_char_count`, `plate_rect` (normalized
   0–10000 corners), `plate_size`, `full_image_size`, `plate_color_code` and `edge_match`

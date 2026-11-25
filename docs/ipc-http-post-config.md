@@ -73,6 +73,26 @@ port, a foreign namespace, DOCTYPE/ENTITY, a body over 256 KiB or more than
 `MATCH` can still report a coexisting receiver. A v1 target never proves a
 `MATCH` because v1 has no protocol field.
 
+## Capability summary
+
+`summarize_http_post_capability(config)` returns `HttpPostCapability`, derived
+only from a config already read (no extra device command):
+
+- `schema`: `v1`, `v2` or `v1+v2`.
+- `max_targets`: v2 `urlList maxCount`, or 1 for a v1-only device.
+- `listed_targets` / `enabled_targets`.
+- `empty_slot_ids`: listed v2 slots with an empty host that are not enabled.
+  A disabled slot that still names a host is never reported free, because it
+  may belong to another integrator.
+- `unlisted_slots`: `maxCount` minus the listed slots. `free_slots` is the sum.
+- `write_supported` is always `False`, with
+  `write_blocked_reason = WRITE_UNSUPPORTED_REASON`
+  ("TVT has not documented SetHttpPostConfig").
+
+Whether GetHttpPostConfig itself is supported is known only from the read: an
+HTTP 400 `WebApiError` means unsupported firmware (see above). There is no
+documented pre-check: `GetSupportedAPIs` does not list the command.
+
 ## Not implemented, on purpose
 
 `SetHttpPostConfig` exists in the reference but has no wrapper. Writing a
